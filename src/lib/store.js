@@ -19,6 +19,10 @@ const EMPTY = {
   events: [],
   sessions: [],
   chat: [],
+  // What the assistant remembers about the conversation so far — see
+  // lib/nlu/context.js. Persisted with everything else so closing the app
+  // mid-thread does not lose the thread.
+  memory: { turns: [] },
   active: null,
   settings: {},
 };
@@ -147,7 +151,11 @@ export const totals = (sessions = read().sessions) => ({
 export const appendChat = (msg) =>
   update({ chat: [...read().chat, { id: uid(), at: Date.now(), ...msg }].slice(-200) });
 
-export const clearChat = () => update({ chat: [] });
+/** Clearing the visible thread has to clear what the assistant remembers of it
+ *  too, or the next message quietly amends something the user can no longer see. */
+export const clearChat = () => update({ chat: [], memory: { turns: [] } });
+
+export const setMemory = (memory) => update({ memory });
 
 // ------------------------------------------------------------ focus session
 /**

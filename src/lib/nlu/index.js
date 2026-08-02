@@ -16,8 +16,11 @@ import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolv
 import { describe, toLocalIso, dayKey, atLocal } from "./datetime.js";
 import { acknowledge, describeDay, addressOf } from "./voice.js";
 import {
+  EMPTY_MEMORY, remember, carryable, lastTurn, focusOf, topicDay, inherit,
+} from "./context.js";
+import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
-  applyPlan,
+  deleteTask, applyPlan, setMemory,
 } from "../store";
 import { planDay, findFreeSlots, fmtTime } from "../agenda";
 import { duration } from "../format";
@@ -25,8 +28,28 @@ import { duration } from "../format";
 const DEFAULT_MEETING_MINS = 60;
 const DEFAULT_TASK_MINS = 30;
 
-const reply = (text, actions = []) => ({ text, actions, choices: null });
-const askWhich = (text, choices) => ({ text, actions: [], choices });
+const reply = (text, actions = [], extra = {}) => ({ text, actions, choices: null, ...extra });
+const askWhich = (text, choices) => ({ text, actions: [], choices, pending: true });
+
+/**
+ * A question, not an answer — the command is missing something.
+ *
+ * Marked so the turn does not inherit the previous focus. If it did, "move the
+ * ops review" → "when?" → "Wednesday at 2" would helpfully move whatever was
+ * touched three turns ago instead of the ops review.
+ */
+const needs = (text) => ({ text, actions: [], choices: null, pending: true });
+
+/**
+ * Is this message a continuation of the last one rather than a new command?
+ *
+ * Four signals, any one of which is enough: an explicit correction ("no…"),
+ * an edit verb aimed at a pronoun ("make it 3pm"), a bare fragment that
+ * carries slots but no verb ("for Friday"), or a command whose only object is
+ * a pronoun ("schedule it for Friday").
+ */
+const isFollowUp = (p) =>
+  p.repair || p.amend || p.fragment || (p.pronoun && !p.slots.title);
 
 /** Lookups scan the calendar; changes write to it. The art should match. */
 const PEN_INTENTS = new Set([
@@ -51,27 +74,178 @@ export const EXAMPLES = [
  */
 export function ask(text, state, opts = {}) {
   const now = opts.now || new Date();
-  const p = parse(text, now);
-  const { slots } = p;
+  const memory = opts.memory ?? state.memory ?? EMPTY_MEMORY;
+  let p = parse(text, now);
   const identity = state.settings?.identity || {};
 
   const openTasks = state.tasks.filter((t) => !t.done);
 
-  const decorate = (res) => ({
-    ...res,
-    intent: p.intent,
-    ack: acknowledge(identity, p.intent, now),
-    variant: PEN_INTENTS.has(p.intent) ? "pen" : "calendar",
-  });
+  // Answering a choice list is already fully specified — it must not be read
+  // as a follow-up, or "cancel it" would amend the wrong thing entirely.
+  const prior = opts.resolvedId ? null : lastTurn(memory, now);
+  const focus = opts.resolvedId ? null : focusOf(memory, state, now);
 
-  return decorate(run());
+  let amending = null;
+  if (prior && isFollowUp(p)) {
+    // Something was created or changed last turn: adjust that, don't do it
+    // again. Repeating the intent is how one meeting becomes three.
+    if (focus) amending = focus;
+    // Nothing was created — the last turn stopped to ask a question, so this
+    // is the missing piece of it.
+    else p = inherit(p, prior);
+  }
+
+  const { slots } = p;
+  const res = amending ? adjust(amending) : run();
+
+  if (!opts.memory) {
+    setMemory(
+      remember(
+        memory,
+        {
+          text: p.text,
+          intent: p.intent,
+          slots: carryable(slots),
+          // Precedence matters. A branch that names an entity — or explicitly
+          // names none — is always believed. Only a question that named
+          // nothing drops the thread, because the next message is answering
+          // the question rather than continuing with the old subject.
+          entity:
+            res.entity !== undefined ? res.entity
+            : res.pending ? null
+            : (prior?.entity ?? null),
+          day: res.day ?? (slots.dateOnly ? dayKey(slots.dateOnly) : prior?.day ?? null),
+        },
+        now.getTime(),
+      ),
+    );
+  }
+
+  return decorate(res);
+
+  function decorate(r) {
+    const { entity, day, pending, ...rest } = r;
+    return {
+      ...rest,
+      intent: p.intent,
+      ack: acknowledge(identity, p.intent, now),
+      variant: amending || PEN_INTENTS.has(p.intent) ? "pen" : "calendar",
+    };
+  }
+
+  /**
+   * Change the thing the last turn produced.
+   *
+   * "No, Friday" keeps the time, the length, and the attendees, and moves the
+   * day — every slot the user did not restate stays exactly as it was. That is
+   * the whole point: they should not have to say it all again.
+   */
+  function adjust({ kind, item }) {
+    if (kind === "event") {
+      if (p.intent === INTENTS.CANCEL_EVENT) {
+        deleteEvent(item.id);
+        return reply(`Cancelled “${item.title}”.`, [{ summary: `Cancelled “${item.title}”` }], { entity: null });
+      }
+
+      const cur = new Date(item.start);
+      let start = new Date(cur);
+      if (slots.dateOnly) start = atLocal(slots.dateOnly, start.getHours(), start.getMinutes());
+      if (slots.timeOnly) start = atLocal(start, slots.timeOnly.h, slots.timeOnly.m);
+      const mins = slots.durationMins ?? (new Date(item.end) - cur) / 60000;
+
+      const patch = {
+        start: toLocalIso(start),
+        end: toLocalIso(new Date(start.getTime() + mins * 60000)),
+      };
+      if (slots.people.length) patch.attendees = slots.people.map((name) => ({ name }));
+      if (slots.subject) patch.notes = slots.subject;
+      if (slots.rename) patch.title = slots.rename;
+
+      const nothingChanged =
+        patch.start === item.start && patch.end === item.end &&
+        !patch.attendees && !patch.notes && !patch.title;
+      if (nothingChanged) {
+        // Still holding on to it — asking what to change must not drop the
+        // subject, or the answer arrives with nothing to apply it to.
+        return {
+          ...needs(`“${item.title}” is already ${describe(cur, now)}. What should I change?`),
+          entity: { kind: "event", id: item.id },
+        };
+      }
+
+      updateEvent(item.id, patch);
+      const moved = patch.start !== item.start;
+      const bits = [];
+      if (moved) bits.push(`now ${describe(start, now)}`);
+      if (slots.durationMins) bits.push(duration(mins * 60000));
+      if (patch.attendees) bits.push(`with ${slots.people.join(" and ")}`);
+      if (patch.notes) bits.push(`about ${slots.subject}`);
+
+      const clash = state.events.find(
+        (o) => o.id !== item.id &&
+          new Date(o.start) < new Date(patch.end) && new Date(o.end) > start,
+      );
+      return reply(
+        `${patch.title || item.title} — ${bits.join(", ")}.` +
+          (clash ? ` That overlaps “${clash.title}”.` : ""),
+        [{ summary: `Updated “${patch.title || item.title}” · ${describe(start, now)}` }],
+        { entity: { kind: "event", id: item.id }, day: dayKey(start) },
+      );
+    }
+
+    // ---- task
+    if (p.intent === INTENTS.COMPLETE_TASK) {
+      toggleTask(item.id);
+      return reply(`Done — “${item.title}”.`, [{ summary: `Completed “${item.title}”` }], { entity: null });
+    }
+    if (p.intent === INTENTS.CANCEL_EVENT) {
+      deleteTask(item.id);
+      return reply(`Deleted “${item.title}”.`, [{ summary: `Deleted “${item.title}”` }], { entity: null });
+    }
+
+    const patch = {};
+    const bits = [];
+    if (slots.dateOnly) {
+      patch.due = dayKey(slots.dateOnly);
+      bits.push(`due ${describe(atLocal(slots.dateOnly, 9), now).split(" at ")[0]}`);
+    }
+    if (slots.priority) {
+      patch.priority = slots.priority;
+      bits.push(`${slots.priority} priority`);
+    }
+    if (slots.durationMins) {
+      patch.estimateMins = slots.durationMins;
+      bits.push(duration(slots.durationMins * 60000));
+    }
+    if (slots.person) {
+      patch.delegatedTo = slots.person;
+      bits.push(`with ${slots.person}`);
+    }
+    if (slots.rename) {
+      patch.title = slots.rename;
+      bits.push(`renamed “${slots.rename}”`);
+    }
+    if (!bits.length) {
+      return {
+        ...needs(`“${item.title}” — what should I change about it?`),
+        entity: { kind: "task", id: item.id },
+      };
+    }
+
+    updateTask(item.id, patch);
+    return reply(
+      `“${patch.title || item.title}” — ${bits.join(", ")}.`,
+      [{ summary: `Updated “${patch.title || item.title}”` }],
+      { entity: { kind: "task", id: item.id }, day: patch.due ?? null },
+    );
+  }
 
   function run() {
   switch (p.intent) {
     // ------------------------------------------------------------- move
     case INTENTS.MOVE_EVENT: {
       if (!slots.when) {
-        return reply("Move it to when? Give me a day and a time — “Wednesday at 2”, say.");
+        return needs("Move it to when? Give me a day and a time — “Wednesday at 2”, say.");
       }
       const ranked = opts.resolvedId
         ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
@@ -103,6 +277,7 @@ export function ask(text, state, opts = {}) {
         `Moved “${ev.title}” to ${describe(start, now)}.` +
           (clash ? ` Heads up — that now overlaps “${clash.title}”.` : ""),
         [{ summary: `Moved “${ev.title}” → ${describe(start, now)}` }],
+        { entity: { kind: "event", id: ev.id }, day: dayKey(start) },
       );
     }
 
@@ -124,21 +299,29 @@ export function ask(text, state, opts = {}) {
       }
       const ev = ranked[0].item;
       deleteEvent(ev.id);
-      return reply(`Cancelled “${ev.title}”.`, [{ summary: `Cancelled “${ev.title}”` }]);
+      return reply(`Cancelled “${ev.title}”.`, [{ summary: `Cancelled “${ev.title}”` }], { entity: null });
     }
 
     // ----------------------------------------------------------- create
     case INTENTS.CREATE_EVENT: {
-      if (!slots.when) return reply("When should I put it? A day and time works — “Thursday at 10”.");
+      if (!slots.when) return needs("When should I put it? A day and time works — “Thursday at 10”.");
       const mins = slots.durationMins || DEFAULT_MEETING_MINS;
       const people = slots.people || [];
+      // A bare time belongs to the day being discussed. Asked "what does Friday
+      // look like?" then "book a 2pm" — that 2pm is Friday's, not today's. The
+      // confirmation always names the day, so a wrong inference is visible
+      // immediately and one "no, Monday" away from fixed.
+      let start = slots.when;
+      const topic = slots.hadDate ? null : topicDay(memory, now);
+      if (topic && slots.hadTime) start = atLocal(topic, start.getHours(), start.getMinutes());
+
       // When the whole sentence was consumed by slots there is no title left,
-      // so build one from who it is with.
+      // so build one from the noun used and who it is with.
+      const noun = slots.kindNoun ? slots.kindNoun[0].toUpperCase() + slots.kindNoun.slice(1) : "Meeting";
       const title =
-        slots.title || (people.length ? `Meeting with ${people.join(" and ")}` : "Meeting");
-      const start = slots.when;
+        slots.title || (people.length ? `${noun} with ${people.join(" and ")}` : noun);
       const end = new Date(start.getTime() + mins * 60000);
-      addEvent({
+      const made = addEvent({
         title,
         start: toLocalIso(start),
         end: toLocalIso(end),
@@ -147,31 +330,38 @@ export function ask(text, state, opts = {}) {
       });
       const withWho = people.length ? ` with ${people.join(" and ")}` : "";
       const about = slots.subject ? ` about ${slots.subject}` : "";
+      const clash = state.events.find(
+        (o) => new Date(o.start) < end && new Date(o.end) > start,
+      );
       return reply(
-        `Booked ${duration(mins * 60000)}${withWho}${about} ${describe(start, now)}.`,
+        `Booked ${duration(mins * 60000)}${withWho}${about} ${describe(start, now)}.` +
+          (clash ? ` That runs into “${clash.title}” — say the word and I'll move one.` : ""),
         [{ summary: `Added “${title}” · ${describe(start, now)}` }],
+        { entity: { kind: "event", id: made.id }, day: dayKey(start) },
       );
     }
 
     case INTENTS.CREATE_TASK: {
       const title = slots.title;
-      if (!title) return reply("What's the task?");
+      if (!title) return needs("What's the task?");
       const projectHit = resolveProject(p.text, state.projects);
-      addTask({
+      const due = slots.dateOnly || (slots.hadDate ? null : topicDay(memory, now));
+      const made = addTask({
         projectId: projectHit.length && isConfident(projectHit) ? projectHit[0].item.id : null,
         title,
         estimateMins: slots.durationMins || DEFAULT_TASK_MINS,
-        due: slots.dateOnly ? dayKey(slots.dateOnly) : null,
+        due: due ? dayKey(due) : null,
         priority: slots.priority || "normal",
         delegatedTo: slots.person || "",
       });
       const bits = [];
-      if (slots.dateOnly) bits.push(`due ${dayKey(slots.dateOnly)}`);
+      if (due) bits.push(`due ${dayKey(due)}`);
       if (slots.priority) bits.push(slots.priority);
       if (slots.person) bits.push(`for ${slots.person}`);
       return reply(
         `Added “${title}”${bits.length ? ` — ${bits.join(", ")}` : ""}.`,
         [{ summary: `Added task “${title}”` }],
+        { entity: { kind: "task", id: made.id }, day: due ? dayKey(due) : null },
       );
     }
 
@@ -190,11 +380,11 @@ export function ask(text, state, opts = {}) {
       }
       const t = ranked[0].item;
       toggleTask(t.id);
-      return reply(`Done — “${t.title}”.`, [{ summary: `Completed “${t.title}”` }]);
+      return reply(`Done — “${t.title}”.`, [{ summary: `Completed “${t.title}”` }], { entity: null });
     }
 
     case INTENTS.DELEGATE_TASK: {
-      if (!slots.person) return reply("Delegate it to whom?");
+      if (!slots.person) return needs("Delegate it to whom?");
       const ranked = resolveTask(slots.subjectPhrase, openTasks);
       if (!ranked.length) return reply("I couldn't find that task.");
       if (!isConfident(ranked)) {
@@ -207,9 +397,11 @@ export function ask(text, state, opts = {}) {
       }
       const t = ranked[0].item;
       updateTask(t.id, { delegatedTo: slots.person });
-      return reply(`“${t.title}” is with ${slots.person} now.`, [
-        { summary: `Delegated “${t.title}” → ${slots.person}` },
-      ]);
+      return reply(
+        `“${t.title}” is with ${slots.person} now.`,
+        [{ summary: `Delegated “${t.title}” → ${slots.person}` }],
+        { entity: { kind: "task", id: t.id } },
+      );
     }
 
     // ------------------------------------------------------------ query
@@ -222,15 +414,17 @@ export function ask(text, state, opts = {}) {
       const rawLabel = slots.dateOnly ? describe(atLocal(slots.dateOnly, 9), now).split(" at ")[0] : "Today";
       const label = rawLabel[0].toUpperCase() + rawLabel.slice(1);
 
-      return reply(describeDay(label, events, due));
+      // The day asked about becomes the topic, so a bare "book a 2pm" next
+      // lands here rather than on today.
+      return reply(describeDay(label, events, due), [], { day });
     }
 
     case INTENTS.QUERY_FREE: {
       const day = dayKey(slots.dateOnly || now);
       const slots_ = findFreeSlots(day, state.events, { minMins: slots.durationMins || 30 });
-      if (!slots_.length) return reply("Nothing open that day inside working hours.");
+      if (!slots_.length) return reply("Nothing open that day inside working hours.", [], { day });
       const lines = slots_.map((s) => `${fmtTime(s.start)}–${fmtTime(s.end)} (${duration(s.mins * 60000)})`);
-      return reply(`Open time:\n${lines.join("\n")}`);
+      return reply(`Open time:\n${lines.join("\n")}`, [], { day });
     }
 
     case INTENTS.PLAN_DAY: {
@@ -243,6 +437,7 @@ export function ask(text, state, opts = {}) {
         `Planned ${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"} around your meetings.` +
           (lines.length ? `\n${lines.join("\n")}` : ""),
         [{ summary: `Planned ${plan.tasks.length} tasks` }],
+        { day },
       );
     }
 

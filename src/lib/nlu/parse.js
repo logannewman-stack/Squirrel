@@ -45,6 +45,41 @@ const PRIORITY = [
   [/\b(low priority|whenever|low|someday)\b/, "low"],
 ];
 
+/**
+ * Openers that mean "what I just said was wrong".
+ *
+ * Stripped before classification so the rest of the sentence is read as the
+ * command it is — otherwise "no schedule it for friday" becomes an event
+ * titled "No schedule it", which is exactly the failure this exists to stop.
+ */
+const REPAIR = /^\s*(?:no+|nope|nah|actually|sorry|wait|whoops|oops|i meant|i said|not that|scratch that|never ?mind that|instead)\b[\s,.:;!—-]*/i;
+
+/** "make it 3pm", "move it to Friday" — an edit to something already named. */
+const AMEND = /^\s*(?:make|change|set|push|move|shift|bump)\s+(?:it|that|this|them)\b/i;
+
+const PRONOUN = /\b(?:it|that one|that|this one|them|those|the meeting|the event|the task|the call)\b/i;
+
+/** The noun that decides whether a bare booking is a "Call" or a "Meeting". */
+const KIND_NOUN = /\b(call|meeting|sync|standup|stand-up|interview|review|1:1|one on one|lunch|dinner|coffee|appointment|catch ?up)\b/i;
+
+/**
+ * Words that follow "with" but are not people.
+ *
+ * Capitalisation used to be the signal here, which fails the moment anyone
+ * types the way people actually type: "meeting with bob" produced no attendee
+ * at all. A stopword list is the right test — "with the team" is not a name,
+ * "with bob" is.
+ */
+const NOT_A_NAME = new Set([
+  "a", "an", "the", "my", "our", "your", "his", "her", "their", "this", "that",
+  "these", "those", "team", "board", "everyone", "everybody", "them", "him",
+  "us", "me", "you", "it", "client", "clients", "group", "staff", "room",
+  "zoom", "google", "meet", "teams", "no", "yes", "regard", "regards",
+  "respect", "time", "someone", "anyone", "each", "both", "all",
+]);
+
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /** Strip leading command verbs so the remainder reads as a title. */
 function stripVerbs(text) {
   return text
@@ -75,18 +110,38 @@ function stripTemporal(text) {
     .trim();
 }
 
-/**
- * "with Bob and Sarah" → the people. Capitalisation is the signal, since a
- * lowercase word after "with" is far more likely to be "with the team" than a
- * name we should put on an invite.
- */
+/** "with bob and Sarah" → ["Bob", "Sarah"]. Case-insensitive by design. */
 function extractPeople(text) {
-  const m = text.match(/\bwith\s+([A-Z][\w'-]*(?:\s+(?:and\s+|,\s*)[A-Z][\w'-]*)*)/);
+  const m = text.match(/\bwith\s+([\w'-]+(?:\s*(?:,|and)\s*[\w'-]+)*)/i);
   if (!m) return [];
-  return m[1]
-    .split(/\s+and\s+|,\s*/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+  const out = [];
+  for (const part of m[1].split(/\s*,\s*|\s+and\s+/)) {
+    const w = part.trim();
+    if (!w || NOT_A_NAME.has(w.toLowerCase())) continue;
+    out.push(w[0].toUpperCase() + w.slice(1));
+  }
+  return out;
+}
+
+/** Matches the exact "with <people>" phrase so it can be cut from a title. */
+function withPhrase(people) {
+  if (!people.length) return /\bwith\s+[A-Z][\w'-]*(?:\s+(?:and\s+|,\s*)[A-Z][\w'-]*)*/g;
+  return new RegExp(`\\bwith\\s+${people.map(esc).join("\\s*(?:,|and)\\s*")}`, "gi");
+}
+
+/**
+ * "call it the board prep" → an explicit rename.
+ *
+ * Amendments only ever rename when asked in so many words. Reusing whatever
+ * words were left over would mean "actually make it an hour" quietly retitles
+ * the meeting, which is not a mistake anyone would think to check for.
+ */
+function extractRename(text) {
+  const m = text.match(/\b(?:call it|rename(?:\s+it)?(?:\s+to)?|title it|name it)\s+(.+)$/i);
+  if (!m) return null;
+  const cleaned = m[1].replace(/^[\s"“'’]+|[\s"”'’.,]+$/g, "").trim();
+  if (!cleaned) return null;
+  return cleaned[0].toUpperCase() + cleaned.slice(1);
 }
 
 /** "about the Q3 pipeline" / "re: financials" → what the meeting covers. */
@@ -98,35 +153,64 @@ function extractSubject(text) {
 }
 
 /**
+ * Left over after every slot is removed, none of these is a name: either a
+ * bare noun ("meeting") or a stranded function word ("for"). Both mean the
+ * sentence was all slots, and the caller should compose a title instead.
+ */
+const BARE_NOUN =
+  /^(?:meetings?|calls?|events?|syncs?|chats?|1:1|one on one|appointments?|catch ?up|blocks?|times?|slots?|for|about|on|to|with|and|it|that|this|them|those|an?|the|re)$/i;
+
+/**
  * Produce the title a human would have typed.
  *
  * Everything the parser consumed as a slot has to come back out of the title,
  * or it shows up in the UI as "sign the Munich lease, high priority," — the
  * command echoed back rather than a task name. Leading connectors and stray
  * punctuation go too: "for the board deck" should read "Board deck".
+ *
+ * The verb strip runs twice on purpose. "a 2 pm meeting for 30 minutes" only
+ * becomes the contiguous phrase "a meeting for" once the temporal parts are
+ * gone, and until it does, the noun-phrase rule cannot see it — which is how
+ * "Meeting for with bob" used to end up on the calendar.
  */
-function cleanTitle(text) {
-  let t = stripVerbs(text)
+function cleanTitle(text, people = []) {
+  // "make it an hour" is an instruction about an existing thing, not a name.
+  // Without this the leftovers spell "Make" and the meeting gets renamed.
+  let t = stripVerbs(text.replace(AMEND, " "))
     .replace(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+.+$/i, " ")
-    .replace(/\bwith\s+[A-Z][\w'-]*(?:\s+(?:and\s+|,\s*)[A-Z][\w'-]*)*/g, " ");
+    .replace(withPhrase(people), " ");
   t = stripTemporal(t);
+  t = stripVerbs(t);
   t = t.replace(/\b(?:high priority|low priority|critical|urgent|asap|drop everything)\b/gi, " ");
   t = t.replace(/\s{2,}/g, " ").trim();
-  // Drop a leading connector and any article behind it: "for the board deck"
-  // is a phrase from the command, "Board deck" is the thing itself.
-  t = t.replace(/^(?:for|about|on|to|with|re|called|named)\s+/i, "");
-  t = t.replace(/^(?:a|an|the)\s+/i, "");
-  t = t.replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "").trim();
-  if (!t) return null;
+  // Peel connectors, articles, and stranded pronouns off both ends until
+  // nothing changes: "for the board deck" is a phrase from the command,
+  // "Board deck" is the thing itself, and "it for" is nothing at all.
+  // Whitespace is required after each word so "On-site review" survives.
+  let prev;
+  do {
+    prev = t;
+    t = t.replace(/^(?:for|about|on|to|with|re|called|named|and|it|that|this|them|those|a|an|the)\s+/i, "");
+    t = t.replace(/\s+(?:for|about|on|to|with|and|it|that)$/i, "");
+    t = t.replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "").trim();
+  } while (t !== prev);
+  // A bare "meeting" is not a title. Returning null lets the caller compose one
+  // from who it is with, which is what the user would have written anyway.
+  if (!t || BARE_NOUN.test(t)) return null;
   return t[0].toUpperCase() + t.slice(1);
 }
 
 /**
- * @returns {{intent: string, slots: object, text: string}}
+ * @returns {{intent, slots, text, body, repair, amend, pronoun, fragment}}
  */
 export function parse(text, now = new Date()) {
   const raw = text.trim();
-  const s = raw.toLowerCase();
+
+  // Classify what is left after "no," / "actually," — the correction marker is
+  // discourse, not content, and leaving it in poisons both intent and title.
+  const repair = REPAIR.test(raw);
+  const body = repair ? raw.replace(REPAIR, "").trim() : raw;
+  const s = body.toLowerCase();
 
   let intent = INTENTS.UNKNOWN;
   for (const [name, re] of RULES) {
@@ -137,10 +221,10 @@ export function parse(text, now = new Date()) {
   }
 
   // "move X to Y" — the target time is what follows the last "to"/"until".
-  let targetPhrase = raw;
-  let subjectPhrase = raw;
+  let targetPhrase = body;
+  let subjectPhrase = body;
   if (intent === INTENTS.MOVE_EVENT) {
-    const split = raw.match(/^(.*?)\s+\b(?:to|until|till|->)\b\s+(.*)$/i);
+    const split = body.match(/^(.*?)\s+\b(?:to|until|till|->)\b\s+(.*)$/i);
     if (split) {
       subjectPhrase = split[1];
       targetPhrase = split[2];
@@ -148,7 +232,7 @@ export function parse(text, now = new Date()) {
   }
 
   const when = parseDateTime(targetPhrase, now);
-  const durationMins = parseDuration(raw);
+  const durationMins = parseDuration(body);
 
   let priority = null;
   for (const [re, level] of PRIORITY) {
@@ -159,28 +243,47 @@ export function parse(text, now = new Date()) {
   }
 
   // "delegate X to Anders" / "assign X to Priya"
-  const toPerson = raw.match(/\b(?:to|with|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/);
+  const toPerson = body.match(/\b(?:to|with|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/);
+  const people = extractPeople(body);
+  const dateOnly = parseDate(body, now)?.date ?? null;
+  const timeOnly = parseTime(body);
+
+  const slots = {
+    when: when?.at ?? null,
+    hadTime: when?.hadTime ?? false,
+    hadDate: when?.hadDate ?? false,
+    durationMins,
+    priority,
+    person: toPerson ? toPerson[1] : null,
+    subjectPhrase,
+    targetPhrase,
+    // Title with verbs, temporal phrases, and priority wording removed.
+    title: cleanTitle(body, people),
+    rename: extractRename(body),
+    people,
+    subject: extractSubject(body),
+    kindNoun: body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null,
+    // "due friday" marks a deadline rather than a start time.
+    isDue: /\bdue\b|\bby\b/.test(s),
+    dateOnly,
+    timeOnly,
+  };
+
+  // A fragment carries information but no verb: "for friday", "make it 30 min",
+  // "with Sarah too". On its own it means nothing; against the previous turn it
+  // means everything.
+  const fragment =
+    intent === INTENTS.UNKNOWN &&
+    Boolean(dateOnly || timeOnly || durationMins || priority || people.length);
 
   return {
     text: raw,
+    body,
     intent,
-    slots: {
-      when: when?.at ?? null,
-      hadTime: when?.hadTime ?? false,
-      hadDate: when?.hadDate ?? false,
-      durationMins,
-      priority,
-      person: toPerson ? toPerson[1] : null,
-      subjectPhrase,
-      targetPhrase,
-      // Title with verbs, temporal phrases, and priority wording removed.
-      title: cleanTitle(raw),
-      people: extractPeople(raw),
-      subject: extractSubject(raw),
-      // "due friday" marks a deadline rather than a start time.
-      isDue: /\bdue\b|\bby\b/.test(s),
-      dateOnly: parseDate(raw, now)?.date ?? null,
-      timeOnly: parseTime(raw),
-    },
+    repair,
+    amend: AMEND.test(body),
+    pronoun: PRONOUN.test(s),
+    fragment,
+    slots,
   };
 }

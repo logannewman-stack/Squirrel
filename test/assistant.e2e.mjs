@@ -132,6 +132,101 @@ const results = await p.evaluate(async () => {
 });
 
 /**
+ * Conversational memory, on a fresh page.
+ *
+ * The store keeps a module-level cache, so clearing localStorage mid-run does
+ * not empty it — only a reload does. Sharing a page with the block above would
+ * leave its events lying around and turn half of these into accidental
+ * ambiguity tests.
+ */
+await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
+await p.reload({ waitUntil: "networkidle" });
+
+const convo = await p.evaluate(async () => {
+  const store = await import("/src/lib/store.js");
+  const { ask } = await import("/src/lib/nlu/index.js");
+  const out = [];
+  const t = (name, ok, detail) => out.push([name, !!ok, detail || ""]);
+
+  const NOW = new Date(2026, 7, 2, 10, 0, 0);
+  const iso = (y, mo, d, h, mi = 0) =>
+    `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}T${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}:00`;
+
+  let r;
+  store.setSetting("identity", { style: "formal", honorific: "Mr.", lastName: "Newman" });
+
+  const M = () => store.getState();
+  const eventCount = () => M().events.length;
+
+  // Logan's transcript, verbatim. Every line of it went wrong before the
+  // assistant remembered anything.
+  ask("what does friday look like", M(), { now: NOW });
+  r = ask("can you schedule a 2 pm meeting for 30 minutes with bob", M(), { now: NOW });
+  let bob = M().events[M().events.length - 1];
+  t("the title is a title, not the sentence", bob.title === "Meeting with Bob", bob.title);
+  t("a lowercase name still becomes an attendee",
+    bob.attendees?.[0]?.name === "Bob", JSON.stringify(bob.attendees));
+  t("a bare time lands on the day being discussed",
+    bob.start === "2026-08-07T14:00:00", bob.start);
+  t("the stated duration is honoured",
+    (new Date(bob.end) - new Date(bob.start)) / 60000 === 30);
+
+  // "no for friday" — a correction with nothing but a day in it.
+  let n = eventCount();
+  r = ask("no make it monday", M(), { now: NOW });
+  bob = M().events.find((e) => e.id === bob.id);
+  t("a correction edits, it does not add", eventCount() === n, `${eventCount()} vs ${n}`);
+  t("the corrected day is applied", bob.start.startsWith("2026-08-03"), bob.start);
+  t("and the time it never restated is kept", bob.start.endsWith("T14:00:00"), bob.start);
+  t("as is the duration", (new Date(bob.end) - new Date(bob.start)) / 60000 === 30);
+  t("and the attendee", bob.attendees?.[0]?.name === "Bob");
+
+  // "no schedule it for friday" — the exact line that created "No schedule it".
+  n = eventCount();
+  r = ask("no schedule it for friday", M(), { now: NOW });
+  t("a pronoun command edits too", eventCount() === n, `${eventCount()} vs ${n}`);
+  t("no event is ever named after the correction",
+    !M().events.some((e) => /^no\b/i.test(e.title)), M().events.map((e) => e.title).join("|"));
+  bob = M().events.find((e) => e.id === bob.id);
+  t("and it moved to Friday", bob.start === "2026-08-07T14:00:00", bob.start);
+
+  // Fragments amend the length without repeating anything else.
+  r = ask("actually make it an hour", M(), { now: NOW });
+  bob = M().events.find((e) => e.id === bob.id);
+  t("a fragment can change just the length",
+    (new Date(bob.end) - new Date(bob.start)) / 60000 === 60);
+  t("without moving it", bob.start === "2026-08-07T14:00:00", bob.start);
+
+  // A missing slot gets asked for, then supplied on its own.
+  store.addEvent({ title: "Ops review", start: iso(2026, 8, 10, 9), end: iso(2026, 8, 10, 10) });
+  r = ask("move the ops review", M(), { now: NOW });
+  t("an incomplete command still asks", /when/i.test(r.text), r.text);
+  r = ask("wednesday at 2", M(), { now: NOW });
+  const ops = M().events.find((e) => e.title === "Ops review");
+  t("and the answer alone completes it", ops.start === "2026-08-05T14:00:00", ops.start);
+
+  // A real new command after all that must not be swallowed as a follow-up.
+  n = eventCount();
+  ask("schedule a call with priya tuesday at 11", M(), { now: NOW });
+  t("a fresh command still creates", eventCount() === n + 1, `${eventCount()} vs ${n + 1}`);
+  const priya = M().events[M().events.length - 1];
+  t("and names itself after the noun used", priya.title === "Call with Priya", priya.title);
+
+  // "no, cancel it" is the natural undo.
+  n = eventCount();
+  r = ask("no cancel it", M(), { now: NOW });
+  t("a correction can undo the thing it just made", eventCount() === n - 1, `${eventCount()} vs ${n - 1}`);
+  t("and it removed the right one",
+    !M().events.some((e) => e.title === "Call with Priya"), M().events.map((e) => e.title).join("|"));
+
+  // Memory has to be forgettable, or a cleared thread still steers replies.
+  store.clearChat();
+  t("clearing the chat clears the memory", store.getState().memory.turns.length === 0);
+
+  return out;
+});
+
+/**
  * Second pass, through the actual UI rather than the store: first-run identity,
  * an event captured in the dialog, then the assistant describing it. This is
  * the path that broke silently before — the assistant could say "with Bob about
@@ -174,7 +269,7 @@ ui.push(["derived end time stays in local time", span === 60, `${span} mins`]);
 await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
 
 let failed = 0;
-for (const [name, ok, detail] of [...results, ...ui]) {
+for (const [name, ok, detail] of [...results, ...convo, ...ui]) {
   if (!ok) failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? `  → ${detail}` : ""}`);
 }

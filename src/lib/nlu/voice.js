@@ -63,6 +63,25 @@ export function joinNames(names) {
   return `${list.slice(0, -1).join(", ")}, and ${list[list.length - 1]}`;
 }
 
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * True when the title says nothing the sentence hasn't already said.
+ *
+ * "Meeting with Bob" is what the assistant itself names a booking that had no
+ * title, so reading it back produces "you're meeting with Bob — Meeting with
+ * Bob." Anything with real words left in it, like "Q3 board review", is worth
+ * saying.
+ */
+function saysNothingNew(title, names) {
+  const rest = title
+    .replace(/\b(?:meeting|call|sync|chat|catch ?up|appointment|event|block|1:1|one on one)\b/gi, " ")
+    .replace(/\b(?:with|and|the|a|an)\b/gi, " ")
+    .replace(names.length ? new RegExp(`\\b(?:${names.map(esc).join("|")})\\b`, "gi") : /$^/, " ")
+    .replace(/[^a-z0-9]/gi, "");
+  return rest.length === 0;
+}
+
 /**
  * One meeting, as a sentence.
  *   "At 10:00 AM you're meeting with Bob about the Q3 pipeline."
@@ -71,14 +90,19 @@ export function joinNames(names) {
  */
 export function describeMeeting(event, index = 0) {
   const at = `At ${timeOf(event.start)}`;
-  const people = joinNames((event.attendees || []).map((a) => (typeof a === "string" ? a : a.name)));
+  const names = (event.attendees || []).map((a) => (typeof a === "string" ? a : a.name)).filter(Boolean);
+  const people = joinNames(names);
   const about = (event.notes || "").trim();
 
   // Vary the verb slightly so a list of four doesn't drum.
   const verb = index % 2 === 0 ? "you're meeting with" : "you're with";
 
   if (people && about) return `${at} ${verb} ${people} about ${about}.`;
-  if (people) return `${at} ${verb} ${people} — ${event.title}.`;
+  if (people) {
+    return saysNothingNew(event.title, names)
+      ? `${at} ${verb} ${people}.`
+      : `${at} ${verb} ${people} — ${event.title}.`;
+  }
   if (about) return `${at} you have ${event.title} about ${about}.`;
   return `${at} you have ${event.title}.`;
 }
