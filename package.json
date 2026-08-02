@@ -7,10 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "verify": "node test/tools.test.mjs"
+    "test": "node test/nlu.test.mjs",
+    "test:e2e": "node test/assistant.e2e.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
     "@supabase/supabase-js": "^2.111.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -18,19 +18,40 @@ npm run verify   # tool-layer checks, needs the dev server running
 
 ## The assistant
 
-Type "reschedule my 3pm Monday to Wednesday at 2" and it does it. Under the
-hood it runs a tool-use loop: read the schedule, find the event by id, move it
-preserving duration, and report what changed. It can also create and cancel
-events, add and delegate tasks, find open gaps, plan a day, and start a focus
-session.
+Deterministic and coded — no model, no API call, no per-message cost. It runs in
+the browser, answers instantly, and works offline.
 
-Two rules the system prompt enforces, because they are what make it usable:
-anything referring to an existing item requires a schedule lookup first — the
-model cannot move what it has not addressed by id — and it acts rather than
-proposing, asking only when a genuine ambiguity would send it to the wrong item.
+```
+Reschedule my 3pm Monday to Wednesday at 2
+Block 2 hours Thursday morning for the board deck
+Add a task to sign the Munich lease, high priority, due Friday
+Mark the term sheet review as done
+Delegate the vendor review to Priya
+What does Friday look like?
+When am I free tomorrow?
+Cancel my 4pm
+```
 
-Each tool call surfaces in the transcript as a one-line receipt before the
-reply, so a change is never silent.
+Three layers: `datetime.js` resolves times and dates, `parse.js` classifies
+intent and pulls out slots, `resolve.js` matches a phrase like "my 3pm" to an
+actual row by combining time reference with title overlap.
+
+Two rules it follows, both deliberate:
+
+- **Ambiguity asks, it never guesses.** If "my 3pm" matches two meetings, it
+  shows both and waits. Moving the wrong meeting is far worse than one extra tap.
+- **Missing information asks too.** "Move the exec staff meeting" with no target
+  time gets a question, not an invented slot.
+
+The honest limit: it understands the phrasings it was built for. Anything else
+gets a plain "I didn't catch that" plus examples — never a wrong action. That
+tradeoff is the point: it costs nothing to run, so chats are unlimited on every
+plan, and its behaviour is pinned by 82 tests rather than hoped for.
+
+```bash
+npm test        # 63 language checks — dates, intents, slot extraction, matching
+npm run test:e2e  # 19 end-to-end checks against the real store (needs npm run dev)
+```
 
 ## How planning works
 

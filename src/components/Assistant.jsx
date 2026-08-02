@@ -1,51 +1,41 @@
 import { useEffect, useRef, useState } from "react";
-import { runAssistant, ERROR_COPY } from "../lib/assistant";
+import { ask, resolveChoice, EXAMPLES } from "../lib/nlu";
 import { appendChat, clearChat } from "../lib/store";
 
-const EXAMPLES = [
-  "Reschedule my 3pm Monday to Wednesday at 2",
-  "Block two hours Thursday morning for the board deck",
-  "What's my Friday look like?",
-  "Add a task to review the term sheet, high priority, due Friday",
-];
-
+/**
+ * The assistant runs entirely in the browser — no API call, no per-message
+ * cost, works offline, answers instantly. Ambiguity becomes a choice list
+ * rather than a guess, because moving the wrong meeting is far worse than one
+ * extra tap.
+ */
 export default function Assistant({ state }) {
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [actions, setActions] = useState([]);
-  // API-shaped history, kept separate from the rendered transcript: it carries
-  // tool_use and tool_result blocks the UI never shows but the model needs.
-  const apiHistory = useRef([]);
+  const [pendingChoice, setPendingChoice] = useState(null);
   const scroller = useRef(null);
-
   const chat = state.chat;
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [chat.length, busy, actions.length]);
+  }, [chat.length, pendingChoice]);
 
-  async function send(text) {
+  function run(text) {
     const msg = (text ?? input).trim();
-    if (!msg || busy) return;
+    if (!msg) return;
     setInput("");
-    setActions([]);
+    setPendingChoice(null);
     appendChat({ role: "user", text: msg });
-    setBusy(true);
 
-    const live = [];
-    const res = await runAssistant(msg, apiHistory.current, state.settings.apiKey, (a) => {
-      live.push(a);
-      setActions([...live]);
-    });
+    const res = ask(msg, state);
+    appendChat({ role: "assistant", text: res.text, actions: res.actions });
+    if (res.choices) setPendingChoice(res.choices);
+  }
 
-    apiHistory.current = res.messages;
-    if (res.error) {
-      appendChat({ role: "error", text: ERROR_COPY[res.error] || res.error });
-    } else {
-      appendChat({ role: "assistant", text: res.text, actions: live });
-    }
-    setActions([]);
-    setBusy(false);
+  function pick(option) {
+    const choice = pendingChoice;
+    setPendingChoice(null);
+    appendChat({ role: "user", text: option.label });
+    const res = resolveChoice(choice, option.id, state);
+    appendChat({ role: "assistant", text: res.text, actions: res.actions });
   }
 
   return (
@@ -54,17 +44,11 @@ export default function Assistant({ state }) {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Assistant</h1>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
-            Changes your calendar and tasks directly.
+            Changes your calendar and tasks directly. Included on every plan.
           </p>
         </div>
         {chat.length > 0 && (
-          <button
-            onClick={() => {
-              clearChat();
-              apiHistory.current = [];
-            }}
-            className="text-xs text-[var(--muted)] hover:text-[var(--ink)]"
-          >
+          <button onClick={clearChat} className="text-xs text-[var(--muted)] hover:text-[var(--ink)]">
             Clear
           </button>
         )}
@@ -78,7 +62,7 @@ export default function Assistant({ state }) {
               {EXAMPLES.map((e) => (
                 <button
                   key={e}
-                  onClick={() => send(e)}
+                  onClick={() => run(e)}
                   className="block w-full rounded-md border border-[var(--line)] px-4 py-3
                              text-left text-sm transition-colors hover:border-[var(--ink)]"
                 >
@@ -98,23 +82,38 @@ export default function Assistant({ state }) {
                     {m.text}
                   </p>
                 </div>
-              ) : m.role === "error" ? (
-                <p className="rounded-md border border-[var(--line)] px-4 py-2.5 text-sm text-[var(--muted)]">
-                  {m.text}
-                </p>
               ) : (
                 <div className="space-y-2">
-                  {m.actions?.length > 0 && <Receipts actions={m.actions} />}
-                  {m.text && <p className="text-sm leading-relaxed">{m.text}</p>}
+                  {m.actions?.length > 0 && (
+                    <ul className="space-y-1.5">
+                      {m.actions.map((a, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--ink)]" />
+                          <span>{a.summary}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {m.text && (
+                    <p className="whitespace-pre-line text-sm leading-relaxed">{m.text}</p>
+                  )}
                 </div>
               )}
             </div>
           ))}
 
-          {busy && (
+          {pendingChoice && (
             <div className="space-y-2">
-              {actions.length > 0 && <Receipts actions={actions} />}
-              <p className="text-sm text-[var(--muted)]">Working…</p>
+              {pendingChoice.options.map((o) => (
+                <button
+                  key={o.id}
+                  onClick={() => pick(o)}
+                  className="block w-full rounded-md border border-[var(--line)] px-4 py-2.5
+                             text-left text-sm transition-colors hover:border-[var(--ink)]"
+                >
+                  {o.label}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -123,7 +122,7 @@ export default function Assistant({ state }) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          send();
+          run();
         }}
         className="border-t border-[var(--line)] px-6 py-4"
       >
@@ -138,7 +137,7 @@ export default function Assistant({ state }) {
           />
           <button
             type="submit"
-            disabled={busy || !input.trim()}
+            disabled={!input.trim()}
             className="rounded-md bg-[var(--ink)] px-5 py-2.5 text-sm font-medium
                        text-[var(--paper)] transition-opacity disabled:opacity-30"
           >
@@ -147,19 +146,5 @@ export default function Assistant({ state }) {
         </div>
       </form>
     </div>
-  );
-}
-
-/** Action receipts — what actually changed, shown before the model's reply. */
-function Receipts({ actions }) {
-  return (
-    <ul className="space-y-1.5">
-      {actions.map((a, i) => (
-        <li key={i} className="flex items-start gap-2 text-sm">
-          <span className={`mt-1.5 h-1 w-1 shrink-0 rounded-full ${a.isError ? "bg-[var(--faint)]" : "bg-[var(--ink)]"}`} />
-          <span className={a.isError ? "text-[var(--muted)]" : ""}>{a.summary}</span>
-        </li>
-      ))}
-    </ul>
   );
 }

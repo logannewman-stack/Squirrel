@@ -14,9 +14,9 @@ export const PLANS = {
     price: 0,
     projects: 1,
     tasks: 10,
-    chats: 0,
+    chats: null,
     blurb: "Calendar, one project, ten open tasks.",
-    features: ["Calendar and focus timer", "1 project", "10 open tasks", "Rule-based day planning"],
+    features: ["Calendar and focus timer", "Assistant — unlimited", "1 project", "10 open tasks"],
   },
   plus: {
     id: "plus",
@@ -24,9 +24,9 @@ export const PLANS = {
     price: 20,
     projects: 5,
     tasks: null,
-    chats: 200,
-    blurb: "The assistant, five projects, unlimited tasks.",
-    features: ["Everything in Free", "AI assistant — 200 chats/month", "5 projects", "Unlimited tasks", "Insights"],
+    chats: null,
+    blurb: "Five projects, unlimited tasks, insights.",
+    features: ["Everything in Free", "5 projects", "Unlimited tasks", "Insights", "Meeting invites by email"],
   },
   pro: {
     id: "pro",
@@ -35,20 +35,17 @@ export const PLANS = {
     projects: null,
     tasks: null,
     chats: null,
-    blurb: "Unlimited assistant, unlimited everything.",
-    features: ["Everything in Plus", "Unlimited assistant chats*", "Unlimited projects", "Unlimited tasks", "Priority support"],
-    // Unlimited needs a stated ceiling somewhere, or one automated integration
-    // can outspend the subscription indefinitely. See FAIR_USE_CHATS.
-    footnote: "*Subject to fair use — see below.",
+    blurb: "Unlimited projects and tasks.",
+    features: ["Everything in Plus", "Unlimited projects", "Unlimited tasks", "Priority support"],
   },
 };
 
 /**
- * Soft ceiling on "unlimited". Beyond this a Pro user is asked to slow down
- * rather than being cut off. Without a number here, "unlimited" is an open
- * cheque against per-token API cost.
+ * The assistant is deterministic and runs in the browser, so a message costs
+ * nothing to serve. Chats are therefore unlimited on every plan and the tiers
+ * differentiate on projects, tasks, and features instead. Reintroduce a chat
+ * limit only if a paid model is ever added behind it.
  */
-export const FAIR_USE_CHATS = 2000;
 
 export const limitFor = (plan, resource) => PLANS[plan ?? "free"]?.[resource] ?? 0;
 
