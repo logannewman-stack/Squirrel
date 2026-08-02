@@ -44,7 +44,10 @@ export function acknowledge(identity, kind, now = new Date()) {
     create_task: "adding that",
     complete_task: "marking that off",
     delegate_task: "handing that over",
-  }[kind] || "one moment";
+  }[kind];
+  // Small talk gets no "checking your calendar" line — she is not looking
+  // anything up, and pretending to is the kind of theatre that gets noticed.
+  if (!work) return who ? `One moment${suffix}.` : "One moment.";
   return `${greeting(now)}${suffix} — ${work}.`;
 }
 

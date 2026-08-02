@@ -96,9 +96,12 @@ const results = await p.evaluate(async () => {
   t("free-time answer excludes the booked block",
     r.text.includes("11:00") || /open time/i.test(r.text), r.text);
 
-  // 9. Out of scope is declined, not attempted.
+  // 9. Out of scope is declined, not attempted — and named as a boundary
+  // rather than a failure to parse, which is a different thing to be told.
   r = ask("write me a poem about autumn", S(), { now: NOW });
-  t("refuses off-topic requests", /didn't catch that|scheduling, tasks/i.test(r.text), r.text);
+  t("refuses off-topic requests",
+    /outside what I know|didn't catch that/i.test(r.text), r.text);
+  t("and does not attempt one", !/autumn/i.test(r.text), r.text);
 
   // 10. Missing information asks rather than guesses.
   r = ask("move the exec staff meeting", S(), { now: NOW });
@@ -222,6 +225,27 @@ const convo = await p.evaluate(async () => {
   t("a correction can undo the thing it just made", eventCount() === n - 1, `${eventCount()} vs ${n - 1}`);
   t("and it removed the right one",
     !M().events.some((e) => e.title === "Call with Priya"), M().events.map((e) => e.title).join("|"));
+
+  // ---- small talk, through the real assistant ----
+  r = ask("hi", M(), { now: NOW });
+  t("she answers a greeting", /Good (morning|afternoon|evening), Mr\. Newman/.test(r.text), r.text);
+  t("without pretending to look anything up", !/checking your calendar/.test(r.ack), r.ack);
+  r = ask("what time is it", M(), { now: NOW });
+  t("and knows the time", /10:00 AM/.test(r.text), r.text);
+  r = ask("what is the capital of france", M(), { now: NOW });
+  t("general knowledge is declined honestly", /outside what I know/.test(r.text), r.text);
+  const before2 = M().events.length;
+  ask("thanks", M(), { now: NOW });
+  t("courtesies change nothing", M().events.length === before2);
+
+  // "ok" must still mean yes while a proposal is open, not hello.
+  store.setSetting("confirm", true);
+  ask("schedule a call with dana tuesday at 4", M(), { now: NOW });
+  const n2 = M().events.length;
+  ask("ok", M(), { now: NOW });
+  t("'ok' confirms a proposal rather than greeting", M().events.length === n2 + 1,
+    `${M().events.length} vs ${n2 + 1}`);
+  store.setSetting("confirm", false);
 
   // Memory has to be forgettable, or a cleared thread still steers replies.
   store.clearChat();

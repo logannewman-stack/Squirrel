@@ -234,5 +234,59 @@ const NOW = new Date(2026, 7, 2, 10, 0, 0);
     /Q3 board review/.test(real), real);
 }
 
+// ---------------------------------------------------------------- small talk
+{
+  const { classify, answer } = await import("../src/lib/nlu/smalltalk.js");
+  const state = {
+    settings: { identity: { style: "formal", honorific: "Mr.", lastName: "Newman" } },
+    events: [{ id: "1", title: "Board meeting", start: "2026-08-02T14:00:00", end: "2026-08-02T15:00:00" }],
+    tasks: [{ id: "t1", done: false, due: "2026-07-30" }],
+    projects: [{ id: "p1" }],
+  };
+  const at = (h, m = 0) => new Date(2026, 7, 2, h, m);
+
+  t("hello is a greeting", classify("hi") === "greet");
+  t("so is a wave with punctuation", classify("Hey!") === "greet");
+  t("and a time of day", classify("good morning") === "greet");
+  t("but not when a request rides along",
+    classify("hi, what does tuesday look like") === null,
+    classify("hi, what does tuesday look like"));
+
+  const greet = answer("greet", state, at(9), 0);
+  t("a greeting leads with what is coming", /Board meeting at 2:00 PM/.test(greet.text), greet.text);
+  t("and uses the name they chose", /Mr\. Newman/.test(greet.text), greet.text);
+
+  t("she knows the time", /2:30 PM/.test(answer("time", state, at(14, 30), 0).text));
+  t("and how long until the next thing",
+    /in 30 minutes/.test(answer("time", state, at(13, 30), 0).text),
+    answer("time", state, at(13, 30), 0).text);
+  t("she knows the date",
+    /Sunday, August 2, 2026/.test(answer("date", state, at(9), 0).text),
+    answer("date", state, at(9), 0).text);
+
+  t("she can say what she is", /Squirrel/.test(answer("whoami", state, at(9), 0).text));
+  t("and is straight about not being a model",
+    /not a language model/.test(answer("whatcanyoudo", state, at(9), 0).text));
+
+  const count = answer("count", state, at(9), 0).text;
+  t("she can count the work", /1 open task/.test(count) && /1 project/.test(count), count);
+  t("and flags what is late", /1 overdue/.test(count), count);
+
+  // The boundary. Guessing here would make her a bad language model instead of
+  // a good scheduler.
+  t("general knowledge is declined, not attempted",
+    classify("what is the capital of france") === "outside");
+  t("and declined honestly",
+    /outside what I know/.test(answer("outside", state, at(9), 0).text));
+
+  // Variety, so a greeting twice running is not word-for-word identical.
+  const a1 = answer("thanks", state, at(9), 0).text;
+  const a2 = answer("thanks", state, at(9), 1).text;
+  t("phrasing varies between turns", a1 !== a2, `${a1} / ${a2}`);
+
+  // "ok" has to stay a yes while a proposal is open — checked in the e2e too.
+  t("bare yes is not mistaken for small talk", classify("ok") === null, classify("ok"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

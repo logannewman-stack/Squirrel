@@ -12,6 +12,7 @@
  */
 
 import { parse, INTENTS } from "./parse.js";
+import { classify as smallTalk, answer as smallAnswer } from "./smalltalk.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
 import { describe, toLocalIso, dayKey, atLocal } from "./datetime.js";
 import { acknowledge, describeDay, addressOf, confirmLine, composeTitle } from "./voice.js";
@@ -108,6 +109,7 @@ const PEN_INTENTS = new Set([
 ]);
 
 export const EXAMPLES = [
+  "What time is it?",
   "Reschedule my 3pm Monday to Wednesday at 2",
   "Block 2 hours Thursday morning for the board deck",
   "What does Friday look like?",
@@ -159,6 +161,37 @@ export function ask(text, state, opts = {}) {
   }
 
   if (patch) applyPatch(p.slots, patch);
+
+  // Courtesies and questions about the clock, answered before anything else
+  // touches the calendar. Checked after the confirmation branch above, so
+  // "ok" while a proposal is open still means yes rather than hello — and the
+  // patterns are anchored, so "hi, what's on Tuesday?" is a Tuesday question.
+  const chat = !pending && !opts.resolvedId ? smallTalk(p.body) : null;
+  if (chat) {
+    const said = smallAnswer(chat, state, now, memory.turns?.length || 0);
+    if (said) {
+      if (!opts.memory) {
+        setMemory({
+          ...remember(memory, {
+            text, intent: `small:${chat}`, slots: carryable(p.slots),
+            // Small talk does not change what is being discussed, so the
+            // thread carries straight through it.
+            entity: lastTurn(memory, now)?.entity ?? null,
+            day: lastTurn(memory, now)?.day ?? null,
+          }, now.getTime()),
+          pending: null,
+        });
+      }
+      return {
+        text: said.text,
+        actions: [],
+        choices: null,
+        intent: `small:${chat}`,
+        ack: acknowledge(identity, chat, now),
+        variant: said.variant,
+      };
+    }
+  }
 
   // Answering a choice list is already fully specified — it must not be read
   // as a follow-up, or "cancel it" would amend the wrong thing entirely.
@@ -615,7 +648,9 @@ export function ask(text, state, opts = {}) {
 
     default:
       return reply(
-        `I didn't catch that. I handle scheduling, tasks, and projects — try something like:\n${EXAMPLES.slice(0, 3).map((e) => `• ${e}`).join("\n")}`,
+        "I didn't catch that. I handle your calendar, your tasks, and your projects — " +
+        "and I'll tell you the time, the date, or what's left to do. Try:\n" +
+        EXAMPLES.slice(0, 4).map((e) => `• ${e}`).join("\n"),
       );
   }
   }
