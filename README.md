@@ -7,40 +7,63 @@ task initiation and the focus session, not around task lists and guilt.
 
 ## Status
 
-Working v1. Projects, tasks, per-project calendars, an AI-scheduled daily list,
-and the focus timer all run. Local-first — no backend, no accounts.
+Working. Projects, a week calendar with real events, task planning that fits
+around meetings, a focus timer, insights, and a conversational assistant that
+changes your schedule directly. Local-first — no backend, no accounts.
 
 ```bash
 npm install && npm run dev
+npm run verify   # tool-layer checks, needs the dev server running
 ```
 
-## How it works
+## The assistant
 
-**Projects** hold tasks; each task carries a time estimate and an optional due
-date, and each project gets its own calendar.
+Type "reschedule my 3pm Monday to Wednesday at 2" and it does it. Under the
+hood it runs a tool-use loop: read the schedule, find the event by id, move it
+preserving duration, and report what changed. It can also create and cancel
+events, add and delegate tasks, find open gaps, plan a day, and start a focus
+session.
 
-**Today** merges every project into one list. "Plan my day" orders it — by rules
-always, and with AI when a key is set. The list is capped at 6 tasks and roughly
-4 hours: a list you can finish beats a list you avoid.
+Two rules the system prompt enforces, because they are what make it usable:
+anything referring to an existing item requires a schedule lookup first — the
+model cannot move what it has not addressed by id — and it acts rather than
+proposing, asking only when a genuine ambiguity would send it to the wrong item.
 
-**Focus** is a blank screen, a countdown, and one way out.
+Each tool call surfaces in the transcript as a one-line receipt before the
+reply, so a change is never silent.
 
-## The lockdown is partial, and that is a browser limit
+## How planning works
 
-No web API can block an app switch or a home swipe. What the focus screen does
-use: fullscreen, screen wake lock, a trapped back button, and a confirm on
-close — which removes every accidental exit. Installed to the home screen as a
-PWA there is no browser chrome either. Real lockdown needs a native app (iOS
-Screen Time API, Android kiosk mode) and is not achievable on the web.
+**Events** own a slot on the clock. **Tasks** are work with a duration and a
+deadline but no fixed hour. Planning is the job of fitting the second around the
+first: the planner ranks by priority, deadline, and age, then lays the winners
+into the actual gaps between meetings.
 
-## AI scheduling is optional
+Two deliberate constraints:
 
-Days are planned by deterministic rules with no key and no network. Adding an
-Anthropic key in settings swaps in a model that reads task titles and orders
-with more judgement; every failure path falls back to the rules. The key is
-stored in the browser and sent straight to Anthropic — fine for a personal tool
-on your own machine, not fine for a hosted multi-user product. If Squirrel gets
-a server, that call moves behind it.
+- The day is capped at 7 tasks and the lesser of 5 focused hours or the real
+  free time on the calendar. A list that cannot be finished gets abandoned.
+- The shortest task leads. The first item decides whether the list gets touched
+  at all, so it should be the cheapest real win available.
+
+## The focus lockdown is partial
+
+No web API can block an app switch or a home swipe. The focus screen stacks what
+the browser does allow — fullscreen, screen wake lock, a trapped back button, a
+confirm on close — which removes every accidental exit. Installed to the home
+screen as a PWA there is no browser chrome either. Genuine lockdown needs a
+native app (iOS Screen Time API, Android kiosk mode).
+
+## Keys and data
+
+Everything lives in this browser. No sync, no accounts; clearing site data
+erases it.
+
+The assistant needs an Anthropic key, entered in Settings and sent straight from
+the browser to the API — there is no server to hold it. Fine for a single
+operator on a trusted machine, not fine for a hosted multi-tenant product. When
+Squirrel grows a backend, `src/lib/assistant.js` is what moves behind it.
+Planning itself works with no key and no network.
 
 ## Brand
 

@@ -1,23 +1,24 @@
 /**
  * Local-first data store.
  *
- * Everything lives in localStorage under one versioned key. There is no server,
- * so reads are synchronous and writes notify subscribers directly — no async
- * layer to reason about, and the app works offline by construction.
+ * One versioned localStorage key holds everything. No server, so reads are
+ * synchronous and writes notify subscribers directly — the app works offline by
+ * construction and there is no async layer to reason about.
  *
- * The running focus session is stored as an `endsAt` timestamp rather than a
- * counter that ticks down. Browsers throttle timers in background tabs, often
- * to once a minute, so anything accumulating intervals loses time whenever the
- * app is not in front. Deriving from a wall-clock timestamp keeps the session
- * correct while backgrounded and survives a refresh or an outright close.
+ * Two time concepts, deliberately distinct:
+ *   events — anchored to a wall clock (meetings, blocks). start/end are ISO.
+ *   tasks  — work with a duration and a deadline, but no fixed hour.
+ * The planner's whole job is fitting the second around the first.
  */
 
-const KEY = "squirrel.v1";
+const KEY = "squirrel.v2";
 
 const EMPTY = {
   projects: [],
   tasks: [],
+  events: [],
   sessions: [],
+  chat: [],
   active: null,
   settings: {},
 };
@@ -30,7 +31,6 @@ function read() {
   try {
     cache = { ...EMPTY, ...(JSON.parse(localStorage.getItem(KEY)) || {}) };
   } catch {
-    // Corrupt storage must never brick the app — start clean instead.
     cache = { ...EMPTY };
   }
   return cache;
@@ -41,71 +41,57 @@ function commit(next) {
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
-    // Quota or private-browsing failures are non-fatal; state stays in memory.
+    // Quota / private-browsing failures are non-fatal; state stays in memory.
   }
   listeners.forEach((fn) => fn(next));
 }
 
-export function subscribe(fn) {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
-
-export function getState() {
-  return read();
-}
-
-function update(patch) {
-  commit({ ...read(), ...patch });
-}
+export const subscribe = (fn) => (listeners.add(fn), () => listeners.delete(fn));
+export const getState = () => read();
+const update = (patch) => commit({ ...read(), ...patch });
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
-export const todayKey = (d = new Date()) =>
+export const dayKey = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+export const PRIORITIES = ["critical", "high", "normal", "low"];
+
 // ---------------------------------------------------------------- projects
-export function addProject(name) {
-  const project = { id: uid(), name: name.trim() || "Untitled", createdAt: Date.now() };
-  update({ projects: [...read().projects, project] });
-  return project;
+export function addProject({ name, client = "", value = null, status = "active" }) {
+  const p = { id: uid(), name: name.trim() || "Untitled", client, value, status, createdAt: Date.now() };
+  update({ projects: [...read().projects, p] });
+  return p;
 }
 
-export function renameProject(id, name) {
-  update({
-    projects: read().projects.map((p) => (p.id === id ? { ...p, name } : p)),
-  });
-}
+export const updateProject = (id, patch) =>
+  update({ projects: read().projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
 
 export function deleteProject(id) {
   const s = read();
   update({
     projects: s.projects.filter((p) => p.id !== id),
     tasks: s.tasks.filter((t) => t.projectId !== id),
+    events: s.events.map((e) => (e.projectId === id ? { ...e, projectId: null } : e)),
   });
 }
 
 // ------------------------------------------------------------------- tasks
-export function addTask({ projectId, title, estimateMins = 25, due = null }) {
-  const task = {
-    id: uid(),
-    projectId,
-    title: title.trim(),
-    estimateMins,
-    due,
-    done: false,
-    doneAt: null,
-    createdAt: Date.now(),
-    scheduledFor: null,
-    order: null,
+export function addTask({
+  projectId = null, title, estimateMins = 30, due = null,
+  priority = "normal", delegatedTo = "", notes = "",
+}) {
+  const t = {
+    id: uid(), projectId, title: title.trim(), estimateMins, due, priority,
+    delegatedTo, notes, done: false, doneAt: null,
+    createdAt: Date.now(), scheduledFor: null, order: null,
   };
-  update({ tasks: [...read().tasks, task] });
-  return task;
+  update({ tasks: [...read().tasks, t] });
+  return t;
 }
 
-export function updateTask(id, patch) {
+export const updateTask = (id, patch) =>
   update({ tasks: read().tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
-}
 
 export function toggleTask(id) {
   update({
@@ -115,13 +101,10 @@ export function toggleTask(id) {
   });
 }
 
-export function deleteTask(id) {
-  update({ tasks: read().tasks.filter((t) => t.id !== id) });
-}
+export const deleteTask = (id) => update({ tasks: read().tasks.filter((t) => t.id !== id) });
 
-/** Replace today's plan: an ordered list of task ids. */
-export function applyPlan(taskIds) {
-  const day = todayKey();
+/** Replace today's plan with an ordered list of task ids. */
+export function applyPlan(taskIds, day = dayKey()) {
   const rank = new Map(taskIds.map((id, i) => [id, i]));
   update({
     tasks: read().tasks.map((t) =>
@@ -134,36 +117,59 @@ export function applyPlan(taskIds) {
   });
 }
 
-// ---------------------------------------------------------------- sessions
-export function logSession(entry) {
-  update({ sessions: [{ id: uid(), ...entry }, ...read().sessions].slice(0, 1000) });
+// ------------------------------------------------------------------ events
+export function addEvent({ title, start, end, location = "", attendees = [], projectId = null, notes = "" }) {
+  const e = { id: uid(), title: title.trim(), start, end, location, attendees, projectId, notes, createdAt: Date.now() };
+  update({ events: [...read().events, e] });
+  return e;
 }
 
-export function totals(sessions = read().sessions) {
-  return {
-    count: sessions.length,
-    focusedMs: sessions.reduce((sum, s) => sum + (s.focusedMs || 0), 0),
-  };
-}
+export const updateEvent = (id, patch) =>
+  update({ events: read().events.map((e) => (e.id === id ? { ...e, ...patch } : e)) });
+
+export const deleteEvent = (id) => update({ events: read().events.filter((e) => e.id !== id) });
+
+export const eventsOn = (day, events = read().events) =>
+  events
+    .filter((e) => dayKey(new Date(e.start)) === day)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+// ---------------------------------------------------------------- sessions
+export const logSession = (entry) =>
+  update({ sessions: [{ id: uid(), ...entry }, ...read().sessions].slice(0, 2000) });
+
+export const totals = (sessions = read().sessions) => ({
+  count: sessions.length,
+  focusedMs: sessions.reduce((s, x) => s + (x.focusedMs || 0), 0),
+});
+
+// -------------------------------------------------------------------- chat
+export const appendChat = (msg) =>
+  update({ chat: [...read().chat, { id: uid(), at: Date.now(), ...msg }].slice(-200) });
+
+export const clearChat = () => update({ chat: [] });
 
 // ------------------------------------------------------------ focus session
-export function startFocus({ taskId = null, label = "", plannedMs }) {
+/**
+ * The running session stores an `endsAt` timestamp rather than a counter that
+ * ticks down. Browsers throttle background-tab timers to as little as once a
+ * minute, so anything accumulating intervals loses time whenever the app is not
+ * in front. Wall-clock derivation stays correct backgrounded and across a
+ * refresh or an outright close.
+ */
+export function startFocus({ taskId = null, eventId = null, label = "", plannedMs }) {
   const now = Date.now();
-  update({
-    active: { taskId, label, plannedMs, startedAt: now, endsAt: now + plannedMs, remainingMs: plannedMs },
-  });
+  update({ active: { taskId, eventId, label, plannedMs, startedAt: now, endsAt: now + plannedMs, remainingMs: plannedMs } });
 }
 
 export function pauseFocus(now = Date.now()) {
   const a = read().active;
-  if (!a || a.endsAt == null) return;
-  update({ active: { ...a, endsAt: null, remainingMs: remainingOf(a, now) } });
+  if (a?.endsAt != null) update({ active: { ...a, endsAt: null, remainingMs: remainingOf(a, now) } });
 }
 
 export function resumeFocus(now = Date.now()) {
   const a = read().active;
-  if (!a || a.endsAt != null) return;
-  update({ active: { ...a, endsAt: now + a.remainingMs } });
+  if (a && a.endsAt == null) update({ active: { ...a, endsAt: now + a.remainingMs } });
 }
 
 export function endFocus(now = Date.now()) {
@@ -172,30 +178,21 @@ export function endFocus(now = Date.now()) {
   const focusedMs = focusedOf(a, now);
   const task = read().tasks.find((t) => t.id === a.taskId);
   logSession({
-    taskId: a.taskId,
-    projectId: task?.projectId ?? null,
-    label: a.label || task?.title || "",
-    plannedMs: a.plannedMs,
-    focusedMs,
-    endedAt: now,
+    taskId: a.taskId, projectId: task?.projectId ?? null,
+    label: a.label || task?.title || "", plannedMs: a.plannedMs, focusedMs, endedAt: now,
   });
   update({ active: null });
   return { ...a, focusedMs };
 }
 
 /** Milliseconds left, derived from the clock. Never negative. */
-export function remainingOf(a, now = Date.now()) {
-  if (!a) return 0;
-  return Math.max(0, a.endsAt == null ? a.remainingMs : a.endsAt - now);
-}
+export const remainingOf = (a, now = Date.now()) =>
+  !a ? 0 : Math.max(0, a.endsAt == null ? a.remainingMs : a.endsAt - now);
 
-/** Time actually spent focused — excludes any paused stretches. */
-export function focusedOf(a, now = Date.now()) {
-  if (!a) return 0;
-  return Math.max(0, a.plannedMs - remainingOf(a, now));
-}
+/** Time actually spent focused — excludes paused stretches. */
+export const focusedOf = (a, now = Date.now()) =>
+  !a ? 0 : Math.max(0, a.plannedMs - remainingOf(a, now));
 
 // ---------------------------------------------------------------- settings
-export function setSetting(key, value) {
+export const setSetting = (key, value) =>
   update({ settings: { ...read().settings, [key]: value } });
-}

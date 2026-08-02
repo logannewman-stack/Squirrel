@@ -18,11 +18,11 @@ export default function Settings({ state, onBack }) {
       <h1 className="mb-8 mt-4 text-3xl font-semibold tracking-tight">Settings</h1>
 
       <section className="mb-10">
-        <h2 className="mb-2 font-medium">AI scheduling</h2>
+        <h2 className="mb-2 font-medium">Assistant</h2>
         <p className="mb-4 text-sm text-[var(--muted)]">
-          Optional. Without a key, days are planned by rules — overdue first, a short task
-          up front, capped at what fits. A key adds a model that reads your task titles
-          and orders them with more judgement.
+          Required for the assistant. Planning also works without one — rules order the
+          day by deadline, priority, and what fits between meetings. A key adds the
+          conversational layer that can read your calendar and act on it.
         </p>
         <input
           type="password"
@@ -44,7 +44,7 @@ export default function Settings({ state, onBack }) {
       <section className="mb-10">
         <h2 className="mb-2 font-medium">Your data</h2>
         <p className="text-sm text-[var(--muted)]">
-          {state.projects.length} projects · {state.tasks.length} tasks · {t.count} sessions ·{" "}
+          {state.projects.length} projects · {state.tasks.length} tasks · {state.events.length} events · {t.count} sessions ·{" "}
           {duration(t.focusedMs)} focused.
         </p>
         <p className="mt-2 text-xs text-[var(--muted)]">
@@ -54,7 +54,7 @@ export default function Settings({ state, onBack }) {
         <button
           onClick={() => {
             if (confirm("Erase all projects, tasks, and sessions? This cannot be undone.")) {
-              localStorage.removeItem("squirrel.v1");
+              localStorage.removeItem("squirrel.v2");
               location.reload();
             }
           }}

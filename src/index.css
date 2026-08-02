@@ -2,23 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Monochrome by design: the audience's scarce resource is attention, so the
-   interface spends none of it on colour. Hierarchy and motion carry meaning. */
+/* Monochrome by design. The audience's scarce resource is attention, so the
+   interface spends none of it on decoration — hierarchy, density, and rules
+   carry meaning instead of colour. */
 :root {
   --paper: #ffffff;
-  --ink: #000000;
-  --muted: #6b6b6b;
-  --line: #e6e6e6;
-  --hover: #f4f4f4;
+  --raised: #fafafa;
+  --ink: #0a0a0a;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+  --line: #e4e4e7;
+  --hairline: #f0f0f1;
+  --hover: #f4f4f5;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #000000;
-    --ink: #ffffff;
-    --muted: #8a8a8a;
-    --line: #232323;
-    --hover: #141414;
+    --paper: #08080a;
+    --raised: #101013;
+    --ink: #fafafa;
+    --muted: #8b8b93;
+    --faint: #5f5f68;
+    --line: #24242a;
+    --hairline: #17171b;
+    --hover: #16161a;
   }
 }
 
@@ -27,16 +34,34 @@ html { -webkit-text-size-adjust: 100%; }
 body {
   background: var(--paper);
   color: var(--ink);
+  font-feature-settings: "cv02", "cv03", "cv04", "tnum";
   -webkit-font-smoothing: antialiased;
-  overscroll-behavior: none;
-}
-
-/* The mark is authored black; invert it rather than shipping a second file. */
-@media (prefers-color-scheme: dark) {
-  .logo { filter: invert(1); }
+  overscroll-behavior-y: none;
 }
 
 ::selection { background: var(--ink); color: var(--paper); }
+
+/* Micro-label: the small uppercase rule-setter above a section. */
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.hairline { border-color: var(--hairline); }
+
+input[type="date"], input[type="time"] { color-scheme: light; }
+@media (prefers-color-scheme: dark) {
+  input[type="date"], input[type="time"] { color-scheme: dark; }
+}
+
+/* The mark is authored black; invert rather than shipping a second file. */
+@media (prefers-color-scheme: dark) { .logo { filter: invert(1); } }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 3px solid var(--paper); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }

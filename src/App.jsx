@@ -1,9 +1,14 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Today from "./components/Today";
+import WeekCalendar from "./components/WeekCalendar";
 import Projects from "./components/Projects";
 import ProjectDetail from "./components/ProjectDetail";
+import Insights from "./components/Insights";
+import Assistant from "./components/Assistant";
 import Settings from "./components/Settings";
 import FocusScreen from "./components/FocusScreen";
+import EventDialog from "./components/EventDialog";
+import CommandPalette from "./components/CommandPalette";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
   remainingOf, toggleTask,
@@ -11,34 +16,38 @@ import {
 import { duration } from "./lib/format";
 
 /**
- * Closing copy. Every branch is neutral or warm — nothing implies the session
- * should have been longer. A short session is a success: the product's job is
- * to make starting cheap, and punishing a two-minute attempt is the fastest way
- * to make the next one not happen.
+ * Closing copy. Every branch is neutral — nothing implies the session should
+ * have been longer. Punishing a short session is the fastest way to make the
+ * next one not happen.
  */
 function closingLine(focusedMs, plannedMs) {
-  if (focusedMs >= plannedMs) return "You did the whole thing.";
-  if (focusedMs >= plannedMs * 0.6) return "That's a solid stretch.";
+  if (focusedMs >= plannedMs) return "Session complete.";
+  if (focusedMs >= plannedMs * 0.6) return "Solid stretch.";
   if (focusedMs >= plannedMs * 0.25) return "That counts.";
-  if (focusedMs >= 60000) return "Short one. Still counts.";
-  return "Starting was the hard part.";
+  return "Logged.";
 }
 
-const LENGTHS = [
-  { ms: 5 * 60000, label: "Just 5" },
-  { ms: 15 * 60000, label: "15m" },
-  { ms: 25 * 60000, label: "25m" },
-  { ms: 45 * 60000, label: "45m" },
+const LENGTHS = [15, 25, 45, 90];
+
+const TABS = [
+  ["today", "Today", "M4 7h16M4 12h16M4 17h10"],
+  ["calendar", "Calendar", "M4 8h16M4 8a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V8zM9 4v4M15 4v4"],
+  ["projects", "Projects", "M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"],
+  ["insights", "Insights", "M5 19V11M10 19V5M15 19v-6M20 19v-9"],
+  ["assistant", "Assistant", "M5 6h14v9H9l-4 4V6z"],
 ];
 
 export default function App() {
   const state = useSyncExternalStore(subscribe, getState);
   const [view, setView] = useState({ name: "today" });
-  const [pending, setPending] = useState(null); // task awaiting a length choice
+  const [pending, setPending] = useState(null);
   const [done, setDone] = useState(null);
+  const [newEvent, setNewEvent] = useState(false);
+  const [palette, setPalette] = useState(false);
   const [, force] = useState(0);
 
   const active = state.active;
+  const remaining = remainingOf(active);
 
   // Re-render on a fixed cadence so the countdown moves. The timestamp in the
   // store is the source of truth — this only drives repaints, so a throttled
@@ -49,18 +58,27 @@ export default function App() {
     return () => clearInterval(id);
   }, [active]);
 
-  // Auto-finish when the clock runs out.
-  const remaining = remainingOf(active);
   useEffect(() => {
     if (active && active.endsAt != null && remaining <= 0) {
-      const finished = endFocus();
-      if (finished) setDone(finished);
+      const f = endFocus();
+      if (f) setDone(f);
     }
   }, [active, remaining]);
 
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette((p) => !p);
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+
   function finish() {
-    const finished = endFocus();
-    if (finished) setDone(finished);
+    const f = endFocus();
+    if (f) setDone(f);
   }
 
   // ------------------------------------------------------------- overlays
@@ -80,25 +98,22 @@ export default function App() {
   if (done) {
     const task = state.tasks.find((t) => t.id === done.taskId);
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6 text-center">
-        <div className="space-y-3">
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {closingLine(done.focusedMs, done.plannedMs)}
-          </h1>
-          <p className="text-lg text-[var(--muted)]">
-            {duration(done.focusedMs)} focused{done.label ? ` on ${done.label}` : ""}.
-          </p>
-        </div>
-        <div className="flex w-full max-w-sm flex-col gap-3">
+      <Centered>
+        <p className="label">{closingLine(done.focusedMs, done.plannedMs)}</p>
+        <h1 className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">
+          {duration(done.focusedMs)}
+        </h1>
+        {done.label && <p className="mt-1 text-sm text-[var(--muted)]">{done.label}</p>}
+        <div className="mt-8 flex w-full max-w-xs flex-col gap-2">
           {task && !task.done && (
             <button
               onClick={() => {
                 toggleTask(task.id);
                 setDone(null);
               }}
-              className="w-full rounded-full bg-[var(--ink)] py-4 text-base font-medium text-[var(--paper)]"
+              className="rounded-md bg-[var(--ink)] py-3 text-sm font-medium text-[var(--paper)]"
             >
-              Mark it done
+              Mark done
             </button>
           )}
           <button
@@ -106,55 +121,51 @@ export default function App() {
               setPending(task || { title: done.label });
               setDone(null);
             }}
-            className="w-full rounded-full border border-[var(--line)] py-4 text-base
-                       transition-colors hover:border-[var(--ink)]"
+            className="rounded-md border border-[var(--line)] py-3 text-sm transition-colors hover:border-[var(--ink)]"
           >
-            Go again
+            Another session
           </button>
-          <button
-            onClick={() => setDone(null)}
-            className="py-2 text-sm text-[var(--muted)] underline-offset-4 hover:underline"
-          >
-            Done for now
+          <button onClick={() => setDone(null)} className="py-2 text-xs text-[var(--muted)]">
+            Back to work
           </button>
         </div>
-      </div>
+      </Centered>
     );
   }
 
   if (pending) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6">
-        <p className="max-w-md text-center text-xl">{pending.title}</p>
-        <div className="flex flex-wrap justify-center gap-2">
-          {LENGTHS.map((l) => (
+      <Centered>
+        <p className="label">Focus on</p>
+        <p className="mt-2 max-w-md text-center text-xl">{pending.title}</p>
+        <div className="mt-8 flex flex-wrap justify-center gap-2">
+          {LENGTHS.map((m) => (
             <button
-              key={l.ms}
+              key={m}
               onClick={() => {
-                startFocus({ taskId: pending.id ?? null, label: pending.title, plannedMs: l.ms });
+                startFocus({ taskId: pending.id ?? null, label: pending.title, plannedMs: m * 60000 });
                 setPending(null);
               }}
-              className="rounded-full border border-[var(--line)] px-6 py-3
+              className="rounded-md border border-[var(--line)] px-6 py-3 text-sm tabular-nums
                          transition-colors hover:border-[var(--ink)]"
             >
-              {l.label}
+              {m >= 60 ? `${m / 60}h` : `${m}m`}
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setPending(null)}
-          className="text-sm text-[var(--muted)] underline-offset-4 hover:underline"
-        >
+        <button onClick={() => setPending(null)} className="mt-8 text-xs text-[var(--muted)]">
           Cancel
         </button>
-      </div>
+      </Centered>
     );
   }
 
   // ---------------------------------------------------------------- views
   const body =
     view.name === "today" ? (
-      <Today state={state} onFocus={setPending} onOpenSettings={() => setView({ name: "settings" })} />
+      <Today state={state} onFocus={setPending} onNewEvent={() => setNewEvent(true)} />
+    ) : view.name === "calendar" ? (
+      <WeekCalendar state={state} onNewEvent={() => setNewEvent(true)} />
     ) : view.name === "projects" ? (
       <Projects state={state} onOpen={(id) => setView({ name: "project", id })} />
     ) : view.name === "project" ? (
@@ -164,35 +175,75 @@ export default function App() {
         onBack={() => setView({ name: "projects" })}
         onFocus={setPending}
       />
+    ) : view.name === "insights" ? (
+      <Insights state={state} />
+    ) : view.name === "assistant" ? (
+      <Assistant state={state} />
     ) : (
       <Settings state={state} onBack={() => setView({ name: "today" })} />
     );
 
-  const tab = (name, label) => (
-    <button
-      onClick={() => setView({ name })}
-      aria-current={view.name === name || (name === "projects" && view.name === "project")}
-      className={`px-4 py-2 text-sm transition-colors ${
-        view.name === name || (name === "projects" && view.name === "project")
-          ? "text-[var(--ink)]"
-          : "text-[var(--muted)] hover:text-[var(--ink)]"
-      }`}
-    >
-      {label}
-    </button>
-  );
+  const isActive = (n) => view.name === n || (n === "projects" && view.name === "project");
+  const fullHeight = view.name === "calendar" || view.name === "assistant";
 
   return (
-    <div className="min-h-dvh pb-24">
-      {body}
-      <nav
-        className="fixed inset-x-0 bottom-0 flex items-center justify-center gap-2 border-t
-                   border-[var(--line)] bg-[var(--paper)] py-3"
-      >
-        {tab("today", "Today")}
-        {tab("projects", "Projects")}
-        {tab("settings", "Settings")}
+    <div className="flex h-dvh flex-col">
+      <div className={`flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}>
+        {body}
+      </div>
+
+      <nav className="flex shrink-0 items-center justify-center gap-1 border-t border-[var(--line)]
+                      bg-[var(--paper)] px-4 py-2">
+        {TABS.map(([name, label, d]) => (
+          <button
+            key={name}
+            onClick={() => setView({ name })}
+            aria-current={isActive(name)}
+            className={`flex min-w-[64px] flex-col items-center gap-1 rounded-md px-3 py-1.5
+                        transition-colors ${
+                          isActive(name) ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
+                        }`}
+          >
+            <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
+              <path d={d} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="text-[10px] font-medium tracking-wide">{label}</span>
+          </button>
+        ))}
+        <span className="mx-1 h-6 w-px bg-[var(--line)]" />
+        <button
+          onClick={() => setView({ name: "settings" })}
+          aria-current={view.name === "settings"}
+          className={`flex min-w-[64px] flex-col items-center gap-1 rounded-md px-3 py-1.5 ${
+            view.name === "settings" ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
+          }`}
+        >
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" strokeLinecap="round" />
+          </svg>
+          <span className="text-[10px] font-medium tracking-wide">Settings</span>
+        </button>
       </nav>
+
+      {newEvent && <EventDialog onClose={() => setNewEvent(false)} />}
+      {palette && (
+        <CommandPalette
+          state={state}
+          onClose={() => setPalette(false)}
+          onNavigate={setView}
+          onFocusTask={setPending}
+          onNewEvent={() => setNewEvent(true)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Centered({ children }) {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
+      {children}
     </div>
   );
 }
