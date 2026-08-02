@@ -227,6 +227,44 @@ const convo = await p.evaluate(async () => {
   store.clearChat();
   t("clearing the chat clears the memory", store.getState().memory.turns.length === 0);
 
+  // ---- sync bookkeeping ----
+  // None of this is visible in the UI, and all of it decides whether a change
+  // reaches the other device.
+  const ev = store.addEvent({ title: "Sync check", start: iso(2026, 8, 12, 9), end: iso(2026, 8, 12, 10) });
+  t("a new record gets a server-shaped id",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ev.id), ev.id);
+  t("and is stamped as unsent", ev.dirty === true && ev.updatedAt > 0, JSON.stringify(ev.updatedAt));
+
+  const before = M().events.find((e) => e.id === ev.id).updatedAt;
+  await new Promise((r) => setTimeout(r, 5));
+  store.updateEvent(ev.id, { title: "Sync check 2" });
+  t("an edit moves the stamp forward",
+    M().events.find((e) => e.id === ev.id).updatedAt > before);
+
+  store.markSynced([{ kind: "events", id: ev.id }]);
+  t("acknowledging clears the flag", M().events.find((e) => e.id === ev.id).dirty === false);
+
+  await new Promise((r) => setTimeout(r, 5));
+  store.updateEvent(ev.id, { title: "Edited mid-flight" });
+  store.markSynced([{ kind: "events", id: ev.id }], Date.now() - 1000);
+  t("an edit made during a push stays unsent",
+    M().events.find((e) => e.id === ev.id).dirty === true);
+
+  store.deleteEvent(ev.id);
+  t("a delete removes it from view", !M().events.some((e) => e.id === ev.id));
+  t("and leaves a tombstone",
+    M().tombstones.some((x) => x.kind === "events" && x.id === ev.id),
+    JSON.stringify(M().tombstones));
+
+  // A project taking its tasks with it has to mark each one, or the other
+  // device's next push brings them all back.
+  const proj = store.addProject({ name: "Doomed" });
+  const kid = store.addTask({ projectId: proj.id, title: "Goes with it" });
+  store.deleteProject(proj.id);
+  t("cascaded tasks get their own tombstones",
+    M().tombstones.some((x) => x.kind === "tasks" && x.id === kid.id),
+    JSON.stringify(M().tombstones.map((x) => x.kind)));
+
   return out;
 });
 

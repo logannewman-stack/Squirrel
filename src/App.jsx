@@ -12,8 +12,10 @@ import Identity from "./components/Identity";
 import CommandPalette from "./components/CommandPalette";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
-  remainingOf, toggleTask,
+  remainingOf, toggleTask, setSetting,
 } from "./lib/store";
+import { client, configured } from "./lib/supabase";
+import { startSync, stopSync, nudge } from "./lib/sync";
 import { duration } from "./lib/format";
 
 /**
@@ -65,6 +67,31 @@ export default function App() {
       if (f) setDone(f);
     }
   }, [active, remaining]);
+
+  // Sync follows the session: nothing runs signed out, and signing out stops
+  // it immediately rather than at the next poll.
+  useEffect(() => {
+    if (!configured) return;
+    const apply = (session) => {
+      setSetting("email", session?.user?.email || null);
+      if (session) startSync();
+      else stopSync();
+    };
+    let unsubscribe = () => {};
+    client().then(async (supabase) => {
+      const { data } = await supabase.auth.getSession();
+      apply(data.session);
+      const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => apply(session));
+      unsubscribe = () => sub.subscription.unsubscribe();
+    });
+    return () => {
+      unsubscribe();
+      stopSync();
+    };
+  }, []);
+
+  // Any local write is worth sending; nudge coalesces the burst from typing.
+  useEffect(() => nudge(), [state.projects, state.tasks, state.events]);
 
   useEffect(() => {
     const onKey = (e) => {

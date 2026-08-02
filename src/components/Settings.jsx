@@ -1,5 +1,6 @@
 import { setSetting, totals } from "../lib/store";
 import Identity from "./Identity";
+import Account from "./Account";
 import { duration } from "../lib/format";
 
 export default function Settings({ state, onBack }) {
@@ -16,6 +17,11 @@ export default function Settings({ state, onBack }) {
       </button>
 
       <h1 className="mb-8 mt-4 text-3xl font-semibold tracking-tight">Settings</h1>
+
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">Account</h2>
+        <Account email={state.settings?.email || null} />
+      </section>
 
       <section className="mb-10">
         <h2 className="mb-2 font-medium">How I address you</h2>
@@ -66,8 +72,9 @@ export default function Settings({ state, onBack }) {
           {duration(t.focusedMs)} focused.
         </p>
         <p className="mt-2 text-xs text-[var(--muted)]">
-          All of it lives in this browser. Clearing site data erases it, and it does not sync
-          between devices.
+          {state.settings?.email
+            ? "Synced to your account, and kept on this device so it works offline."
+            : "All of it lives in this browser. Clearing site data erases it, and it does not sync between devices."}
         </p>
         <button
           onClick={() => {

@@ -71,7 +71,7 @@ Two consequences worth deciding on now:
 
 ```bash
 supabase link --project-ref <ref>
-supabase db push        # applies supabase/migrations/0001_init.sql
+supabase db push        # applies everything in supabase/migrations/
 ```
 
 Enable the auth providers you want. **Sign in with Apple is mandatory** if you
@@ -81,6 +81,55 @@ The schema puts plan limits in database triggers, not the client, because the
 client talks to Postgres directly — anything it enforces is a suggestion. RLS is
 the only boundary between one customer's rows and another's, so review
 `0001_init.sql` before trusting it with real data.
+
+Verify the whole schema locally before pushing it — plan limits, sync stamps,
+tombstones, and the column grants that keep calendar refresh tokens out of the
+browser are all database behaviour, and none of it is observable from the
+client:
+
+```bash
+npm run test:schema     # needs a local Postgres on :5433
+```
+
+## Calendar sync — Google is not like Apple
+
+This is the one place where what the two platforms allow differs enough to
+change the product, so it is worth being blunt about before anything is built
+around it.
+
+**Google can be synced from a server.** OAuth gives a refresh token, the
+Calendar API takes writes from anywhere, `syncToken` makes each pull
+incremental, and a watch channel pushes remote changes to a webhook. Once a
+user connects their account, sync runs whether or not the app is open, on any
+device, forever. This is the straightforward half.
+
+**Apple cannot.** There is no server-side Apple Calendar API — not a private
+one, not a partner one, none. Apple offers exactly two routes in:
+
+| Route | Direction | Needs | Reality |
+| --- | --- | --- | --- |
+| **EventKit** | read + write | the native iOS/Mac app, calendar permission | The supported way. Writes to the device's calendar database, which Apple then syncs to iCloud itself. Reaches *every* calendar on the device, including their work Exchange and any Google account they added to iOS. Only runs while the app does. |
+| **ICS subscription** | read-only | nothing | We publish a secret feed URL; they subscribe in Calendar. Zero install, but Apple refreshes it on its own schedule — often hours — and nothing can be written back. |
+| ~~iCloud CalDAV~~ | read + write | the user's app-specific password | Undocumented, unsupported, breaks without notice, and asking an executive to paste an iCloud credential into a planner is not a trust conversation worth having. Do not. |
+
+So "it goes to both their Google and Apple Calendar" is honest with one
+asterisk: Google goes out from the server immediately; Apple goes out from
+their own iPhone or Mac the next time the app runs. In practice, for someone
+carrying the app on their phone, the difference is seconds. It matters for a
+user who only ever uses the website — for them Apple is the read-only feed, or
+nothing.
+
+The consequence for planning: **Apple Calendar sync ships with the native app,
+not before it.** The Capacitor wrap is on the roadmap anyway for the App Store,
+and this rides along with it.
+
+### Loop prevention
+
+Both directions write, so both can echo. `event_links` maps our event id to the
+remote id per calendar, with the remote `etag` and which side wrote last. A pull
+that finds an etag it already recorded is our own write coming back and is
+dropped. Without this, one booking becomes an infinite pair of duplicates —
+which is the single most common way calendar integrations go wrong.
 
 ### Vercel
 
