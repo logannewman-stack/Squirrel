@@ -8,6 +8,7 @@ import Assistant from "./components/Assistant";
 import Settings from "./components/Settings";
 import FocusScreen from "./components/FocusScreen";
 import EventDialog from "./components/EventDialog";
+import Identity from "./components/Identity";
 import CommandPalette from "./components/CommandPalette";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
@@ -82,6 +83,16 @@ export default function App() {
   }
 
   // ------------------------------------------------------------- overlays
+  // Asked once, before anything else — the assistant greets by name and has
+  // nothing to greet with until this is answered.
+  if (!state.settings?.identity) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center px-6">
+        <Identity value={{}} onDone={() => setView({ name: "today" })} />
+      </div>
+    );
+  }
+
   if (active) {
     return (
       <FocusScreen

@@ -63,6 +63,27 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 3px solid var(--paper); }
 
+/* Assistant thinking animation. Cells light in sequence as if the calendar is
+   being read; the pen stroke draws itself. */
+@keyframes sq-cell-scan {
+  0%, 100% { opacity: 0.12; }
+  40%      { opacity: 1; }
+}
+.sq-cell { animation: sq-cell-scan 1.6s ease-in-out infinite; }
+
+@keyframes sq-draw {
+  0%   { stroke-dashoffset: 120; }
+  60%  { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: 0; opacity: 0.25; }
+}
+.sq-draw { stroke-dasharray: 120; animation: sq-draw 1.7s ease-in-out infinite; }
+
+@keyframes sq-nib { 0%,100% { opacity: 0.2; } 50% { opacity: 1; } }
+.sq-nib { animation: sq-nib 1.7s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  /* Hold the thinking art still rather than strobing it. */
+  .sq-cell, .sq-draw, .sq-nib { animation: none !important; opacity: 0.55; }
+  .sq-draw { stroke-dashoffset: 0; }
 }

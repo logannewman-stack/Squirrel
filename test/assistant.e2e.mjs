@@ -7,7 +7,14 @@
 import { chromium } from "playwright";
 
 const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
-const p = await b.newPage({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
+// Deliberately not UTC. Every date the app stores is a local wall-clock string,
+// so a UTC test box would let a toISOString() slip through unnoticed — the
+// offset is zero and the bug has nothing to show.
+const p = await b.newPage({
+  viewport: { width: 1100, height: 900 },
+  deviceScaleFactor: 2,
+  timezoneId: "America/New_York",
+});
 const errs = [];
 p.on("pageerror", (e) => errs.push(e.message));
 
@@ -20,6 +27,7 @@ const results = await p.evaluate(async () => {
   const t = (name, ok, detail) => out.push([name, !!ok, detail || ""]);
 
   localStorage.removeItem("squirrel.v2");
+  store.setSetting("identity", { style: "formal", honorific: "Mr.", lastName: "Newman" });
 
   // Fixed clock so weekday maths is deterministic: Sunday 2 Aug 2026, 10:00.
   const NOW = new Date(2026, 7, 2, 10, 0, 0);
@@ -93,12 +101,80 @@ const results = await p.evaluate(async () => {
   r = ask("move the exec staff meeting", S(), { now: NOW });
   t("asks when, instead of inventing a time", /when/i.test(r.text), r.text);
 
+  // ---- voice ----
+  store.addEvent({
+    title: "Meeting with Bob", start: iso(2026, 8, 4, 10), end: iso(2026, 8, 4, 11),
+    attendees: [{ name: "Bob" }], notes: "the Q3 pipeline",
+  });
+  store.addEvent({
+    title: "Meeting with John", start: iso(2026, 8, 4, 14), end: iso(2026, 8, 4, 15),
+    attendees: [{ name: "John" }], notes: "the Series B financials",
+  });
+  r = ask("what do i have this tuesday", S(), { now: NOW });
+  t("acknowledgement greets by honorific and surname",
+    /Good (morning|afternoon|evening), Mr\. Newman/.test(r.ack), r.ack);
+  t("answer counts the meetings in words", /two meetings/i.test(r.text), r.text);
+  t("answer names who each meeting is with",
+    /with Bob/.test(r.text) && /with John/.test(r.text), r.text);
+  t("answer states what each is about",
+    /about the Q3 pipeline/.test(r.text) && /about the Series B financials/.test(r.text), r.text);
+  t("answer does not repeat the greeting", !/Good morning/i.test(r.text), r.text);
+  t("lookups use the calendar animation", r.variant === "calendar", r.variant);
+
+  r = ask("schedule a call with Sarah about the term sheet friday at 10", S(), { now: NOW });
+  const made = S().events.find((e) => /Sarah/.test(e.title) || (e.attendees || []).some((a) => a.name === "Sarah"));
+  t("attendee captured on create", !!made, S().events.map((e) => e.title).join("|"));
+  t("subject captured on create", made?.notes === "the term sheet", made?.notes);
+  t("changes use the pen animation", r.variant === "pen", r.variant);
+
   localStorage.removeItem("squirrel.v2");
   return out;
 });
 
+/**
+ * Second pass, through the actual UI rather than the store: first-run identity,
+ * an event captured in the dialog, then the assistant describing it. This is
+ * the path that broke silently before — the assistant could say "with Bob about
+ * X" but nothing in the UI could record either fact.
+ */
+await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
+await p.reload({ waitUntil: "networkidle" });
+
+await p.getByRole("button", { name: "Mr." }).click();
+await p.getByPlaceholder("Surname").fill("Newman");
+await p.getByRole("button", { name: "Continue" }).click();
+
+await p.getByRole("button", { name: "New event" }).click();
+await p.getByPlaceholder("Title").fill("Partner sync");
+await p.getByPlaceholder(/^With/).fill("Bob, John");
+await p.getByPlaceholder(/^About/).fill("the Q3 pipeline");
+await p.getByRole("button", { name: "Add" }).click();
+
+await p.getByRole("button", { name: "Assistant" }).click();
+await p.getByPlaceholder("What do I have Tuesday?").fill("what do i have today");
+await p.getByRole("button", { name: "Send" }).click();
+
+const ui = [];
+ui.push(["thinking beat is visible before the answer",
+  await p.locator("svg .sq-cell").first().isVisible().catch(() => false)]);
+
+await p.waitForTimeout(1400);
+const answer = await p.locator("p.whitespace-pre-line").last().textContent();
+ui.push(["dialog attendees reach the answer", /with Bob and John/.test(answer), answer]);
+ui.push(["dialog subject reaches the answer", /about the Q3 pipeline/.test(answer), answer]);
+
+// A 60-minute event must not end hours away from where it started.
+const span = await p.evaluate(async () => {
+  const { getState } = await import("/src/lib/store.js");
+  const e = getState().events.find((x) => x.title === "Partner sync");
+  return (new Date(e.end) - new Date(e.start)) / 60000;
+});
+ui.push(["derived end time stays in local time", span === 60, `${span} mins`]);
+
+await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
+
 let failed = 0;
-for (const [name, ok, detail] of results) {
+for (const [name, ok, detail] of [...results, ...ui]) {
   if (!ok) failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? `  → ${detail}` : ""}`);
 }

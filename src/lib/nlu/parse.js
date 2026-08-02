@@ -60,6 +60,9 @@ function stripTemporal(text) {
     .replace(/\b(?:on|at|for|by|due)?\s*\b(?:next|this|coming)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?\b/gi, " ")
     .replace(/\b(?:today|tomorrow|tonight|yesterday|tmrw)\b/gi, " ")
     .replace(/\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/gi, " ")
+    // Bare "at 10" with no meridiem — otherwise it survives into a title or
+    // subject as trailing noise.
+    .replace(/\bat\s+\d{1,2}(?::\d{2})?\b/gi, " ")
     .replace(/\b\d{1,2}:\d{2}\b/g, " ")
     .replace(/\b\d+(?:\.\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b/gi, " ")
     .replace(/\b(?:half an hour|an hour|a hour)\b/gi, " ")
@@ -73,6 +76,28 @@ function stripTemporal(text) {
 }
 
 /**
+ * "with Bob and Sarah" → the people. Capitalisation is the signal, since a
+ * lowercase word after "with" is far more likely to be "with the team" than a
+ * name we should put on an invite.
+ */
+function extractPeople(text) {
+  const m = text.match(/\bwith\s+([A-Z][\w'-]*(?:\s+(?:and\s+|,\s*)[A-Z][\w'-]*)*)/);
+  if (!m) return [];
+  return m[1]
+    .split(/\s+and\s+|,\s*/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/** "about the Q3 pipeline" / "re: financials" → what the meeting covers. */
+function extractSubject(text) {
+  const m = text.match(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+(.+)$/i);
+  if (!m) return null;
+  const cleaned = stripTemporal(m[1]).replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "").trim();
+  return cleaned || null;
+}
+
+/**
  * Produce the title a human would have typed.
  *
  * Everything the parser consumed as a slot has to come back out of the title,
@@ -81,7 +106,10 @@ function stripTemporal(text) {
  * punctuation go too: "for the board deck" should read "Board deck".
  */
 function cleanTitle(text) {
-  let t = stripTemporal(stripVerbs(text));
+  let t = stripVerbs(text)
+    .replace(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+.+$/i, " ")
+    .replace(/\bwith\s+[A-Z][\w'-]*(?:\s+(?:and\s+|,\s*)[A-Z][\w'-]*)*/g, " ");
+  t = stripTemporal(t);
   t = t.replace(/\b(?:high priority|low priority|critical|urgent|asap|drop everything)\b/gi, " ");
   t = t.replace(/\s{2,}/g, " ").trim();
   // Drop a leading connector and any article behind it: "for the board deck"
@@ -147,6 +175,8 @@ export function parse(text, now = new Date()) {
       targetPhrase,
       // Title with verbs, temporal phrases, and priority wording removed.
       title: cleanTitle(raw),
+      people: extractPeople(raw),
+      subject: extractSubject(raw),
       // "due friday" marks a deadline rather than a start time.
       isDue: /\bdue\b|\bby\b/.test(s),
       dateOnly: parseDate(raw, now)?.date ?? null,

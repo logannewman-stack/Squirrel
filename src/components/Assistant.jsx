@@ -1,41 +1,59 @@
 import { useEffect, useRef, useState } from "react";
 import { ask, resolveChoice, EXAMPLES } from "../lib/nlu";
+import { addressOf } from "../lib/nlu/voice";
 import { appendChat, clearChat } from "../lib/store";
+import Thinking from "./Thinking";
 
 /**
  * The assistant runs entirely in the browser — no API call, no per-message
- * cost, works offline, answers instantly. Ambiguity becomes a choice list
- * rather than a guess, because moving the wrong meeting is far worse than one
- * extra tap.
+ * cost, works offline, answers instantly.
+ *
+ * "Instantly" is the problem the pause solves. An answer that appears the
+ * moment you hit enter reads as a form submitting; a brief, visible beat reads
+ * as someone checking. The lookup is already done — this is presentation, and
+ * it is short enough not to waste anyone's time.
  */
+const THINK_MS = { calendar: 900, pen: 650 };
+
 export default function Assistant({ state }) {
   const [input, setInput] = useState("");
+  const [thinking, setThinking] = useState(null);
   const [pendingChoice, setPendingChoice] = useState(null);
   const scroller = useRef(null);
+  const timer = useRef(null);
   const chat = state.chat;
+  const who = addressOf(state.settings?.identity || {});
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [chat.length, pendingChoice]);
+  }, [chat.length, thinking, pendingChoice]);
+
+  // A pending timeout that fires after unmount would append to a dead view.
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  function present(res) {
+    setThinking({ line: res.ack, variant: res.variant });
+    timer.current = setTimeout(() => {
+      setThinking(null);
+      appendChat({ role: "assistant", text: res.text, actions: res.actions });
+      if (res.choices) setPendingChoice(res.choices);
+    }, THINK_MS[res.variant] ?? 800);
+  }
 
   function run(text) {
     const msg = (text ?? input).trim();
-    if (!msg) return;
+    if (!msg || thinking) return;
     setInput("");
     setPendingChoice(null);
     appendChat({ role: "user", text: msg });
-
-    const res = ask(msg, state);
-    appendChat({ role: "assistant", text: res.text, actions: res.actions });
-    if (res.choices) setPendingChoice(res.choices);
+    present(ask(msg, state));
   }
 
   function pick(option) {
     const choice = pendingChoice;
     setPendingChoice(null);
     appendChat({ role: "user", text: option.label });
-    const res = resolveChoice(choice, option.id, state);
-    appendChat({ role: "assistant", text: res.text, actions: res.actions });
+    present(resolveChoice(choice, option.id, state));
   }
 
   return (
@@ -44,7 +62,7 @@ export default function Assistant({ state }) {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Assistant</h1>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
-            Changes your calendar and tasks directly. Included on every plan.
+            {who ? `At your service, ${who}.` : "Changes your calendar and tasks directly."}
           </p>
         </div>
         {chat.length > 0 && (
@@ -55,7 +73,7 @@ export default function Assistant({ state }) {
       </header>
 
       <div ref={scroller} className="flex-1 overflow-y-auto px-6 py-6">
-        {chat.length === 0 && (
+        {chat.length === 0 && !thinking && (
           <div className="mx-auto max-w-lg">
             <p className="label mb-3">Try</p>
             <div className="space-y-2">
@@ -102,6 +120,8 @@ export default function Assistant({ state }) {
             </div>
           ))}
 
+          {thinking && <Thinking line={thinking.line} variant={thinking.variant} />}
+
           {pendingChoice && (
             <div className="space-y-2">
               {pendingChoice.options.map((o) => (
@@ -130,14 +150,14 @@ export default function Assistant({ state }) {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Move my 3pm to Thursday…"
+            placeholder="What do I have Tuesday?"
             className="flex-1 rounded-md border border-[var(--line)] bg-transparent px-4 py-2.5
                        text-sm outline-none transition-colors placeholder:text-[var(--faint)]
                        focus:border-[var(--ink)]"
           />
           <button
             type="submit"
-            disabled={!input.trim()}
+            disabled={!input.trim() || !!thinking}
             className="rounded-md bg-[var(--ink)] px-5 py-2.5 text-sm font-medium
                        text-[var(--paper)] transition-opacity disabled:opacity-30"
           >

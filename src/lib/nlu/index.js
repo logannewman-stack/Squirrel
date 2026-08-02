@@ -14,6 +14,7 @@
 import { parse, INTENTS } from "./parse.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
 import { describe, toLocalIso, dayKey, atLocal } from "./datetime.js";
+import { acknowledge, describeDay, addressOf } from "./voice.js";
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
   applyPlan,
@@ -26,6 +27,12 @@ const DEFAULT_TASK_MINS = 30;
 
 const reply = (text, actions = []) => ({ text, actions, choices: null });
 const askWhich = (text, choices) => ({ text, actions: [], choices });
+
+/** Lookups scan the calendar; changes write to it. The art should match. */
+const PEN_INTENTS = new Set([
+  INTENTS.CREATE_EVENT, INTENTS.CREATE_TASK, INTENTS.MOVE_EVENT,
+  INTENTS.CANCEL_EVENT, INTENTS.COMPLETE_TASK, INTENTS.DELEGATE_TASK,
+]);
 
 export const EXAMPLES = [
   "Reschedule my 3pm Monday to Wednesday at 2",
@@ -46,9 +53,20 @@ export function ask(text, state, opts = {}) {
   const now = opts.now || new Date();
   const p = parse(text, now);
   const { slots } = p;
+  const identity = state.settings?.identity || {};
 
   const openTasks = state.tasks.filter((t) => !t.done);
 
+  const decorate = (res) => ({
+    ...res,
+    intent: p.intent,
+    ack: acknowledge(identity, p.intent, now),
+    variant: PEN_INTENTS.has(p.intent) ? "pen" : "calendar",
+  });
+
+  return decorate(run());
+
+  function run() {
   switch (p.intent) {
     // ------------------------------------------------------------- move
     case INTENTS.MOVE_EVENT: {
@@ -113,12 +131,24 @@ export function ask(text, state, opts = {}) {
     case INTENTS.CREATE_EVENT: {
       if (!slots.when) return reply("When should I put it? A day and time works — “Thursday at 10”.");
       const mins = slots.durationMins || DEFAULT_MEETING_MINS;
-      const title = slots.title || "Meeting";
+      const people = slots.people || [];
+      // When the whole sentence was consumed by slots there is no title left,
+      // so build one from who it is with.
+      const title =
+        slots.title || (people.length ? `Meeting with ${people.join(" and ")}` : "Meeting");
       const start = slots.when;
       const end = new Date(start.getTime() + mins * 60000);
-      addEvent({ title, start: toLocalIso(start), end: toLocalIso(end) });
+      addEvent({
+        title,
+        start: toLocalIso(start),
+        end: toLocalIso(end),
+        attendees: people.map((name) => ({ name })),
+        notes: slots.subject || "",
+      });
+      const withWho = people.length ? ` with ${people.join(" and ")}` : "";
+      const about = slots.subject ? ` about ${slots.subject}` : "";
       return reply(
-        `Blocked ${duration(mins * 60000)} for “${title}” ${describe(start, now)}.`,
+        `Booked ${duration(mins * 60000)}${withWho}${about} ${describe(start, now)}.`,
         [{ summary: `Added “${title}” · ${describe(start, now)}` }],
       );
     }
@@ -192,15 +222,7 @@ export function ask(text, state, opts = {}) {
       const rawLabel = slots.dateOnly ? describe(atLocal(slots.dateOnly, 9), now).split(" at ")[0] : "Today";
       const label = rawLabel[0].toUpperCase() + rawLabel.slice(1);
 
-      if (!events.length && !due.length) return reply(`${label} is clear — nothing scheduled, nothing due.`);
-
-      const lines = events.map((e) => `${fmtTime(e.start)} — ${e.title}`);
-      const meetingMins = events.reduce((s, e) => s + (new Date(e.end) - new Date(e.start)) / 60000, 0);
-      const parts = [
-        `${label}: ${events.length} ${events.length === 1 ? "meeting" : "meetings"} (${duration(meetingMins * 60000)})`,
-      ];
-      if (due.length) parts.push(`${due.length} ${due.length === 1 ? "task" : "tasks"} due`);
-      return reply(`${parts.join(", ")}.\n${lines.join("\n")}`);
+      return reply(describeDay(label, events, due));
     }
 
     case INTENTS.QUERY_FREE: {
@@ -236,6 +258,7 @@ export function ask(text, state, opts = {}) {
       return reply(
         `I didn't catch that. I handle scheduling, tasks, and projects — try something like:\n${EXAMPLES.slice(0, 3).map((e) => `• ${e}`).join("\n")}`,
       );
+  }
   }
 }
 

@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { addEvent, dayKey } from "../lib/store";
+import { toLocalIso } from "../lib/nlu/datetime";
 
-/** Quick event capture. Duration is chosen, not typed — end time is derived. */
+/**
+ * Quick event capture. Duration is chosen, not typed — end time is derived.
+ *
+ * "With" and "About" are what let the assistant answer "you're meeting with Bob
+ * about the Q3 pipeline" instead of reading the title back. Both optional; the
+ * phrasing degrades to whatever is present.
+ */
 export default function EventDialog({ onClose }) {
   const now = new Date();
   const [title, setTitle] = useState("");
@@ -11,6 +18,8 @@ export default function EventDialog({ onClose }) {
   );
   const [mins, setMins] = useState(60);
   const [location, setLocation] = useState("");
+  const [people, setPeople] = useState("");
+  const [about, setAbout] = useState("");
 
   function submit(e) {
     e.preventDefault();
@@ -19,8 +28,16 @@ export default function EventDialog({ onClose }) {
     addEvent({
       title,
       start: `${day}T${time}:00`,
-      end: new Date(start.getTime() + mins * 60000).toISOString().slice(0, 19),
+      // Local, not toISOString — that would shift the end by the UTC offset and
+      // leave a 60-minute event ending hours away from where it started.
+      end: toLocalIso(new Date(start.getTime() + mins * 60000)),
       location,
+      attendees: people
+        .split(/\s*,\s*|\s+and\s+/)
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .map((name) => ({ name })),
+      notes: about.trim(),
     });
     onClose();
   }
@@ -74,6 +91,22 @@ export default function EventDialog({ onClose }) {
             </button>
           ))}
         </div>
+
+        <input
+          value={people}
+          onChange={(e) => setPeople(e.target.value)}
+          placeholder="With — Bob, John"
+          className="mt-4 w-full border-b border-[var(--line)] bg-transparent pb-2 text-sm outline-none
+                     transition-colors placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+        />
+
+        <input
+          value={about}
+          onChange={(e) => setAbout(e.target.value)}
+          placeholder="About — the Q3 pipeline"
+          className="mt-4 w-full border-b border-[var(--line)] bg-transparent pb-2 text-sm outline-none
+                     transition-colors placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+        />
 
         <input
           value={location}

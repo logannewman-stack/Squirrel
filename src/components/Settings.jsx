@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { setSetting, totals } from "../lib/store";
+import Identity from "./Identity";
 import { duration } from "../lib/format";
 
 export default function Settings({ state, onBack }) {
@@ -16,6 +17,14 @@ export default function Settings({ state, onBack }) {
       </button>
 
       <h1 className="mb-8 mt-4 text-3xl font-semibold tracking-tight">Settings</h1>
+
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">How I address you</h2>
+        <p className="mb-4 text-sm text-[var(--muted)]">
+          Used when the assistant greets you.
+        </p>
+        <Identity value={state.settings?.identity || {}} compact />
+      </section>
 
       <section className="mb-10">
         <h2 className="mb-2 font-medium">Assistant</h2>
