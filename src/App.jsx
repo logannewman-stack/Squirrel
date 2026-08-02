@@ -13,10 +13,15 @@ import CommandPalette from "./components/CommandPalette";
 import Squirrel from "./components/Squirrel";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
-  remainingOf, toggleTask, setSetting,
+  remainingOf, toggleTask, setSetting, setPlan,
 } from "./lib/store";
 import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
+import { distribute } from "./lib/schedule";
+// Aliased: `pending` is already the task waiting for a focus length in this
+// component, and shadowing it silently turns this into a call on null.
+import { pending as dueReminders } from "./lib/reminders";
+import { sync as syncReminders } from "./lib/notify";
 import { duration } from "./lib/format";
 
 /**
@@ -95,6 +100,24 @@ export default function App() {
 
   // Any local write is worth sending; nudge coalesces the burst from typing.
   useEffect(() => nudge(), [state.projects, state.tasks, state.events]);
+
+  // The plan is derived, so it is recomputed rather than stored by hand:
+  // whenever the work or the meetings move, the distribution moves with them.
+  useEffect(() => {
+    const plan = distribute(state.tasks, state.events, state.sessions, {
+      workWeekend: state.settings?.workWeekend,
+    });
+    const same =
+      JSON.stringify(plan.blocks) === JSON.stringify(state.blocks) &&
+      JSON.stringify(plan.shortfalls) === JSON.stringify(state.shortfalls);
+    if (!same) setPlan(plan);
+  }, [state.tasks, state.events, state.sessions, state.settings?.workWeekend]);
+
+  // And the device's queue follows the plan. Diffed rather than rebuilt, since
+  // a phone holds a limited number of pending notifications.
+  useEffect(() => {
+    syncReminders(dueReminders(state, state.settings?.reminders));
+  }, [state.blocks, state.events, state.tasks, state.shortfalls, state.settings?.reminders]);
 
   useEffect(() => {
     const onKey = (e) => {

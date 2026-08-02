@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/nlu.test.mjs && node test/memory.test.mjs && node test/merge.test.mjs",
+    "test": "node test/nlu.test.mjs && node test/memory.test.mjs && node test/merge.test.mjs && node test/schedule.test.mjs",
     "test:e2e": "node test/assistant.e2e.mjs",
     "test:schema": "supabase/tests/run.sh"
   },

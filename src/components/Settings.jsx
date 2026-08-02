@@ -1,6 +1,7 @@
 import { setSetting, totals } from "../lib/store";
 import Identity from "./Identity";
 import Account from "./Account";
+import Reminders from "./Reminders";
 import { duration } from "../lib/format";
 
 export default function Settings({ state, onBack }) {
@@ -63,6 +64,11 @@ export default function Settings({ state, onBack }) {
           The assistant runs entirely on this device. No account, no API key, no per-message
           cost — which is why every plan gets unlimited chats.
         </p>
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">Reminders</h2>
+        <Reminders state={state} />
       </section>
 
       <section className="mb-10">

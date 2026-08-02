@@ -91,6 +91,45 @@ client:
 npm run test:schema     # needs a local Postgres on :5433
 ```
 
+## Reminders need no push server
+
+Worth stating plainly, because it changes what has to be built: **every
+reminder this app sends is scheduled locally on the device.** Meetings, focus
+blocks, the morning digest, and the deadline warning are all derived from the
+user's own calendar and are known in advance, so the OS can be handed the whole
+queue and will fire it with no network, no APNs certificate, no Firebase
+project, and no per-message cost.
+
+A push *server* is only needed for notifications that originate somewhere the
+device cannot know about — a teammate's change, a message from us, a sync from
+another device. There are none of those yet. When there are, the delivery layer
+in `src/lib/notify.js` is where a remote backend slots in; nothing above it
+changes.
+
+| Where it runs | Mechanism | Fires with the app closed |
+| --- | --- | --- |
+| Native (Capacitor) | `LocalNotifications` | Yes — lock screen, as expected |
+| Browser, installed as a PWA | Service worker timers | Mostly, for near-term reminders |
+| Browser tab | Service worker timers | Only while the browser runs |
+| iOS Safari tab | — | No. iOS allows notifications only for an installed PWA |
+
+The interface both share is deliberately the native one — *schedule a list
+ahead of time, cancel by id* — not the web's *show one now*. Writing it the
+other way round would mean rewriting every caller the day the app is wrapped.
+
+Two constraints the code already respects, and which are easy to trip over:
+
+- **iOS holds 64 pending local notifications.** `pending()` caps its output, and
+  `sync()` diffs rather than rebuilding, because re-registering the whole queue
+  on every state change silently drops whatever falls past the limit.
+- **Reminder ids are content-addressed.** Moving a meeting changes its
+  reminder's id, which is what lets the stale one be cancelled instead of
+  firing alongside the new one.
+
+Permission is requested behind a button in Settings, never on load. A prompt
+that appears before the app has done anything gets denied, and on iOS a denial
+is close to permanent — the only route back is system settings.
+
 ## Calendar sync — Google is not like Apple
 
 This is the one place where what the two platforms allow differs enough to

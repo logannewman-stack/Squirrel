@@ -265,6 +265,20 @@ const convo = await p.evaluate(async () => {
     M().tombstones.some((x) => x.kind === "tasks" && x.id === kid.id),
     JSON.stringify(M().tombstones.map((x) => x.kind)));
 
+  // ---- the planner and its reminders, live in the app ----
+  // The App recomputes the plan whenever work or meetings move, so this checks
+  // the wiring rather than the algorithm, which has its own suite.
+  store.setSetting("confirm", false);
+  store.addTask({ title: "Board deck", estimateMins: 480, due: iso(2026, 8, 14, 9).slice(0, 10) });
+  await new Promise((r) => setTimeout(r, 400));
+  const st = M();
+  t("the app lays long work out across days",
+    st.blocks.length >= 2, JSON.stringify(st.blocks.map((b) => `${b.day}:${b.mins}`)));
+  t("every block has a real clock time",
+    st.blocks.every((b) => b.start === null || /T\d\d:\d\d/.test(b.start)));
+  t("and none of it lands after the deadline",
+    st.blocks.every((b) => b.day <= "2026-08-14"), st.blocks.map((b) => b.day).join());
+
   return out;
 });
 

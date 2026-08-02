@@ -26,6 +26,13 @@ const EMPTY = {
   // {kind, id, deletedAt} — what this device has deleted, until the server has
   // heard about it and long enough after that for other devices to catch up.
   tombstones: [],
+  // Work laid out across the days before each deadline — see lib/schedule.js.
+  // Derived, not authored: recomputed whenever tasks or meetings move, so it is
+  // never the source of truth for anything.
+  blocks: [],
+  // Tasks whose remaining work no longer fits before their deadline. Kept in
+  // state because it is the one thing worth interrupting someone about.
+  shortfalls: [],
   active: null,
   settings: {},
 };
@@ -332,3 +339,14 @@ export const focusedOf = (a, now = Date.now()) =>
 // ---------------------------------------------------------------- settings
 export const setSetting = (key, value) =>
   update({ settings: { ...read().settings, [key]: value } });
+
+// ------------------------------------------------------------------ planning
+/**
+ * Replace the work plan.
+ *
+ * Derived state, so it is written wholesale rather than patched: the planner
+ * decides every block at once, and merging its output with a stale copy would
+ * produce a schedule neither of them intended.
+ */
+export const setPlan = ({ blocks, shortfalls }) =>
+  update({ blocks: blocks || [], shortfalls: shortfalls || [] });

@@ -7,7 +7,7 @@
  * a button or a sentence.
  */
 
-import { dayKey } from "./store";
+import { dayKey } from "./store.js";
 
 export const WORK_START = 8;   // 08:00
 export const WORK_END = 19;    // 19:00

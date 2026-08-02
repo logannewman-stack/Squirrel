@@ -20,9 +20,10 @@ import {
 } from "./context.js";
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
-  deleteTask, applyPlan, setMemory,
+  deleteTask, applyPlan, setMemory, setPlan,
 } from "../store";
 import { planDay, findFreeSlots, fmtTime } from "../agenda";
+import { distribute, describePlan } from "../schedule";
 import { duration } from "../format";
 
 const DEFAULT_MEETING_MINS = 60;
@@ -567,6 +568,25 @@ export function ask(text, state, opts = {}) {
     }
 
     case INTENTS.PLAN_DAY: {
+      // "plan my week" and "how do I get this done" want the whole runway, not
+      // just today — that is where the deadline maths actually lives.
+      if (/\bweek\b|\bdeadlines?\b|\bfit\b|\bahead\b/.test(p.body.toLowerCase())) {
+        const spread = distribute(state.tasks, state.events, state.sessions, { now });
+        if (!spread.blocks.length && !spread.shortfalls.length) {
+          return reply("Nothing to lay out — no open work with time on it.");
+        }
+        return gate(
+          `laying ${duration(spread.totals.plannedMins * 60000)} of work across the days before your deadlines`,
+          () => {
+            setPlan(spread);
+            const warn = spread.shortfalls.length
+              ? `\n\n${spread.shortfalls.length} ${spread.shortfalls.length === 1 ? "task does" : "tasks do"} not fit.`
+              : "";
+            return reply(describePlan(spread, state.tasks) + warn,
+              [{ summary: `Planned ${duration(spread.totals.plannedMins * 60000)} across ${spread.totals.taskCount} tasks` }]);
+          },
+        );
+      }
       const day = dayKey(slots.dateOnly || now);
       const plan = planDay(state.tasks, state.events, { day, now });
       if (!plan.tasks.length) return reply("Nothing to plan — no open tasks.");
