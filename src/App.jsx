@@ -10,6 +10,7 @@ import FocusScreen from "./components/FocusScreen";
 import EventDialog from "./components/EventDialog";
 import Identity from "./components/Identity";
 import CommandPalette from "./components/CommandPalette";
+import Squirrel from "./components/Squirrel";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
   remainingOf, toggleTask, setSetting,
@@ -37,7 +38,9 @@ const TABS = [
   ["calendar", "Calendar", "M4 8h16M4 8a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V8zM9 4v4M15 4v4"],
   ["projects", "Projects", "M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"],
   ["insights", "Insights", "M5 19V11M10 19V5M15 19v-6M20 19v-9"],
-  ["assistant", "Assistant", "M5 6h14v9H9l-4 4V6z"],
+  // No path: her tab is the squirrel herself, so the brand mark is on screen
+  // at all times without a logo bolted anywhere.
+  ["assistant", "Assistant", null],
 ];
 
 export default function App() {
@@ -137,6 +140,7 @@ export default function App() {
     const task = state.tasks.find((t) => t.id === done.taskId);
     return (
       <Centered>
+        <Squirrel size={56} className="mb-4" />
         <p className="label">{closingLine(done.focusedMs, done.plannedMs)}</p>
         <h1 className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">
           {duration(done.focusedMs)}
@@ -242,9 +246,13 @@ export default function App() {
                           isActive(name) ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
                         }`}
           >
-            <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
-              <path d={d} strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            {d ? (
+              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
+                <path d={d} strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <Squirrel size={19} className="sq-tab" />
+            )}
             <span className="text-[10px] font-medium tracking-wide">{label}</span>
           </button>
         ))}

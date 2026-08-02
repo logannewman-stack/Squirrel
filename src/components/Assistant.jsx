@@ -3,6 +3,7 @@ import { ask, resolveChoice, EXAMPLES } from "../lib/nlu";
 import { addressOf } from "../lib/nlu/voice";
 import { appendChat, clearChat } from "../lib/store";
 import Thinking from "./Thinking";
+import Squirrel from "./Squirrel";
 
 /**
  * The assistant runs entirely in the browser — no API call, no per-message
@@ -59,11 +60,14 @@ export default function Assistant({ state }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-[var(--line)] px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">Assistant</h1>
-          <p className="mt-0.5 text-xs text-[var(--muted)]">
-            {who ? `At your service, ${who}.` : "Changes your calendar and tasks directly."}
-          </p>
+        <div className="flex items-center gap-3">
+          <Squirrel size={34} pose={thinking ? "thinking" : "idle"} title="Squirrel" />
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Assistant</h1>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              {who ? `At your service, ${who}.` : "Changes your calendar and tasks directly."}
+            </p>
+          </div>
         </div>
         {chat.length > 0 && (
           <button onClick={clearChat} className="text-xs text-[var(--muted)] hover:text-[var(--ink)]">
@@ -75,6 +79,12 @@ export default function Assistant({ state }) {
       <div ref={scroller} className="flex-1 overflow-y-auto px-6 py-6">
         {chat.length === 0 && !thinking && (
           <div className="mx-auto max-w-lg">
+            <div className="mb-6 flex flex-col items-center text-center">
+              <Squirrel size={72} />
+              <p className="mt-3 max-w-xs text-sm text-[var(--muted)]">
+                Ask for anything on your calendar, your tasks, or your projects.
+              </p>
+            </div>
             <p className="label mb-3">Try</p>
             <div className="space-y-2">
               {EXAMPLES.map((e) => (

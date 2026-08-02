@@ -367,8 +367,32 @@ await p.getByPlaceholder("What do I have Tuesday?").fill("what do i have today")
 await p.getByRole("button", { name: "Send" }).click();
 
 const ui = [];
+
+// ---- the squirrel ----
+// One drawing everywhere, and she has to actually move while she thinks.
+// A CSS animation that silently stops applying is invisible in a screenshot,
+// so this samples the real transform rather than trusting the class name.
+const sq = p.locator(".sq-squirrel");
+ui.push(["she is on screen while the assistant is open", (await sq.count()) > 0, await sq.count()]);
+
+const tailAt = () =>
+  p.locator(".sq-thinking .sq-tail, .sq-writing .sq-paws").first()
+    .evaluate((el) => getComputedStyle(el).transform)
+    .catch(() => null);
+
+const a1 = await tailAt();
+await p.waitForTimeout(240);
+const a2 = await tailAt();
+ui.push(["she moves while she is thinking",
+  !!a1 && !!a2 && a1 !== a2, `${a1} → ${a2}`]);
+
+// Idle has to be genuinely still — a fidgeting mascot in a focus app is a bug.
+const idle = await p.locator(".sq-idle .sq-tail").first()
+  .evaluate((el) => getComputedStyle(el).transform).catch(() => "none");
+ui.push(["and is still when she is not", idle === "none" || idle === "matrix(1, 0, 0, 1, 0, 0)", idle]);
+
 ui.push(["thinking beat is visible before the answer",
-  await p.locator("svg .sq-cell").first().isVisible().catch(() => false)]);
+  await p.locator(".sq-squirrel").first().isVisible().catch(() => false)]);
 
 await p.waitForTimeout(1400);
 const answer = await p.locator("p.whitespace-pre-line").last().textContent();
