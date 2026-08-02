@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Monochrome by design: the audience's scarce resource is attention, so the
+   interface spends none of it on colour. Hierarchy and motion carry meaning. */
+:root {
+  --paper: #ffffff;
+  --ink: #000000;
+  --muted: #6b6b6b;
+  --line: #e6e6e6;
+  --hover: #f4f4f4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #000000;
+    --ink: #ffffff;
+    --muted: #8a8a8a;
+    --line: #232323;
+    --hover: #141414;
+  }
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* The mark is authored black; invert it rather than shipping a second file. */
+@media (prefers-color-scheme: dark) {
+  .logo { filter: invert(1); }
+}
+
+::selection { background: var(--ink); color: var(--paper); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
