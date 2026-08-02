@@ -376,7 +376,7 @@ const sq = p.locator(".sq-squirrel");
 ui.push(["she is on screen while the assistant is open", (await sq.count()) > 0, await sq.count()]);
 
 const tailAt = () =>
-  p.locator(".sq-thinking .sq-tail, .sq-writing .sq-paws").first()
+  p.locator(".sq-thinking .sq-her, .sq-writing .sq-her").first()
     .evaluate((el) => getComputedStyle(el).transform)
     .catch(() => null);
 
@@ -387,7 +387,7 @@ ui.push(["she moves while she is thinking",
   !!a1 && !!a2 && a1 !== a2, `${a1} → ${a2}`]);
 
 // Idle has to be genuinely still — a fidgeting mascot in a focus app is a bug.
-const idle = await p.locator(".sq-idle .sq-tail").first()
+const idle = await p.locator(".sq-idle .sq-her").first()
   .evaluate((el) => getComputedStyle(el).transform).catch(() => "none");
 ui.push(["and is still when she is not", idle === "none" || idle === "matrix(1, 0, 0, 1, 0, 0)", idle]);
 

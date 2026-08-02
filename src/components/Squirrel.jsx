@@ -1,33 +1,27 @@
 /**
- * The squirrel. One drawing, used everywhere.
+ * The squirrel. Her, not a drawing of her.
  *
- * Consistency is the whole point, so there is exactly one set of coordinates
- * in this file and every appearance is a crop of it. The tab-bar icon is not a
- * simplified squirrel that resembles the big one — it is the same squirrel with
- * a tighter viewBox. Nothing can drift out of sync because there is nothing to
- * keep in sync.
+ * This is the logo artwork itself — the same trace that produces the app icon
+ * and the wordmark, with the desk and pencil removed so she stands alone. It
+ * is not a redraw that resembles the logo; it is the identical geometry, so
+ * the squirrel in the tab bar and the squirrel on the home screen cannot drift
+ * apart. Regenerate with `python3 brand/extract-her.py` if the source artwork
+ * ever changes.
  *
- * What makes the drawing read as a squirrel rather than a mouse is the tail,
- * and it has to be enormous: taller than she is, wider than her body, arcing up
- * behind and curling forward over her head. A modest tail turns her into a
- * hamster no matter how good the rest of the anatomy is. Everything else — the
- * small round head, the short blunt muzzle, the upright sit with the weight in
- * the haunch — is in service of that silhouette.
- *
- * Drawn in parts rather than as one shape because she has to move: an ear that
- * twitches and a tail that sways have to be their own elements.
- *
- * The body carries a paper-coloured halo (`paint-order: stroke fill`) so it
- * knocks a clean gap out of the tail behind it. Without that, tail and body
- * merge into one blob at any size below about 40px.
+ * One consequence worth knowing: she is a single traced contour, so there are
+ * no separate ears or tail to move independently. She animates as a whole —
+ * which suits her, because the shape is dominated by that tail, and a skew
+ * about her feet swings it exactly the way a real one flicks while the body
+ * stays put.
  */
 
-/**
- * Crops onto the single drawing below. Chosen so the silhouette stays
- * recognisable as each one gets smaller. Even `portrait` keeps both ears and a
- * slice of the tail, because a round head on its own is any rodent at all.
- */
-const FRAME = { full: "0 0 64 64", bust: "4 0 44 44", portrait: "6 0 34 34" };
+/** Crops onto the one drawing. Square, so she never distorts in a square slot. */
+const FRAME = {
+  full: "-142.5 0 1374 1374",
+  portrait: "0 240 620 620",
+};
+
+const D = "M298.0,1372.9 C259.2,1372.6 224.7,1372.2 221.2,1372.1 L215.0,1372.0 L215.0,1367.2 C215.0,1356.2 222.9,1337.0 233.6,1321.8 C240.0,1312.7 252.6,1301.5 262.0,1296.6 C269.7,1292.6 294.5,1284.4 303.3,1283.0 C314.1,1281.3 343.6,1280.0 372.7,1280.0 C391.0,1280.0 401.1,1279.6 401.5,1279.0 C401.9,1278.4 398.8,1273.6 394.7,1268.2 C375.7,1243.3 361.0,1215.8 354.7,1193.0 C345.2,1158.5 345.6,1160.7 345.7,1129.0 L345.8,1100.5 L349.8,1083.0 C354.8,1061.3 359.2,1048.8 368.5,1029.5 C388.2,988.7 422.7,954.8 466.4,933.4 C494.3,919.7 514.0,914.3 541.0,912.9 C575.9,911.2 599.1,913.3 621.5,920.1 C637.3,925.0 667.9,939.1 676.7,945.6 C680.3,948.3 682.0,948.6 682.0,946.6 C682.0,943.4 647.6,914.7 634.5,907.0 C632.3,905.7 628.2,903.2 625.4,901.3 C615.0,894.5 589.8,885.1 567.0,879.5 C548.7,875.0 537.7,873.8 516.5,873.6 C498.8,873.5 498.1,873.6 478.5,877.8 C467.5,880.2 455.0,883.2 450.7,884.7 C439.2,888.4 406.7,905.0 398.0,911.5 C393.9,914.6 388.5,918.6 386.0,920.5 C373.1,930.2 347.3,958.5 339.9,971.1 C335.4,978.8 328.4,988.0 327.0,988.0 C326.4,988.0 312.7,981.5 296.5,973.5 C280.3,965.5 266.8,959.0 266.4,959.0 C266.1,959.0 256.3,954.3 244.7,948.6 C233.0,942.9 212.7,933.1 199.5,927.0 C186.3,920.8 169.2,912.7 161.5,909.0 C128.8,893.2 107.5,883.7 103.6,883.3 C93.4,882.1 81.2,894.2 72.2,914.2 C72.0,914.6 77.4,915.1 84.2,915.3 C94.0,915.5 92.9,915.6 79.0,915.7 C69.4,915.7 62.6,915.5 64.0,915.1 C66.0,914.4 65.3,914.2 60.5,913.6 C57.2,913.2 53.7,912.6 52.8,912.4 C50.3,911.7 50.6,907.6 53.6,900.5 C58.8,888.3 59.9,885.1 59.1,884.5 C57.4,883.5 49.4,893.8 43.9,903.9 L38.5,914.0 L20.2,913.8 C5.3,913.5 1.8,913.2 1.0,912.0 C-1.5,908.1 0.5,888.3 4.6,876.1 C11.3,855.9 29.1,838.1 49.6,830.9 C68.5,824.4 76.7,823.9 176.9,823.1 L266.3,822.5 L268.2,819.9 C270.2,817.3 280.8,793.7 285.9,780.5 C288.8,773.2 311.5,728.9 314.8,724.2 C320.3,716.4 337.2,683.0 345.0,664.5 C355.1,640.6 361.8,620.5 360.6,617.5 C359.7,615.1 358.9,616.1 353.1,625.5 C341.9,643.7 324.9,662.5 308.5,674.8 C301.4,680.0 283.0,689.8 271.0,694.6 C259.6,699.2 240.8,704.0 230.0,705.2 C223.7,705.8 210.7,706.0 197.5,705.7 C173.9,705.1 159.1,703.1 133.3,697.1 C116.4,693.2 112.0,692.4 95.5,690.0 C78.3,687.5 67.3,683.8 58.7,677.7 C49.3,671.0 48.3,667.9 49.8,651.2 C52.7,620.5 56.9,598.6 65.7,569.0 C73.0,544.0 75.0,538.7 82.8,523.5 C91.3,507.0 100.7,494.5 115.6,480.0 C131.6,464.4 141.6,457.2 160.0,448.1 C176.6,439.9 188.8,435.4 204.0,432.1 C217.5,429.1 222.8,427.6 224.2,426.2 C225.1,425.3 225.0,423.8 223.5,419.8 C221.8,415.2 221.5,411.7 221.5,393.0 C221.5,371.6 221.5,371.5 224.7,361.5 C234.0,332.4 241.5,318.4 259.6,296.5 C268.8,285.4 279.8,274.3 290.9,265.1 C303.1,255.0 304.5,256.7 300.5,277.6 C294.4,309.9 290.7,320.2 279.1,337.9 C272.9,347.4 262.0,371.7 256.5,388.6 C252.3,401.2 250.0,412.3 250.0,419.5 C250.0,424.6 250.2,425.1 252.8,426.1 C256.5,427.6 268.2,426.5 269.6,424.5 C270.2,423.7 271.3,419.5 272.0,415.2 C273.7,404.2 279.5,381.5 283.6,369.6 C292.7,343.5 313.6,312.6 336.2,291.9 C352.2,277.3 371.7,263.3 373.5,265.2 C373.7,265.4 373.5,273.8 373.0,284.0 C371.8,308.4 371.8,375.1 373.0,396.5 C374.6,425.5 381.1,471.8 385.6,486.9 C397.1,525.0 398.9,529.9 409.4,551.0 C422.6,577.4 436.1,596.9 455.0,616.4 C473.5,635.5 496.3,653.3 513.0,661.6 C523.7,666.9 537.7,673.0 539.1,673.0 C540.8,673.0 581.2,692.2 588.0,696.2 C591.6,698.3 596.8,701.2 599.5,702.5 C612.9,709.1 641.6,729.0 661.3,745.6 C680.3,761.4 694.7,775.2 709.5,791.5 C735.6,820.1 742.3,829.0 761.0,859.0 C782.0,892.8 802.5,947.7 809.4,988.5 C814.6,1019.6 815.5,1029.6 815.4,1061.5 C815.4,1089.9 815.2,1094.1 812.7,1111.5 C809.2,1135.5 803.7,1163.2 800.6,1171.9 C799.4,1175.5 796.3,1184.3 793.7,1191.5 C786.2,1212.9 773.0,1241.1 762.8,1257.4 C760.0,1261.8 755.7,1268.9 753.2,1273.0 C747.3,1283.1 728.6,1307.8 715.9,1322.4 C702.3,1337.9 700.7,1340.0 701.8,1340.0 C703.8,1340.0 719.8,1325.5 740.5,1304.6 C763.1,1282.0 773.2,1269.7 789.8,1244.8 C801.4,1227.4 823.1,1188.5 827.8,1176.5 C828.9,1173.8 831.6,1167.1 833.9,1161.8 C838.6,1150.4 852.4,1106.4 854.5,1095.8 C855.3,1091.8 857.0,1081.5 858.2,1073.0 C860.3,1058.7 860.5,1054.1 860.5,1012.0 C860.5,949.1 860.0,945.8 843.4,891.8 C840.4,882.1 835.9,869.6 833.5,864.1 C828.1,851.8 816.7,829.1 813.4,823.9 C812.1,821.8 809.1,816.6 806.7,812.2 C799.8,799.7 776.7,769.0 761.9,752.6 C724.6,711.3 679.0,676.4 630.8,652.4 C615.5,644.8 591.3,629.1 576.5,617.3 C525.6,576.6 489.1,528.6 464.4,470.3 C452.4,441.8 450.3,434.9 444.0,403.0 C435.1,358.4 434.7,329.0 442.0,283.4 C444.4,268.4 448.4,249.6 450.9,241.0 C456.0,223.8 467.6,195.8 474.9,183.1 C477.6,178.4 480.9,172.2 482.4,169.3 C486.8,160.5 500.4,141.0 511.2,128.0 C532.8,102.1 556.1,79.9 578.6,63.9 C606.0,44.5 641.2,26.9 674.5,15.9 C711.6,3.6 767.2,-2.5 806.0,1.4 C835.0,4.3 868.7,10.8 879.7,15.6 C881.8,16.5 884.9,17.6 886.5,18.0 C888.1,18.5 891.8,19.7 894.5,20.9 C897.2,22.0 903.8,24.5 909.0,26.6 C914.2,28.6 922.3,32.3 927.0,34.8 C962.4,53.6 979.1,65.5 1003.9,89.5 C1059.1,143.0 1089.0,212.5 1089.0,287.7 C1089.0,314.3 1087.2,325.5 1078.9,350.6 C1070.4,376.2 1063.7,390.2 1050.9,409.1 C1036.7,429.8 1015.8,451.0 996.9,463.6 C977.6,476.5 948.5,488.4 924.9,493.2 C914.7,495.2 910.6,495.5 886.5,495.5 C860.3,495.5 859.2,495.4 848.5,492.7 C829.9,488.0 821.9,485.1 810.5,478.7 C789.1,466.6 773.3,452.8 762.5,436.5 C752.3,421.2 743.5,397.2 742.0,380.5 C740.2,360.9 740.7,353.4 744.4,340.3 C750.1,320.7 756.8,307.8 767.5,295.5 C776.3,285.5 778.8,280.0 774.7,280.0 C772.6,280.0 757.6,292.5 750.1,300.6 C734.8,317.0 722.6,336.5 716.7,354.0 C707.1,382.3 703.9,409.5 707.5,432.0 C709.3,443.1 715.9,469.4 719.3,479.6 C724.2,493.8 740.6,521.6 753.7,537.7 C768.7,556.3 794.6,578.0 820.8,594.1 C853.8,614.4 872.4,628.5 895.4,651.0 C928.3,683.2 950.1,711.5 973.0,751.8 C978.0,760.7 984.2,773.0 986.6,779.2 C989.1,785.4 993.5,795.9 996.5,802.5 C1002.1,815.0 1003.3,818.9 1009.9,845.5 C1019.6,884.7 1022.1,904.1 1022.7,947.8 C1023.5,1001.1 1020.6,1028.3 1009.5,1069.5 C1002.7,1095.0 996.8,1114.0 994.4,1117.8 C993.6,1119.0 990.5,1126.2 987.5,1133.7 C981.7,1148.1 969.3,1171.3 957.8,1189.5 C942.4,1213.7 922.6,1237.4 896.4,1263.0 C876.6,1282.3 864.8,1291.8 841.1,1307.4 C818.9,1322.1 810.1,1327.2 795.5,1334.0 C789.5,1336.9 782.5,1340.2 780.0,1341.5 C774.5,1344.4 762.2,1349.3 751.5,1353.0 C747.1,1354.5 739.9,1357.1 735.5,1358.8 C724.4,1363.0 707.9,1366.5 685.0,1369.5 C666.1,1372.1 663.2,1372.2 589.0,1373.0 C504.2,1374.0 404.7,1373.9 298.0,1372.9 Z M209.0,578.3 C216.8,574.4 226.0,564.9 230.1,556.5 C233.3,549.9 233.5,549.0 233.5,538.5 C233.5,523.6 230.6,516.7 219.3,505.4 C212.5,498.7 207.5,496.7 196.9,496.6 L188.2,496.5 L179.6,502.3 C169.4,509.3 163.8,515.3 159.9,523.5 C157.3,528.9 157.0,530.5 157.0,540.0 C157.0,552.9 157.8,556.0 163.4,563.3 C169.1,570.9 174.4,574.7 184.3,578.1 C195.1,581.9 201.8,581.9 209.0,578.3 Z";
 
 export default function Squirrel({
   size = 24,
@@ -47,79 +41,8 @@ export default function Squirrel({
       aria-hidden={title ? undefined : true}
     >
       {title && <title>{title}</title>}
-
-      {/* ---- tail: the whole silhouette. Rises off the rump, sweeps right and
-           up, curls forward over her head. Outer edge is deliberately lobed so
-           it reads as fur rather than a smooth crescent. */}
-      <g className="sq-tail">
-        <path
-          className="sq-fill"
-          d="M39 59
-             C47 59 53 55 56 49
-             C59 44 60 38 58 33
-             C61 28 60 21 56 16
-             C53 11 48 8 43 7
-             C38 6 33 8 31 12
-             C34 12 38 14 41 18
-             C45 23 47 30 45 36
-             C43 42 39 46 37 51
-             C36 54 36 57 39 59 Z"
-        />
-        {/* Fur direction. Three strokes following the sweep, thin enough to
-            vanish rather than smear when she is 18px tall. */}
-        <path className="sq-hair" d="M50 48c4-5 6-12 4-18M54 40c2-6 2-13-1-18M44 53c3-3 5-7 6-11" />
-      </g>
-
-      {/* ---- her, from the ground up. One group so the halo is continuous. */}
-      <g className="sq-body">
-        {/* haunch and hind foot: the weight sits low and to the front */}
-        <path
-          className="sq-fill sq-halo"
-          d="M22 34
-             C16 37 13 44 14 50
-             C15 56 20 59 27 59
-             L36 59
-             C40 59 41 56 39 53
-             C36 49 35 44 35 39
-             C35 35 30 32 22 34 Z"
-        />
-        <path
-          className="sq-fill sq-halo"
-          d="M13 54c-3 0-5 1-5 3 0 2 2 3 5 3h9c2 0 3-1 3-2 0-2-2-3-5-3z"
-        />
-      </g>
-
-      {/* ---- forelegs, tucked at the chest where a squirrel always holds them */}
-      <g className="sq-paws">
-        <path className="sq-fill" d="M18 35c-2 1-4 3-4 5 0 2 2 4 4 4 2 0 4-2 4-4 0-2-2-5-4-5z" />
-      </g>
-
-      {/* ---- ears: tall and tufted, the near one flicks */}
-      <g className="sq-head">
-        <path className="sq-fill sq-halo sq-ear-far" d="M29 11c0-5 2-9 4-9 2 0 3 4 2 8-1 3-3 5-6 6z" />
-        <path className="sq-fill sq-halo sq-ear" d="M18 11c-1-5-4-9-6-8-2 1-1 5 1 8 1 3 3 5 5 5z" />
-
-        {/* head: small and round, with a short blunt muzzle. A long snout is a
-            rat; a big head is a hamster. */}
-        <path
-          className="sq-fill sq-halo"
-          d="M23 7
-             C16 7 11 12 11 19
-             C11 22 12 24 13 26
-             C11 27 10 28 10 29
-             C10 30 11 31 13 31
-             C15 31 17 30 18 29
-             C20 30 22 31 24 31
-             C30 31 34 26 34 20
-             C34 12 29 7 23 7 Z"
-        />
-        {/* eye: knocked out of the fill, so it survives to the smallest size */}
-        <circle className="sq-eye" cx="18" cy="17" r="2.7" />
-        <circle className="sq-glint" cx="19.1" cy="15.9" r="0.9" />
-        {/* nose, at the tip of the muzzle rather than under it */}
-        <circle className="sq-fill" cx="10.5" cy="28.5" r="1.5" />
-        {/* whiskers: what makes it an animal rather than a shape */}
-        <path className="sq-whisker" d="M9 27L3 24M9 29L2 29M10 31L5 34" />
+      <g className="sq-her">
+        <path className="sq-fill" fillRule="evenodd" d={D} />
       </g>
     </svg>
   );

@@ -89,96 +89,41 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 }
 
 /* ---------------------------------------------------------------- squirrel
-   One drawing, four states. Everything animates from the parts named in
-   components/Squirrel.jsx, so a change to her shape never needs a matching
-   change here.
+   She is the logo artwork itself — one traced contour, so there is nothing to
+   move independently. The motion is applied to the whole figure about her
+   feet, which works because the shape is nearly all tail: a small skew there
+   swings the plume through a real arc while her haunches stay planted, which
+   is exactly what a squirrel does.
 
-   She is currency: an idle squirrel that jitters is a distraction in a focus
-   app, so idle really is still. Motion is reserved for the moment she is
-   actually doing something. */
+   Idle is genuinely still. A mascot that fidgets while you are trying to
+   concentrate is a bug in a focus app, not charm. */
 .sq-squirrel .sq-fill { fill: var(--ink); }
-/* A paper-coloured outline painted *under* the fill, so every part of her
-   knocks a clean gap out of whatever sits behind it. Without this the tail and
-   the body merge into one blob below about 40px. */
-.sq-squirrel .sq-halo {
-  stroke: var(--paper);
-  stroke-width: 2.4;
-  stroke-linejoin: round;
-  paint-order: stroke fill;
-}
-.sq-squirrel .sq-eye { fill: var(--paper); }
-.sq-squirrel .sq-glint { fill: var(--ink); }
-.sq-squirrel .sq-hair {
-  fill: none;
-  stroke: var(--paper);
-  stroke-width: 1.1;
-  stroke-linecap: round;
-  opacity: 0.75;
-}
-.sq-squirrel .sq-whisker {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 0.7;
-  stroke-linecap: round;
-  opacity: 0.55;
+.sq-squirrel .sq-her {
+  transform-origin: 480px 1360px;   /* her feet, in the artwork's own units */
+  transform-box: view-box;
 }
 
-/* Parts pivot around where they actually join, not the middle of the canvas. */
-.sq-squirrel .sq-tail { transform-origin: 39px 59px; transform-box: view-box; }
-.sq-squirrel .sq-ear { transform-origin: 17px 14px; transform-box: view-box; }
-.sq-squirrel .sq-head { transform-origin: 26px 30px; transform-box: view-box; }
-.sq-squirrel .sq-paws { transform-origin: 20px 44px; transform-box: view-box; }
-
-/* ---- thinking: she looks up and away, the tail sways, an ear flicks */
-.sq-thinking .sq-head { animation: sq-ponder 2.2s ease-in-out infinite; }
-.sq-thinking .sq-tail { animation: sq-sway 2.2s ease-in-out infinite; }
-.sq-thinking .sq-ear { animation: sq-twitch 2.2s ease-in-out infinite; }
-
+/* ---- thinking: a slow lean back and forth, tail swinging with it */
+.sq-thinking .sq-her { animation: sq-ponder 2.4s ease-in-out infinite; }
 @keyframes sq-ponder {
-  0%, 100% { transform: rotate(0deg); }
-  30%      { transform: rotate(-7deg) translateY(-1px); }
-  60%      { transform: rotate(4deg); }
-}
-@keyframes sq-sway {
-  0%, 100% { transform: rotate(0deg); }
-  35%      { transform: rotate(9deg); }
-  70%      { transform: rotate(-6deg); }
-}
-@keyframes sq-twitch {
-  0%, 55%, 100% { transform: rotate(0deg); }
-  62%           { transform: rotate(-16deg); }
-  70%           { transform: rotate(6deg); }
-  78%           { transform: rotate(0deg); }
+  0%, 100% { transform: skewX(0deg) rotate(0deg); }
+  30%      { transform: skewX(-2.6deg) rotate(-1.4deg) translateY(-6px); }
+  65%      { transform: skewX(1.8deg) rotate(1deg); }
 }
 
-/* ---- writing: the paws do the work, the head stays down on the page */
-.sq-writing .sq-paws { animation: sq-scribble 0.65s ease-in-out infinite; }
-.sq-writing .sq-head { animation: sq-bob 1.3s ease-in-out infinite; }
-.sq-writing .sq-tail { animation: sq-sway 1.8s ease-in-out infinite; }
-
-@keyframes sq-scribble {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  50%      { transform: translate(1.5px, -0.5px) rotate(-6deg); }
-}
-@keyframes sq-bob {
-  0%, 100% { transform: rotate(0deg); }
-  50%      { transform: rotate(3deg) translateY(0.5px); }
+/* ---- writing: quicker, smaller, head-down. Busy rather than pensive. */
+.sq-writing .sq-her { animation: sq-work 0.7s ease-in-out infinite; }
+@keyframes sq-work {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  50%      { transform: rotate(1.6deg) translateY(4px); }
 }
 
-/* ---- alert: one beat, for a fresh answer arriving */
-.sq-alert .sq-ear { animation: sq-twitch 1s ease-in-out 1; }
+/* In the tab bar she takes the tab's own colour, so she dims with the rest
+   instead of staying stubbornly black. */
+.sq-tab .sq-fill { fill: currentColor; }
 
 /* Reduced motion: she holds still. The status line already says what is
    happening, so nothing is lost but the movement. */
 @media (prefers-reduced-motion: reduce) {
   .sq-squirrel * { animation: none !important; }
 }
-
-/* In the tab bar she inherits the tab's own colour, so she dims with the
-   others when the tab is not current instead of staying stubbornly black. */
-.sq-tab .sq-fill { fill: currentColor; }
-.sq-tab .sq-eye { fill: var(--paper); }
-.sq-tab .sq-glint,
-.sq-tab .sq-whisker { display: none; }
-.sq-tab .sq-hair { display: none; }
-.sq-tab .sq-halo { stroke: var(--paper); stroke-width: 2.2; }
