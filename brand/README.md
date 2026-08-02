@@ -1,80 +1,76 @@
 # Squirrel — brand marks
 
-Logo system for **Squirrel**, an ADHD focus app. Black and white only.
+Logo system for **Squirrel**, an ADHD focus app. Black and white.
 
-## The mark
+The mark is a squirrel sitting at a desk at a monitor, its tail curling up
+behind it. Drawn by Logan; everything in this folder is derived from that
+artwork by `build-assets.py`. **Nothing here is redrawn.**
 
-A squirrel sitting upright at a desk, working at a monitor, its big tail curling
-up and over behind it.
+## Files
+
+Source of truth: `source/logo_black_on_white_4k.png`.
 
 | File | Use |
 | --- | --- |
-| `squirrel-logo.svg` | Full mark, with desk and monitor. 64px and up. |
-| `squirrel-logo-simple.svg` | Squirrel and tail only. Below 64px. |
+| `squirrel-logo.svg` | Black art, **transparent** background. The default. |
+| `squirrel-logo-white.svg` | White art, transparent. For dark backgrounds. |
+| `squirrel-logo-on-white.svg` | Black art, white background baked in. |
+| `squirrel-logo-on-black.svg` | White art, black background baked in. |
 | `squirrel-appicon-{light,dark}.svg` | Rounded-square app icon. |
-| `squirrel-appicon-small-{light,dark}.svg` | App icon, simple cut, 60px and below. |
 | `squirrel-lockup{,-dark}.svg` | Mark + wordmark, horizontal. |
+| `favicon-32.png` | Favicon. |
 
-`-white` variants are the same geometry filled white, for dark backgrounds.
+PNG exports: app icons at 1024/512/180/120/60/32, logos at 1024/512/256,
+lockup at 2400 wide.
 
-## Why black and white
+Reach for a **transparent** variant by default. The `-on-white` / `-on-black`
+files have the background painted in, so they show as a hard rectangle over any
+other colour — which is exactly what the raw source PNG does too.
 
-The audience is people whose attention is the scarce resource. Colour is a claim
-on attention, so the interface spends none of it on decoration — hierarchy and
-motion carry meaning instead. It also means the mark has no colour-on-colour
-failure case.
+## Why the artwork is traced
 
-Note that monochrome removes the tool a two-tone version would use to separate
-the tail from the body. Here that separation is carried entirely by white gaps,
-which is why the gap rules below matter more than they normally would.
+The source is a 3840×3860 PNG, but the artwork only occupies 1408×1375 of it —
+the rest is white margin. So it is not really a 4K logo, and anything built
+straight from it would sit in a field of dead space.
+
+It is also pure two-value black and white, which vectorises almost exactly:
+there is no colour quantisation to fight. Tracing gives the same shapes as clean
+paths that stay sharp at any size, cropped to the real ink bounds with
+consistent padding. The trace agrees with the source to ~97% pixel-for-pixel;
+the residual is antialiasing along edges.
+
+## The polarity trap
+
+`potracer` fills where its mask is **False**, so `trace_source()` passes `True`
+for the *light* pixels. Get this backwards and it emits a filled rectangle with
+the squirrel punched out of it.
+
+That failure is easy to ship by accident, because this artwork is close to 50/50
+black and white — so an inverted trace has almost the same ink fraction as a
+correct one, and any coverage or ink-percentage check waves it through. `verify()`
+therefore rasterises the trace and compares it to the source pixel-for-pixel,
+failing the build below 95% agreement. Don't replace it with a cheaper check.
 
 ## Rules
 
-- **Never use the full cut below 64px.** The desk and monitor fill into a smear.
-  Switch to `-simple`.
-- Clear space: one desk-leg width on all sides.
-- Don't recolour, rotate, add gradients, or outline it.
-- Don't close the tail's curl. The white spiral inside it is what makes it read
-  as a tail rather than a solid comma.
-
-## Two things that break easily
-
-**1. The tail welds shut.** The tail is a logarithmic spiral swept through a
-width profile. A curl only reads as a curl while the stroke width stays well
-under the radius the spiral loses per turn. At the current settings the radius
-drops 36 across the sweep against a 30-wide stroke. Widen the stroke or extend
-the sweep much past 290° and consecutive turns merge into one black blob.
-
-**2. Gaps must halo the merged figure.** `halo()` paints a whole group fat in the
-background colour, then paints it again in black. Applying a knockout stroke to
-each shape individually instead makes neighbouring shapes bite chunks out of one
-another. On a background that is not pure black or white, regenerate with a
-matching `bg` — the halo colour must equal the background or a fringe appears.
-
-A related trap: the body's shoulder points must sit above the head's lower edge
-(y=141), or Catmull-Rom sags the outline into a white notch and the head reads
-as detached from the body.
+- Prefer transparent variants; only use the baked-background ones deliberately.
+- Don't recolour, rotate, stretch, or add effects.
+- Don't rebuild assets by editing the SVGs — they are overwritten on every run.
 
 ## Regenerating
 
-Geometry is **parametric, not hand-drawn** — `geom.py` holds the curve
-primitives, `build-logo.py` holds the mark. Edit the numbers there; never
-hand-edit the generated SVGs, which are overwritten on every run.
-
 ```bash
-pip install cairosvg pillow
-python3 brand/build-logo.py
+pip install cairosvg pillow numpy potracer
+python3 brand/build-assets.py
 ```
 
-Key constants in `build-logo.py`:
-
-- `TAIL` — `(cx, cy, r_base, r_tip, start_deg, sweep_deg, w_base, w_peak, w_tip)`
-- `figure()` — body outline points, head radius, snout and ear taper
-- `MONITOR` / `DESK` — furniture geometry
+Replace `source/logo_black_on_white_4k.png` and re-run to update everything.
+Layout constants live at the top of the script: `CANVAS`, `ART_FRACTION`,
+`ICON_FRACTION`, `CORNER`.
 
 ## Typography — not final
 
-The lockup sets its wordmark in Liberation Sans Bold, an Arial metric clone. That
-is a placeholder. Choose a real typeface, set the wordmark, convert to outlines,
-and replace the `<text>` element — live text in a logo renders differently on any
+The lockup sets its wordmark in Liberation Sans Bold, an Arial metric clone —
+a placeholder. Choose a real typeface, set the wordmark, convert it to outlines,
+and replace the `<text>` element. Live text in a logo renders differently on any
 machine missing the font.

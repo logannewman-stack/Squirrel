@@ -11,9 +11,9 @@ Early. Brand marks exist; the app does not yet.
 
 ## Brand
 
-Logo system lives in [`brand/`](brand/) — a squirrel hunched at a screen wrapped
-in its own tail, where the tail closes into a focus ring. Black and white only,
-because the audience is people whose attention is the scarce resource.
+Logo system lives in [`brand/`](brand/) — a squirrel sitting at a desk at a
+monitor, tail curling up behind it. Black and white, because the audience is
+people whose attention is the scarce resource.
 
 See [`brand/README.md`](brand/README.md) for usage rules and how to regenerate
 the marks.
