@@ -28,6 +28,9 @@ const results = await p.evaluate(async () => {
 
   localStorage.removeItem("squirrel.v2");
   store.setSetting("identity", { style: "formal", honorific: "Mr.", lastName: "Newman" });
+  // These check what the actions do. The confirmation gate in front of them
+  // gets its own block below.
+  store.setSetting("confirm", false);
 
   // Fixed clock so weekday maths is deterministic: Sunday 2 Aug 2026, 10:00.
   const NOW = new Date(2026, 7, 2, 10, 0, 0);
@@ -154,6 +157,7 @@ const convo = await p.evaluate(async () => {
 
   let r;
   store.setSetting("identity", { style: "formal", honorific: "Mr.", lastName: "Newman" });
+  store.setSetting("confirm", false);
 
   const M = () => store.getState();
   const eventCount = () => M().events.length;
@@ -226,6 +230,81 @@ const convo = await p.evaluate(async () => {
   return out;
 });
 
+/** Confirm-before-acting, on its own page so the setting starts at its default. */
+await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
+await p.reload({ waitUntil: "networkidle" });
+
+const confirms = await p.evaluate(async () => {
+  const store = await import("/src/lib/store.js");
+  const { ask, resolveChoice } = await import("/src/lib/nlu/index.js");
+  const out = [];
+  const t = (name, ok, detail) => out.push([name, !!ok, detail || ""]);
+
+  const NOW = new Date(2026, 7, 2, 10, 0, 0);
+  store.setSetting("identity", { style: "formal", honorific: "Mr.", lastName: "Newman" });
+  const M = () => store.getState();
+
+  // On by default — nobody has to find a setting to get this.
+  let r = ask("schedule a 2 pm meeting for 30 minutes with bob friday", M(), { now: NOW });
+  t("nothing is written before it asks", M().events.length === 0, M().events.length);
+  t("it addresses you and states the intent",
+    /^Okay, Mr\. Newman — just to confirm:/.test(r.text), r.text);
+  t("the read-back names the length", /30m/.test(r.text), r.text);
+  t("names who it is with", /with Bob/.test(r.text), r.text);
+  t("names the day and time", /Friday at 2:00 PM/.test(r.text), r.text);
+  t("and the title it intends to use", /titled “Meeting with Bob”/.test(r.text), r.text);
+  t("with a yes and a no", r.choices?.kind === "confirm" && r.choices.options.length === 2);
+
+  // Revising a proposal keeps everything already agreed.
+  r = ask("no make it monday at 3", M(), { now: NOW });
+  t("a revision still writes nothing", M().events.length === 0, M().events.length);
+  // Monday is tomorrow from the fixed Sunday clock, and it says so.
+  t("the revised day and time show up", /tomorrow at 3:00 PM/.test(r.text), r.text);
+  t("the length survives the revision", /30m/.test(r.text), r.text);
+  t("so does the attendee", /with Bob/.test(r.text), r.text);
+
+  // Yes acts, exactly once.
+  r = ask("yes", M(), { now: NOW });
+  t("yes writes it", M().events.length === 1, M().events.length);
+  const ev = M().events[0];
+  t("with everything from the revised proposal",
+    ev.start === "2026-08-03T15:00:00" && (new Date(ev.end) - new Date(ev.start)) / 60000 === 30,
+    `${ev.start} ${ev.end}`);
+  t("and the agreed title", ev.title === "Meeting with Bob", ev.title);
+  t("the proposal is spent", !M().memory.pending, JSON.stringify(M().memory.pending));
+
+  // No declines and changes nothing.
+  ask("cancel the meeting with bob", M(), { now: NOW });
+  r = ask("no", M(), { now: NOW });
+  t("no leaves it alone", M().events.length === 1, M().events.length);
+  t("and says so", /left it as it was/i.test(r.text), r.text);
+
+  // The buttons take the same path as typing.
+  r = ask("mark the lease done", M(), { now: NOW });
+  store.addTask({ title: "Sign the Munich lease" });
+  r = ask("delete the meeting with bob", M(), { now: NOW });
+  const after = resolveChoice(r.choices, "yes", M(), NOW);
+  t("tapping yes acts too", M().events.length === 0, after.text);
+
+  // Turning it off restores one-shot behaviour.
+  store.setSetting("confirm", false);
+  ask("schedule a call with priya tuesday at 11", M(), { now: NOW });
+  t("with confirmations off it just does it", M().events.length === 1, M().events.length);
+  t("and titles it sensibly", M().events[0].title === "Call with Priya", M().events[0].title);
+
+  // Common-sense titles: the subject leads when there is one.
+  store.setSetting("confirm", false);
+  ask("book 45 minutes with anders about the munich lease thursday at 9", M(), { now: NOW });
+  const titled = M().events.find((e) => /munich/i.test(e.title));
+  t("a subject makes the better title",
+    titled?.title === "Munich lease with Anders", M().events.map((e) => e.title).join("|"));
+  ask("lunch with priya friday at 12", M(), { now: NOW });
+  t("and the noun used is the noun kept",
+    M().events.some((e) => e.title === "Lunch with Priya"), M().events.map((e) => e.title).join("|"));
+
+  return out;
+});
+
 /**
  * Second pass, through the actual UI rather than the store: first-run identity,
  * an event captured in the dialog, then the assistant describing it. This is
@@ -269,7 +348,7 @@ ui.push(["derived end time stays in local time", span === 60, `${span} mins`]);
 await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
 
 let failed = 0;
-for (const [name, ok, detail] of [...results, ...convo, ...ui]) {
+for (const [name, ok, detail] of [...results, ...convo, ...confirms, ...ui]) {
   if (!ok) failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? `  → ${detail}` : ""}`);
 }

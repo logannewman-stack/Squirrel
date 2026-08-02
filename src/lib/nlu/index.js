@@ -14,7 +14,7 @@
 import { parse, INTENTS } from "./parse.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
 import { describe, toLocalIso, dayKey, atLocal } from "./datetime.js";
-import { acknowledge, describeDay, addressOf } from "./voice.js";
+import { acknowledge, describeDay, addressOf, confirmLine, composeTitle } from "./voice.js";
 import {
   EMPTY_MEMORY, remember, carryable, lastTurn, focusOf, topicDay, inherit,
 } from "./context.js";
@@ -51,6 +51,55 @@ const needs = (text) => ({ text, actions: [], choices: null, pending: true });
 const isFollowUp = (p) =>
   p.repair || p.amend || p.fragment || (p.pronoun && !p.slots.title);
 
+/**
+ * Yes and no, and nothing else.
+ *
+ * Both are anchored end to end on purpose. "No, make it Monday" is a revision
+ * of the proposal, not a rejection of it, and treating it as a rejection would
+ * throw away everything the user had already said.
+ */
+const YES = /^\s*(?:y|ya|yes+|yep|yeah|yup|sure|ok|okay|k|confirm(?:ed)?|correct|right|perfect|do it|go ahead|book it|sounds good|please do|that'?s right)\b[\s.!,]*$/i;
+const NO = /^\s*(?:n|no+|nope|nah|cancel(?: (?:it|that))?|forget it|never ?mind|dont|don'?t|stop|leave it|scratch that)\b[\s.!,]*$/i;
+
+/** Slots a proposal can be revised on, all JSON-safe so they survive a reload. */
+function revisePatch(patch, slots, base, now) {
+  const next = { ...patch };
+  if (slots.dateOnly || slots.timeOnly) {
+    const from = next.whenIso ? new Date(next.whenIso) : base.slots.when || now;
+    let d = new Date(from);
+    if (slots.dateOnly) d = atLocal(slots.dateOnly, d.getHours(), d.getMinutes());
+    if (slots.timeOnly) d = atLocal(d, slots.timeOnly.h, slots.timeOnly.m);
+    next.whenIso = toLocalIso(d);
+  }
+  if (slots.durationMins) next.durationMins = slots.durationMins;
+  if (slots.people.length) next.people = slots.people;
+  if (slots.subject) next.subject = slots.subject;
+  if (slots.priority) next.priority = slots.priority;
+  if (slots.rename) next.title = slots.rename;
+  if (slots.person) next.person = slots.person;
+  return next;
+}
+
+/** Fold a stored patch back onto a freshly parsed command. */
+function applyPatch(slots, patch) {
+  if (!patch) return slots;
+  if (patch.whenIso) {
+    const d = new Date(patch.whenIso);
+    slots.when = d;
+    slots.dateOnly = atLocal(d, 0);
+    slots.timeOnly = { h: d.getHours(), m: d.getMinutes(), source: "confirmed" };
+    slots.hadDate = true;
+    slots.hadTime = true;
+  }
+  if (patch.durationMins != null) slots.durationMins = patch.durationMins;
+  if (patch.people) slots.people = patch.people;
+  if (patch.subject) slots.subject = patch.subject;
+  if (patch.priority) slots.priority = patch.priority;
+  if (patch.title) slots.title = patch.title;
+  if (patch.person) slots.person = patch.person;
+  return slots;
+}
+
 /** Lookups scan the calendar; changes write to it. The art should match. */
 const PEN_INTENTS = new Set([
   INTENTS.CREATE_EVENT, INTENTS.CREATE_TASK, INTENTS.MOVE_EVENT,
@@ -77,13 +126,43 @@ export function ask(text, state, opts = {}) {
   const memory = opts.memory ?? state.memory ?? EMPTY_MEMORY;
   let p = parse(text, now);
   const identity = state.settings?.identity || {};
+  // On unless turned off. Reading a change back before making it is cheap;
+  // finding out next week that a board meeting moved is not.
+  const confirms = state.settings?.confirm !== false;
 
   const openTasks = state.tasks.filter((t) => !t.done);
 
+  // ------------------------------------------------- a proposal is on the table
+  const pending = opts.confirmed || opts.resolvedId ? null : memory.pending;
+  let baseText = text;
+  let patch = opts.patch ?? null;
+  let short = null;
+
+  if (pending) {
+    if (YES.test(text)) {
+      return ask(pending.text, state, {
+        ...opts, now, confirmed: true, patch: pending.patch, resolvedId: pending.resolvedId,
+      });
+    }
+    if (NO.test(text)) {
+      short = reply("Left it as it was.", [], { entity: null });
+    } else if (isFollowUp(p)) {
+      // "No, make it Monday" — a revision, not a new command. Everything
+      // already agreed stays; only what was just said changes.
+      const base = parse(pending.text, now);
+      patch = revisePatch(pending.patch, p.slots, base, now);
+      baseText = pending.text;
+      p = base;
+    }
+    // Anything else is a genuinely new command, and the proposal lapses.
+  }
+
+  if (patch) applyPatch(p.slots, patch);
+
   // Answering a choice list is already fully specified — it must not be read
   // as a follow-up, or "cancel it" would amend the wrong thing entirely.
-  const prior = opts.resolvedId ? null : lastTurn(memory, now);
-  const focus = opts.resolvedId ? null : focusOf(memory, state, now);
+  const prior = opts.resolvedId || pending ? null : lastTurn(memory, now);
+  const focus = opts.resolvedId || pending ? null : focusOf(memory, state, now);
 
   let amending = null;
   if (prior && isFollowUp(p)) {
@@ -96,14 +175,14 @@ export function ask(text, state, opts = {}) {
   }
 
   const { slots } = p;
-  const res = amending ? adjust(amending) : run();
+  const res = short ?? (amending ? adjust(amending) : run());
 
   if (!opts.memory) {
-    setMemory(
-      remember(
+    setMemory({
+      ...remember(
         memory,
         {
-          text: p.text,
+          text,
           intent: p.intent,
           slots: carryable(slots),
           // Precedence matters. A branch that names an entity — or explicitly
@@ -118,18 +197,47 @@ export function ask(text, state, opts = {}) {
         },
         now.getTime(),
       ),
-    );
+      // Held only while a proposal is open. Any turn that acts, declines, or
+      // wanders off somewhere else clears it.
+      pending: res.proposal
+        ? { text: baseText, patch, resolvedId: opts.resolvedId ?? null }
+        : null,
+    });
   }
 
   return decorate(res);
 
   function decorate(r) {
-    const { entity, day, pending, ...rest } = r;
+    const { entity, day, pending: _p, proposal, ...rest } = r;
     return {
       ...rest,
       intent: p.intent,
       ack: acknowledge(identity, p.intent, now),
       variant: amending || PEN_INTENTS.has(p.intent) ? "pen" : "calendar",
+    };
+  }
+
+  /**
+   * Read it back before doing it.
+   *
+   * The description covers the whole action, not only the parts that were
+   * inferred — one line to check, and the inferred day sits in it plainly
+   * rather than being discovered later on the calendar.
+   */
+  function gate(desc, act) {
+    if (opts.confirmed || !confirms) return act();
+    return {
+      text: confirmLine(identity, desc),
+      actions: [],
+      choices: {
+        kind: "confirm",
+        options: [
+          { id: "yes", label: "Yes, go ahead" },
+          { id: "no", label: "No, leave it" },
+        ],
+      },
+      pending: true,
+      proposal: desc,
     };
   }
 
@@ -143,8 +251,10 @@ export function ask(text, state, opts = {}) {
   function adjust({ kind, item }) {
     if (kind === "event") {
       if (p.intent === INTENTS.CANCEL_EVENT) {
-        deleteEvent(item.id);
-        return reply(`Cancelled “${item.title}”.`, [{ summary: `Cancelled “${item.title}”` }], { entity: null });
+        return gate(`cancelling “${item.title}”`, () => {
+          deleteEvent(item.id);
+          return reply(`Cancelled “${item.title}”.`, [{ summary: `Cancelled “${item.title}”` }], { entity: null });
+        });
       }
 
       const cur = new Date(item.start);
@@ -173,7 +283,6 @@ export function ask(text, state, opts = {}) {
         };
       }
 
-      updateEvent(item.id, patch);
       const moved = patch.start !== item.start;
       const bits = [];
       if (moved) bits.push(`now ${describe(start, now)}`);
@@ -181,26 +290,33 @@ export function ask(text, state, opts = {}) {
       if (patch.attendees) bits.push(`with ${slots.people.join(" and ")}`);
       if (patch.notes) bits.push(`about ${slots.subject}`);
 
-      const clash = state.events.find(
-        (o) => o.id !== item.id &&
-          new Date(o.start) < new Date(patch.end) && new Date(o.end) > start,
-      );
-      return reply(
-        `${patch.title || item.title} — ${bits.join(", ")}.` +
-          (clash ? ` That overlaps “${clash.title}”.` : ""),
-        [{ summary: `Updated “${patch.title || item.title}” · ${describe(start, now)}` }],
-        { entity: { kind: "event", id: item.id }, day: dayKey(start) },
-      );
+      return gate(`“${item.title}” — ${bits.join(", ")}`, () => {
+        updateEvent(item.id, patch);
+        const clash = state.events.find(
+          (o) => o.id !== item.id &&
+            new Date(o.start) < new Date(patch.end) && new Date(o.end) > start,
+        );
+        return reply(
+          `${patch.title || item.title} — ${bits.join(", ")}.` +
+            (clash ? ` That overlaps “${clash.title}”.` : ""),
+          [{ summary: `Updated “${patch.title || item.title}” · ${describe(start, now)}` }],
+          { entity: { kind: "event", id: item.id }, day: dayKey(start) },
+        );
+      });
     }
 
     // ---- task
     if (p.intent === INTENTS.COMPLETE_TASK) {
-      toggleTask(item.id);
-      return reply(`Done — “${item.title}”.`, [{ summary: `Completed “${item.title}”` }], { entity: null });
+      return gate(`marking “${item.title}” done`, () => {
+        toggleTask(item.id);
+        return reply(`Done — “${item.title}”.`, [{ summary: `Completed “${item.title}”` }], { entity: null });
+      });
     }
     if (p.intent === INTENTS.CANCEL_EVENT) {
-      deleteTask(item.id);
-      return reply(`Deleted “${item.title}”.`, [{ summary: `Deleted “${item.title}”` }], { entity: null });
+      return gate(`deleting “${item.title}”`, () => {
+        deleteTask(item.id);
+        return reply(`Deleted “${item.title}”.`, [{ summary: `Deleted “${item.title}”` }], { entity: null });
+      });
     }
 
     const patch = {};
@@ -232,12 +348,14 @@ export function ask(text, state, opts = {}) {
       };
     }
 
-    updateTask(item.id, patch);
-    return reply(
-      `“${patch.title || item.title}” — ${bits.join(", ")}.`,
-      [{ summary: `Updated “${patch.title || item.title}”` }],
-      { entity: { kind: "task", id: item.id }, day: patch.due ?? null },
-    );
+    return gate(`“${item.title}” — ${bits.join(", ")}`, () => {
+      updateTask(item.id, patch);
+      return reply(
+        `“${patch.title || item.title}” — ${bits.join(", ")}.`,
+        [{ summary: `Updated “${patch.title || item.title}”` }],
+        { entity: { kind: "task", id: item.id }, day: patch.due ?? null },
+      );
+    });
   }
 
   function run() {
@@ -268,17 +386,19 @@ export function ask(text, state, opts = {}) {
       const durMs = new Date(ev.end) - new Date(ev.start);
       const start = slots.when;
       const end = new Date(start.getTime() + durMs);
-      updateEvent(ev.id, { start: toLocalIso(start), end: toLocalIso(end) });
 
-      const clash = state.events.find(
-        (o) => o.id !== ev.id && new Date(o.start) < end && new Date(o.end) > start,
-      );
-      return reply(
-        `Moved “${ev.title}” to ${describe(start, now)}.` +
-          (clash ? ` Heads up — that now overlaps “${clash.title}”.` : ""),
-        [{ summary: `Moved “${ev.title}” → ${describe(start, now)}` }],
-        { entity: { kind: "event", id: ev.id }, day: dayKey(start) },
-      );
+      return gate(`moving “${ev.title}” to ${describe(start, now)}`, () => {
+        updateEvent(ev.id, { start: toLocalIso(start), end: toLocalIso(end) });
+        const clash = state.events.find(
+          (o) => o.id !== ev.id && new Date(o.start) < end && new Date(o.end) > start,
+        );
+        return reply(
+          `Moved “${ev.title}” to ${describe(start, now)}.` +
+            (clash ? ` Heads up — that now overlaps “${clash.title}”.` : ""),
+          [{ summary: `Moved “${ev.title}” → ${describe(start, now)}` }],
+          { entity: { kind: "event", id: ev.id }, day: dayKey(start) },
+        );
+      });
     }
 
     // ----------------------------------------------------------- cancel
@@ -298,8 +418,13 @@ export function ask(text, state, opts = {}) {
         });
       }
       const ev = ranked[0].item;
-      deleteEvent(ev.id);
-      return reply(`Cancelled “${ev.title}”.`, [{ summary: `Cancelled “${ev.title}”` }], { entity: null });
+      return gate(
+        `cancelling “${ev.title}”, ${describe(new Date(ev.start), now)}`,
+        () => {
+          deleteEvent(ev.id);
+          return reply(`Cancelled “${ev.title}”.`, [{ summary: `Cancelled “${ev.title}”` }], { entity: null });
+        },
+      );
     }
 
     // ----------------------------------------------------------- create
@@ -315,29 +440,33 @@ export function ask(text, state, opts = {}) {
       const topic = slots.hadDate ? null : topicDay(memory, now);
       if (topic && slots.hadTime) start = atLocal(topic, start.getHours(), start.getMinutes());
 
-      // When the whole sentence was consumed by slots there is no title left,
-      // so build one from the noun used and who it is with.
-      const noun = slots.kindNoun ? slots.kindNoun[0].toUpperCase() + slots.kindNoun.slice(1) : "Meeting";
-      const title =
-        slots.title || (people.length ? `${noun} with ${people.join(" and ")}` : noun);
+      // Name it the way a person would: lead with what it is about, fall back
+      // to who it is with, then to the noun they actually used.
+      const title = composeTitle(slots);
       const end = new Date(start.getTime() + mins * 60000);
-      const made = addEvent({
-        title,
-        start: toLocalIso(start),
-        end: toLocalIso(end),
-        attendees: people.map((name) => ({ name })),
-        notes: slots.subject || "",
-      });
       const withWho = people.length ? ` with ${people.join(" and ")}` : "";
       const about = slots.subject ? ` about ${slots.subject}` : "";
-      const clash = state.events.find(
-        (o) => new Date(o.start) < end && new Date(o.end) > start,
-      );
-      return reply(
-        `Booked ${duration(mins * 60000)}${withWho}${about} ${describe(start, now)}.` +
-          (clash ? ` That runs into “${clash.title}” — say the word and I'll move one.` : ""),
-        [{ summary: `Added “${title}” · ${describe(start, now)}` }],
-        { entity: { kind: "event", id: made.id }, day: dayKey(start) },
+
+      return gate(
+        `a ${duration(mins * 60000)} ${slots.kindNoun || "meeting"}${withWho}${about}, ${describe(start, now)}, titled “${title}”`,
+        () => {
+          const made = addEvent({
+            title,
+            start: toLocalIso(start),
+            end: toLocalIso(end),
+            attendees: people.map((name) => ({ name })),
+            notes: slots.subject || "",
+          });
+          const clash = state.events.find(
+            (o) => new Date(o.start) < end && new Date(o.end) > start,
+          );
+          return reply(
+            `Booked ${duration(mins * 60000)}${withWho}${about} ${describe(start, now)}.` +
+              (clash ? ` That runs into “${clash.title}” — say the word and I'll move one.` : ""),
+            [{ summary: `Added “${title}” · ${describe(start, now)}` }],
+            { entity: { kind: "event", id: made.id }, day: dayKey(start) },
+          );
+        },
       );
     }
 
@@ -346,22 +475,28 @@ export function ask(text, state, opts = {}) {
       if (!title) return needs("What's the task?");
       const projectHit = resolveProject(p.text, state.projects);
       const due = slots.dateOnly || (slots.hadDate ? null : topicDay(memory, now));
-      const made = addTask({
-        projectId: projectHit.length && isConfident(projectHit) ? projectHit[0].item.id : null,
-        title,
-        estimateMins: slots.durationMins || DEFAULT_TASK_MINS,
-        due: due ? dayKey(due) : null,
-        priority: slots.priority || "normal",
-        delegatedTo: slots.person || "",
-      });
       const bits = [];
-      if (due) bits.push(`due ${dayKey(due)}`);
-      if (slots.priority) bits.push(slots.priority);
+      if (due) bits.push(`due ${describe(atLocal(due, 9), now).split(" at ")[0]}`);
+      if (slots.priority) bits.push(`${slots.priority} priority`);
       if (slots.person) bits.push(`for ${slots.person}`);
-      return reply(
-        `Added “${title}”${bits.length ? ` — ${bits.join(", ")}` : ""}.`,
-        [{ summary: `Added task “${title}”` }],
-        { entity: { kind: "task", id: made.id }, day: due ? dayKey(due) : null },
+
+      return gate(
+        `a task, “${title}”${bits.length ? `, ${bits.join(", ")}` : ""}`,
+        () => {
+          const made = addTask({
+            projectId: projectHit.length && isConfident(projectHit) ? projectHit[0].item.id : null,
+            title,
+            estimateMins: slots.durationMins || DEFAULT_TASK_MINS,
+            due: due ? dayKey(due) : null,
+            priority: slots.priority || "normal",
+            delegatedTo: slots.person || "",
+          });
+          return reply(
+            `Added “${title}”${bits.length ? ` — ${bits.join(", ")}` : ""}.`,
+            [{ summary: `Added task “${title}”` }],
+            { entity: { kind: "task", id: made.id }, day: due ? dayKey(due) : null },
+          );
+        },
       );
     }
 
@@ -379,8 +514,10 @@ export function ask(text, state, opts = {}) {
         });
       }
       const t = ranked[0].item;
-      toggleTask(t.id);
-      return reply(`Done — “${t.title}”.`, [{ summary: `Completed “${t.title}”` }], { entity: null });
+      return gate(`marking “${t.title}” done`, () => {
+        toggleTask(t.id);
+        return reply(`Done — “${t.title}”.`, [{ summary: `Completed “${t.title}”` }], { entity: null });
+      });
     }
 
     case INTENTS.DELEGATE_TASK: {
@@ -396,12 +533,14 @@ export function ask(text, state, opts = {}) {
         });
       }
       const t = ranked[0].item;
-      updateTask(t.id, { delegatedTo: slots.person });
-      return reply(
-        `“${t.title}” is with ${slots.person} now.`,
-        [{ summary: `Delegated “${t.title}” → ${slots.person}` }],
-        { entity: { kind: "task", id: t.id } },
-      );
+      return gate(`handing “${t.title}” to ${slots.person}`, () => {
+        updateTask(t.id, { delegatedTo: slots.person });
+        return reply(
+          `“${t.title}” is with ${slots.person} now.`,
+          [{ summary: `Delegated “${t.title}” → ${slots.person}` }],
+          { entity: { kind: "task", id: t.id } },
+        );
+      });
     }
 
     // ------------------------------------------------------------ query
@@ -431,13 +570,18 @@ export function ask(text, state, opts = {}) {
       const day = dayKey(slots.dateOnly || now);
       const plan = planDay(state.tasks, state.events, { day, now });
       if (!plan.tasks.length) return reply("Nothing to plan — no open tasks.");
-      applyPlan(plan.tasks.map((t) => t.id), day);
-      const lines = plan.blocks.map((b) => `${fmtTime(b.start)} — ${b.task.title}`);
-      return reply(
-        `Planned ${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"} around your meetings.` +
-          (lines.length ? `\n${lines.join("\n")}` : ""),
-        [{ summary: `Planned ${plan.tasks.length} tasks` }],
-        { day },
+      return gate(
+        `laying ${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"} into the gaps around your meetings`,
+        () => {
+          applyPlan(plan.tasks.map((t) => t.id), day);
+          const lines = plan.blocks.map((b) => `${fmtTime(b.start)} — ${b.task.title}`);
+          return reply(
+            `Planned ${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"} around your meetings.` +
+              (lines.length ? `\n${lines.join("\n")}` : ""),
+            [{ summary: `Planned ${plan.tasks.length} tasks` }],
+            { day },
+          );
+        },
       );
     }
 
@@ -459,6 +603,10 @@ export function ask(text, state, opts = {}) {
 
 /** Continue after the user picks from a choice list. */
 export function resolveChoice(choice, id, state, now = new Date()) {
+  // Tapping and typing take the same path, so both behave identically and
+  // there is only one place where a confirmation can be granted.
+  if (choice.kind === "confirm") return ask(id === "yes" ? "yes" : "no", state, { now });
+
   const verb = {
     move: `move it to ${choice.when}`,
     cancel: "cancel it",

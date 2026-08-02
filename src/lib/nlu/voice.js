@@ -48,6 +48,29 @@ export function acknowledge(identity, kind, now = new Date()) {
   return `${greeting(now)}${suffix} — ${work}.`;
 }
 
+const ARTICLE = /^(?:the|a|an|our|my|their|this|that)\s+/i;
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+/**
+ * What a person would have typed in the title field.
+ *
+ * The subject is the most useful thing to lead with — "Term sheet with Priya"
+ * tells you what the block is for at a glance, where "Call with Priya" makes
+ * you open it. Falls back through who it's with, then the noun that was
+ * actually used, so a lunch reads "Lunch with Bob" and not "Meeting with Bob".
+ */
+export function composeTitle({ title, subject, people = [], kindNoun } = {}) {
+  if (title) return title;              // they named it outright; leave it alone
+  const who = joinNames(people.map((x) => (typeof x === "string" ? x : x.name)));
+  const topic = subject ? subject.replace(ARTICLE, "").trim() : "";
+  const noun = kindNoun ? cap(kindNoun) : "Meeting";
+
+  if (topic && who) return `${cap(topic)} with ${who}`;
+  if (topic) return cap(topic);
+  if (who) return `${noun} with ${who}`;
+  return noun;
+}
+
 const NUMBER = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 export const spell = (n) => (n <= 10 ? NUMBER[n] : String(n));
 
@@ -133,6 +156,20 @@ export function describeDay(dayLabel, events, dueTasks = []) {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * The line that goes out before anything is written.
+ *
+ * Reads back the whole proposal, not just the part that was inferred — the
+ * point is that one glance confirms every detail, including the ones the user
+ * never said out loud.
+ */
+export function confirmLine(identity, desc) {
+  const who = addressOf(identity);
+  return who
+    ? `Okay, ${who} — just to confirm: ${desc}?`
+    : `Just to confirm: ${desc}?`;
 }
 
 /** Closing courtesy, used sparingly — on answers, not on every confirmation. */

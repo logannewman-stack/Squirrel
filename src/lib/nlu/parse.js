@@ -158,7 +158,7 @@ function extractSubject(text) {
  * sentence was all slots, and the caller should compose a title instead.
  */
 const BARE_NOUN =
-  /^(?:meetings?|calls?|events?|syncs?|chats?|1:1|one on one|appointments?|catch ?up|blocks?|times?|slots?|for|about|on|to|with|and|it|that|this|them|those|an?|the|re)$/i;
+  /^(?:meetings?|calls?|events?|syncs?|chats?|1:1|one on one|appointments?|catch ?up|blocks?|times?|slots?|lunch|dinner|breakfast|coffee|drinks|standups?|stand-ups?|interviews?|reviews?|for|about|on|to|with|and|it|that|this|them|those|an?|the|re)$/i;
 
 /**
  * Produce the title a human would have typed.
@@ -247,6 +247,14 @@ export function parse(text, now = new Date()) {
   const people = extractPeople(body);
   const dateOnly = parseDate(body, now)?.date ?? null;
   const timeOnly = parseTime(body);
+  const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;
+
+  // "lunch with priya friday at 12" — nobody writes a verb in front of that.
+  // A meeting noun with a time attached is a booking, and the only reason it
+  // needed "schedule" in front was that the rules were looking for a verb.
+  if (intent === INTENTS.UNKNOWN && kindNoun && (dateOnly || timeOnly)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
 
   const slots = {
     when: when?.at ?? null,
@@ -262,7 +270,7 @@ export function parse(text, now = new Date()) {
     rename: extractRename(body),
     people,
     subject: extractSubject(body),
-    kindNoun: body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null,
+    kindNoun,
     // "due friday" marks a deadline rather than a start time.
     isDue: /\bdue\b|\bby\b/.test(s),
     dateOnly,

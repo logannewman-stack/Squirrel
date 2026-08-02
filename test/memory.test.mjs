@@ -148,6 +148,34 @@ const NOW = new Date(2026, 7, 2, 10, 0, 0);
   t("a restated slot overrides", merged.slots.durationMins === 90, merged.slots.durationMins);
 }
 
+// ------------------------------------------------------------------ titles
+{
+  const { composeTitle } = await import("../src/lib/nlu/voice.js");
+  const T = (text) => composeTitle(parse(text, NOW).slots);
+
+  t("subject leads when there is one",
+    T("book 45 minutes with anders about the munich lease thursday at 9") === "Munich lease with Anders",
+    T("book 45 minutes with anders about the munich lease thursday at 9"));
+  t("otherwise it is the noun and who",
+    T("schedule a 2 pm meeting for 30 minutes with bob") === "Meeting with Bob",
+    T("schedule a 2 pm meeting for 30 minutes with bob"));
+  t("the noun they used is the noun kept",
+    T("lunch with priya friday at 12") === "Lunch with Priya",
+    T("lunch with priya friday at 12"));
+  t("a call is a call", T("book a call with priya at 4") === "Call with Priya", T("book a call with priya at 4"));
+  t("a subject alone stands on its own",
+    T("block 2 hours thursday morning for the board deck") === "Board deck",
+    T("block 2 hours thursday morning for the board deck"));
+  t("and with nothing to go on, it is a meeting",
+    T("schedule something friday at 2") === "Something", T("schedule something friday at 2"));
+}
+{
+  // No verb, but a noun and a time — people book like this constantly.
+  const p = parse("lunch with priya friday at 12", NOW);
+  t("a noun with a time is a booking", p.intent === "create_event", p.intent);
+  t("and not a fragment to be attached to something else", p.fragment === false);
+}
+
 // ---------------------------------------------------------------- phrasing
 {
   const { describeMeeting } = await import("../src/lib/nlu/voice.js");
