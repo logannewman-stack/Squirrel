@@ -1,7 +1,13 @@
 # Deploying Squirrel
 
-Stack: Supabase (Postgres + auth), Vercel (static site + serverless API),
-Anthropic (assistant), Stripe (web billing), StoreKit (App Store billing).
+Stack: Vercel (static site + serverless API), Supabase (Postgres + auth),
+Stripe (web billing), StoreKit (App Store billing).
+
+**The web app itself needs none of them.** The assistant is ordinary code
+running in the browser — no model, no API key, no network call — so the site is
+a static bundle that works the moment it is served. Everything below is for
+accounts, sync, and billing, which the client does not use yet. If the deployed
+site is broken, a missing environment variable is not the reason.
 
 ---
 
@@ -78,13 +84,37 @@ the only boundary between one customer's rows and another's, so review
 
 ### Vercel
 
-Set every variable from `.env.example` in project settings. The distinction that
-matters: `VITE_*` variables are **inlined into the browser bundle**.
-`ANTHROPIC_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` must never carry that prefix.
+`vercel.json` pins the build so nothing depends on auto-detection:
+
+| Setting | Value |
+| --- | --- |
+| Framework | Vite |
+| Install | `npm ci` |
+| Build | `npm run build` |
+| Output | `dist` |
+| Root directory | *(repository root — leave blank)* |
+
+The rewrite sends every path except `/api/*` to `index.html`. The app keeps its
+view in React state rather than the URL, so this only matters for reloads and
+shared links, but without it a static host answers `/anything` with a 404.
+
+If the project was created before this file existed, Vercel keeps whatever was
+set in the dashboard — **dashboard settings override `vercel.json`**. Clear the
+build and output overrides in Project Settings → Build & Development so they
+fall back to this file, and confirm Production Branch is `main`.
 
 ```bash
 vercel --prod
 ```
+
+Deploying the site needs no environment variables at all. Set the ones in
+`.env.example` when wiring up accounts and billing; the distinction that matters
+then is that `VITE_*` variables are **inlined into the browser bundle**, so
+`SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_SECRET_KEY` must never carry that prefix.
+
+The three functions in `api/` are for that future backend and are not called by
+the client yet. They build fine without their variables set; they simply return
+errors if requested.
 
 ### Stripe
 

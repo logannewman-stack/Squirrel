@@ -80,11 +80,87 @@ const NOT_A_NAME = new Set([
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/**
+ * Words worth recognising through a typo. Command verbs and time words only —
+ * this list is never used to correct anything a user might have meant
+ * literally, like a name or a project.
+ */
+const VOCAB = [
+  "schedule", "reschedule", "book", "block", "cancel", "delete", "remove",
+  "move", "push", "postpone", "shift", "bump", "complete", "finish",
+  "delegate", "assign", "remind", "calendar", "meeting", "meetings",
+  "tomorrow", "tonight", "today", "monday", "tuesday", "wednesday",
+  "thursday", "friday", "saturday", "sunday", "morning", "afternoon",
+  "evening", "minutes", "minute", "hours", "clock", "oclock", "priority",
+];
+
+/** Levenshtein, abandoned as soon as it cannot come in under `max`. */
+function distance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(
+        prev[j] + 1,
+        row[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+      if (row[j] < best) best = row[j];
+    }
+    if (best > max) return max + 1;
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Nudge obvious typos onto known command words.
+ *
+ * Only runs when nothing classified at all, so a sentence that already makes
+ * sense is never rewritten, and a name is never "corrected" into a verb. Words
+ * sitting where a name goes are skipped outright. A wrong guess here is caught
+ * by the confirmation before it reaches the calendar, where doing nothing at
+ * all — which is what "scheduke" used to get — is not.
+ */
+function despell(text) {
+  const parts = text.split(/(\s+)/);
+  let namePosition = false;
+  return parts
+    .map((tok) => {
+      if (/^\s*$/.test(tok)) return tok;
+      const w = tok.toLowerCase().replace(/[^a-z']/g, "");
+      const after = namePosition;
+      namePosition = /^(?:with|to|for|and)$/.test(w);
+      if (after || w.length < 4 || VOCAB.includes(w)) return tok;
+
+      const max = w.length >= 6 ? 2 : 1;
+      let best = null;
+      let bestD = max + 1;
+      for (const v of VOCAB) {
+        const d = distance(w, v, max);
+        if (d < bestD) {
+          bestD = d;
+          best = v;
+        }
+      }
+      return bestD <= max ? tok.replace(w, best) : tok;
+    })
+    .join("");
+}
+
+const classify = (s) => {
+  for (const [name, re] of RULES) if (re.test(s)) return name;
+  return INTENTS.UNKNOWN;
+};
+
 /** Strip leading command verbs so the remainder reads as a title. */
 function stripVerbs(text) {
   return text
     .replace(/^\s*(?:can you|could you|please|hey|ok|okay)\s+/i, "")
     .replace(/^\s*(?:add|create|new|schedule|book|block|set up|remind me to|i need to)\s+/i, "")
+    .replace(/\bput\s+(?:it|this|that)?\s*(?:on|in)\s+(?:my|the)\s+calendar\b/i, " ")
     .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder)\s+(?:to|for|called|named)?\s*/i, "")
     .trim();
 }
@@ -97,6 +173,7 @@ function stripTemporal(text) {
     .replace(/\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/gi, " ")
     // Bare "at 10" with no meridiem — otherwise it survives into a title or
     // subject as trailing noise.
+    .replace(/\b\d{1,2}\s*o'?\s*c?l[o0]?c?k\b/gi, " ")
     .replace(/\bat\s+\d{1,2}(?::\d{2})?\b/gi, " ")
     .replace(/\b\d{1,2}:\d{2}\b/g, " ")
     .replace(/\b\d+(?:\.\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b/gi, " ")
@@ -144,12 +221,23 @@ function extractRename(text) {
   return cleaned[0].toUpperCase() + cleaned.slice(1);
 }
 
-/** "about the Q3 pipeline" / "re: financials" → what the meeting covers. */
-function extractSubject(text) {
-  const m = text.match(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+(.+)$/i);
+/**
+ * "about the Q3 pipeline", "re: financials", "on financials for DOD".
+ *
+ * "on" earns its place — people say "a meeting on financials" constantly — but
+ * it is also how they say "on Friday" and "on my calendar". Both are stripped
+ * before the result is judged empty, so those produce no subject at all.
+ */
+function extractSubject(text, people = []) {
+  const m = text.match(/\b(?:about|regarding|re:?|to discuss|to go over|covering|on)\s+(.+)$/i);
   if (!m) return null;
-  const cleaned = stripTemporal(m[1]).replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "").trim();
-  return cleaned || null;
+  const cleaned = stripTemporal(m[1])
+    .replace(withPhrase(people), " ")
+    .replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (!cleaned || /^(?:my|the|our)?\s*calendar$/i.test(cleaned)) return null;
+  return cleaned;
 }
 
 /**
@@ -173,11 +261,14 @@ const BARE_NOUN =
  * gone, and until it does, the noun-phrase rule cannot see it — which is how
  * "Meeting for with bob" used to end up on the calendar.
  */
-function cleanTitle(text, people = []) {
+function cleanTitle(text, people = [], subject = null) {
   // "make it an hour" is an instruction about an existing thing, not a name.
   // Without this the leftovers spell "Make" and the meeting gets renamed.
   let t = stripVerbs(text.replace(AMEND, " "))
     .replace(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+.+$/i, " ")
+    // Cut the exact subject that was extracted rather than everything after a
+    // preposition — "on" is far too common to truncate a title on.
+    .replace(subject ? new RegExp(`\\b(?:on\\s+)?${esc(subject)}\\b`, "i") : /$^/, " ")
     .replace(withPhrase(people), " ");
   t = stripTemporal(t);
   t = stripVerbs(t);
@@ -209,16 +300,20 @@ export function parse(text, now = new Date()) {
   // Classify what is left after "no," / "actually," — the correction marker is
   // discourse, not content, and leaving it in poisons both intent and title.
   const repair = REPAIR.test(raw);
-  const body = repair ? raw.replace(REPAIR, "").trim() : raw;
-  const s = body.toLowerCase();
+  let body = repair ? raw.replace(REPAIR, "").trim() : raw;
 
-  let intent = INTENTS.UNKNOWN;
-  for (const [name, re] of RULES) {
-    if (re.test(s)) {
-      intent = name;
-      break;
+  let intent = classify(body.toLowerCase());
+  if (intent === INTENTS.UNKNOWN) {
+    // Nothing matched — before giving up, try it as though it were typed in a
+    // hurry. "can you scheduke a 3 o clok" is a booking, not a mystery.
+    const fixed = despell(body);
+    const retry = classify(fixed.toLowerCase());
+    if (retry !== INTENTS.UNKNOWN) {
+      intent = retry;
+      body = fixed;
     }
   }
+  const s = body.toLowerCase();
 
   // "move X to Y" — the target time is what follows the last "to"/"until".
   let targetPhrase = body;
@@ -245,6 +340,7 @@ export function parse(text, now = new Date()) {
   // "delegate X to Anders" / "assign X to Priya"
   const toPerson = body.match(/\b(?:to|with|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/);
   const people = extractPeople(body);
+  const subject = extractSubject(body, people);
   const dateOnly = parseDate(body, now)?.date ?? null;
   const timeOnly = parseTime(body);
   const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;
@@ -266,10 +362,10 @@ export function parse(text, now = new Date()) {
     subjectPhrase,
     targetPhrase,
     // Title with verbs, temporal phrases, and priority wording removed.
-    title: cleanTitle(body, people),
+    title: cleanTitle(body, people, subject),
     rename: extractRename(body),
     people,
-    subject: extractSubject(body),
+    subject,
     kindNoun,
     // "due friday" marks a deadline rather than a start time.
     isDue: /\bdue\b|\bby\b/.test(s),

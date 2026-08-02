@@ -63,8 +63,23 @@ function disambiguateHour(h, meridiem) {
  * Extract a clock time.
  * @returns {{h: number, m: number, source: string} | null}
  */
+/**
+ * "3 o'clock", "3 oclock", "3 o clock", "3 o clok".
+ *
+ * Deliberately forgiving — this gets typed at speed and mistyped constantly,
+ * and a missed time is the difference between booking a meeting and asking a
+ * question the user already answered.
+ */
+export const OCLOCK = /\b(\d{1,2})\s*o'?\s*c?l[o0]?c?k\b/i;
+
 export function parseTime(text) {
   const s = text.toLowerCase();
+
+  const oc = s.match(OCLOCK);
+  if (oc) {
+    const hour = Number(oc[1]);
+    if (hour <= 23) return { h: disambiguateHour(hour, null), m: 0, source: oc[0] };
+  }
 
   // 3pm, 3:30 pm, 15:00, at 2
   const m = s.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/);

@@ -148,6 +148,50 @@ const NOW = new Date(2026, 7, 2, 10, 0, 0);
   t("a restated slot overrides", merged.slots.durationMins === 90, merged.slots.durationMins);
 }
 
+// -------------------------------------------------------------- typed fast
+// Logan's line, exactly as typed. Two typos and an unusual time format, and it
+// used to produce a confirmation reading: “Then can you book” — with Bob?
+{
+  const p = parse("can you scheduke a 3 o clok for a meeting with bob on financials for DOD", NOW);
+  t("a mistyped verb still classifies", p.intent === "create_event", p.intent);
+  t("and is not mistaken for a fragment", p.fragment === false);
+  t("'3 o clok' is three o'clock", p.slots.timeOnly?.h === 15, JSON.stringify(p.slots.timeOnly));
+  t("'on financials' is the subject", p.slots.subject === "financials for DOD", p.slots.subject);
+  t("bob is still the attendee", p.slots.people[0] === "Bob", JSON.stringify(p.slots.people));
+  t("no scrap of the command survives as a title", p.slots.title === null, p.slots.title);
+}
+{
+  const forms = ["3 o'clock", "3 oclock", "3 o clock", "3 o clok", "3oclock"];
+  for (const f of forms) {
+    const p = parse(`meeting with bob at ${f} friday`, NOW);
+    t(`“${f}” reads as 3 PM`, p.slots.timeOnly?.h === 15, JSON.stringify(p.slots.timeOnly));
+  }
+}
+{
+  // The correction pass must not touch a sentence that already made sense,
+  // and must never rewrite a name into a verb.
+  const p = parse("book 30 minutes with Blocke friday at 2", NOW);
+  t("a name near a command word is left alone",
+    p.slots.people[0] === "Blocke", JSON.stringify(p.slots.people));
+}
+{
+  const p = parse("put it on my calendar tomorrow at 3", NOW);
+  t("a calendar phrase is not a subject", p.slots.subject === null, p.slots.subject);
+  t("nor a title", p.slots.title === null, p.slots.title);
+}
+{
+  const p = parse("meeting on friday with bob", NOW);
+  t("'on friday' is a date, not a subject", p.slots.subject === null, p.slots.subject);
+  t("and the day is read", p.slots.dateOnly?.getDay() === 5, p.slots.dateOnly);
+}
+{
+  // A title belongs to one thing. Carrying it is what produced the nonsense.
+  const prior = { intent: "create_event", slots: carryable(parse("block 2 hours for the board deck", NOW).slots) };
+  t("a title is never carried between turns", prior.slots.title === undefined, JSON.stringify(prior.slots));
+  const merged = inherit(parse("friday at 2", NOW), prior);
+  t("so a fragment cannot inherit one", !merged.slots.title, merged.slots.title);
+}
+
 // ------------------------------------------------------------------ titles
 {
   const { composeTitle } = await import("../src/lib/nlu/voice.js");

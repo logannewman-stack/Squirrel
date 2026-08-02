@@ -32,7 +32,9 @@ export function carryable(slots) {
     person: slots.person ?? null,
     people: slots.people?.length ? slots.people : null,
     subject: slots.subject ?? null,
-    title: slots.title ?? null,
+    // Deliberately absent: title. A title belongs to one specific thing, and
+    // carrying it forward means a later fragment gets named after an earlier
+    // sentence — which is how a booking ended up called "Then can you book".
     subjectPhrase: slots.subjectPhrase ?? null,
     kindNoun: slots.kindNoun ?? null,
   };
