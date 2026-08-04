@@ -107,6 +107,7 @@ function applyPatch(slots, patch) {
 const PEN_INTENTS = new Set([
   INTENTS.CREATE_EVENT, INTENTS.CREATE_TASK, INTENTS.MOVE_EVENT,
   INTENTS.CANCEL_EVENT, INTENTS.COMPLETE_TASK, INTENTS.DELEGATE_TASK,
+  INTENTS.RESIZE_EVENT,
 ]);
 
 export const EXAMPLES = [
@@ -591,6 +592,122 @@ export function ask(text, state, opts = {}) {
       // The day asked about becomes the topic, so a bare "book a 2pm" next
       // lands here rather than on today.
       return reply(describeDay(label, events, due), [], { day });
+    }
+
+    // ------------------------------------------------------- one thing
+    case INTENTS.QUERY_EVENT: {
+      const ranked = resolveEvent(p.body, state.events, now);
+      if (!ranked.length) return reply("I couldn't find that on your calendar.");
+      if (!isConfident(ranked)) {
+        return askWhich("Which one?", {
+          kind: "event", intent: "show",
+          options: ranked.slice(0, 4).map((r) => ({
+            id: r.item.id, label: `${r.item.title} · ${describe(new Date(r.item.start), now)}`,
+          })),
+        });
+      }
+      const ev = ranked[0].item;
+      const mins = Math.round((new Date(ev.end) - new Date(ev.start)) / 60000);
+      const who = (ev.attendees || []).map((a) => (typeof a === "string" ? a : a.name)).filter(Boolean);
+      const bits = [`${ev.title} is ${describe(new Date(ev.start), now)}`];
+      bits.push(`${duration(mins * 60000)} long`);
+      if (who.length) bits.push(`with ${who.join(" and ")}`);
+      if (ev.location) bits.push(`at ${ev.location}`);
+      if (ev.notes) bits.push(`about ${ev.notes}`);
+      return reply(`${bits.join(", ")}.`, [], { entity: { kind: "event", id: ev.id }, day: dayKey(new Date(ev.start)) });
+    }
+
+    // ------------------------------------------------------- how it went
+    case INTENTS.QUERY_PROGRESS: {
+      // Answered from logged sessions, which is the only honest source — what
+      // was planned is not what happened.
+      //
+      // Looking back needs its own reading of the words. "This week" as a
+      // deadline means before it runs out, so the date parser resolves it to
+      // Friday; asked about what has been done, it means since Monday. Same
+      // phrase, opposite end of the same week, and using the forward reading
+      // here reported an empty week every time.
+      const b = p.body.toLowerCase();
+      const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+      const mondayOf = (d, backWeeks = 0) => {
+        const x = startOfDay(d);
+        x.setDate(x.getDate() - ((x.getDay() + 6) % 7) - backWeeks * 7);
+        return x;
+      };
+      const since =
+        /\btoday\b/.test(b) ? startOfDay(now)
+        : /\byesterday\b/.test(b) ? startOfDay(new Date(now.getTime() - 86400000))
+        : /\blast week\b/.test(b) ? mondayOf(now, 1)
+        : /\bthis week\b|\bthe week\b/.test(b) ? mondayOf(now)
+        : /\bthis month\b/.test(b) ? new Date(now.getFullYear(), now.getMonth(), 1)
+        : new Date(now.getTime() - 7 * 86400000);
+      const until =
+        /\byesterday\b/.test(b) ? startOfDay(now)
+        : /\blast week\b/.test(b) ? mondayOf(now)
+        : new Date(now.getTime() + 86400000);
+      const mine = state.sessions.filter(
+        (x) => new Date(x.endedAt) >= since && new Date(x.endedAt) < until);
+      const project = resolveProject(p.body, state.projects);
+      const scoped = project.length && isConfident(project)
+        ? mine.filter((x) => x.projectId === project[0].item.id)
+        : mine;
+
+      const focused = scoped.reduce((n, x) => n + (x.focusedMs || 0), 0);
+      const doneTasks = state.tasks.filter(
+        (t) => t.done && t.doneAt && new Date(t.doneAt) >= since && new Date(t.doneAt) < until).length;
+      const label = project.length && isConfident(project) ? ` on ${project[0].item.name}` : "";
+
+      if (!scoped.length && !doneTasks) {
+        return reply(`Nothing logged${label} in that stretch.`);
+      }
+      return reply(
+        `${duration(focused)} of focused work${label} across ${scoped.length} ` +
+        `${scoped.length === 1 ? "session" : "sessions"}` +
+        (doneTasks ? `, and ${doneTasks} ${doneTasks === 1 ? "task" : "tasks"} finished` : "") + ".",
+      );
+    }
+
+    // --------------------------------------------------- change its length
+    case INTENTS.RESIZE_EVENT: {
+      const ranked = opts.resolvedId
+        ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
+        : resolveEvent(p.body, state.events, now);
+      if (!ranked.length) return reply("I couldn't find that on your calendar.");
+      if (!isConfident(ranked)) {
+        return askWhich("Which one?", {
+          kind: "event", intent: "resize",
+          options: ranked.slice(0, 4).map((r) => ({
+            id: r.item.id, label: `${r.item.title} · ${describe(new Date(r.item.start), now)}`,
+          })),
+        });
+      }
+      const ev = ranked[0].item;
+      const start = new Date(ev.start);
+      const was = Math.round((new Date(ev.end) - start) / 60000);
+      const body = p.body.toLowerCase();
+
+      let mins;
+      if (/\bin half\b/.test(body)) mins = Math.max(15, Math.round(was / 2));
+      else if (/\bdouble\b/.test(body)) mins = was * 2;
+      else if (slots.durationMins && /\bby\b/.test(body)) {
+        mins = /\b(?:shorten|trim|cut|reduce)\b/.test(body)
+          ? Math.max(15, was - slots.durationMins)
+          : was + slots.durationMins;
+      } else if (slots.durationMins) mins = slots.durationMins;
+      else return needs(`How long should “${ev.title}” be?`);
+
+      const end = toLocalIso(new Date(start.getTime() + mins * 60000));
+      return gate(
+        `“${ev.title}” ${mins > was ? "extended" : "shortened"} to ${duration(mins * 60000)}`,
+        () => {
+          updateEvent(ev.id, { end });
+          return reply(
+            `“${ev.title}” is now ${duration(mins * 60000)}, ${describe(start, now)}.`,
+            [{ summary: `${ev.title} → ${duration(mins * 60000)}` }],
+            { entity: { kind: "event", id: ev.id }, day: dayKey(start) },
+          );
+        },
+      );
     }
 
     case INTENTS.QUERY_FREE: {

@@ -247,6 +247,57 @@ const convo = await p.evaluate(async () => {
     `${M().events.length} vs ${n2 + 1}`);
   store.setSetting("confirm", false);
 
+  // ---- the newer intents actually do something ----
+  store.addEvent({
+    title: "Lease walkthrough", start: iso(2026, 8, 5, 11), end: iso(2026, 8, 5, 12),
+    attendees: [{ name: "Anders" }], location: "Maximilianstrasse",
+  });
+  r = ask("where is the lease walkthrough", M(), { now: NOW });
+  t("she answers where", /Maximilianstrasse/.test(r.text), r.text);
+  t("and how long, and with whom", /1h/.test(r.text) && /Anders/.test(r.text), r.text);
+  t("without changing anything", M().events.some((e) => e.title === "Lease walkthrough"));
+
+  r = ask("how long is the lease walkthrough", M(), { now: NOW });
+  t("length questions are answered too", /1h/.test(r.text), r.text);
+
+  // Resizing is a different operation from moving, and must not move it.
+  const lw = M().events.find((e) => e.title === "Lease walkthrough");
+  r = ask("shorten the lease walkthrough to 30 minutes", M(), { now: NOW });
+  const after = M().events.find((e) => e.id === lw.id);
+  t("shortening changes the length",
+    (new Date(after.end) - new Date(after.start)) / 60000 === 30,
+    (new Date(after.end) - new Date(after.start)) / 60000);
+  t("and leaves the start alone", after.start === lw.start, after.start);
+
+  ask("extend the lease walkthrough by an hour", M(), { now: NOW });
+  const longer = M().events.find((e) => e.id === lw.id);
+  t("extending by adds to what is there",
+    (new Date(longer.end) - new Date(longer.start)) / 60000 === 90,
+    (new Date(longer.end) - new Date(longer.start)) / 60000);
+
+  ask("cut the lease walkthrough in half", M(), { now: NOW });
+  const halved = M().events.find((e) => e.id === lw.id);
+  t("and halving halves it",
+    (new Date(halved.end) - new Date(halved.start)) / 60000 === 45,
+    (new Date(halved.end) - new Date(halved.start)) / 60000);
+
+  // Progress is answered from what was logged, not what was planned.
+  store.logSession({ taskId: null, projectId: null, label: "Deep work",
+    plannedMs: 60 * 60000, focusedMs: 50 * 60000, endedAt: NOW.getTime() - 86400000 });
+  r = ask("how much have i done this week", M(), { now: NOW });
+  t("progress comes from logged sessions", /50m/.test(r.text), r.text);
+  t("and counts them", /1 session/.test(r.text), r.text);
+
+  // Vague dates and written numbers land on real days.
+  n = eventCount();
+  ask("book a couple of hours with dana early next week", M(), { now: NOW });
+  const vague = M().events[M().events.length - 1];
+  t("a written duration is understood",
+    (new Date(vague.end) - new Date(vague.start)) / 60000 === 120,
+    (new Date(vague.end) - new Date(vague.start)) / 60000);
+  t("and a vague day becomes a real one",
+    new Date(`${vague.start}`).getDay() === 1, vague.start);
+
   // Memory has to be forgettable, or a cleared thread still steers replies.
   store.clearChat();
   t("clearing the chat clears the memory", store.getState().memory.turns.length === 0);

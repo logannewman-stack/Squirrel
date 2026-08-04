@@ -42,6 +42,16 @@ const CORPUS = {
   "complete / delegate": ["mark the term sheet done","complete the lease task","i finished the board deck","delegate the lease to anders","assign the letter to priya","hand off the data room to sarah"],
   "planning & pacing": ["plan my day","plan my week","what should i work on","what's most urgent","will the board deck fit","am i behind on the raise","how is the board cycle going","how much is left on munich","spread the deck out","when will i finish the letter","triage my tasks"],
   "corrections": ["no make it monday","actually make it an hour","no for friday","make it 3pm","push it to thursday","call it board prep","no cancel it","instead do it tuesday"],
+"vague dates": ["book a call next week","schedule the review end of the week","find time in a couple of days","meeting on the 15th","a week from tuesday","put it in for eod friday","cob monday","first thing tomorrow","later today","this afternoon","early next week","end of month","in two weeks","the day after tomorrow","sometime this week","start of next month"],
+  "loose durations": ["book half an hour with bob","a couple of hours on the deck","45 mins with priya","an hour and a half thursday","block out all morning friday","quick call with dana","a quick 15 with sarah","two and a half hours on the letter","the rest of the afternoon"],
+  "other booking verbs": ["pencil in a call with bob friday","get the board prep on my calendar","find time for the deck this week","squeeze in 30 minutes with priya","clear my friday afternoon","free up tuesday morning","hold thursday 2 to 4","pop a review in monday","stick a call in wednesday","set aside 3 hours for the deck","carve out time thursday","make time for the letter"],
+  "edit the length": ["make the board prep two hours","extend my 3pm by 30 minutes","shorten the exec staff to 30","trim the review to 45 minutes","double the deck block","cut the standup in half"],
+  "recurring": ["every monday at 9 standup","weekly exec staff monday 9am","a daily standup at 9","repeat the board prep every friday","move all my mondays"],
+  "about one thing": ["when is the board meeting","what time is my call with bob","where is the lease walkthrough","who am i meeting friday","how long is the exec staff","what's my next meeting","when's my first meeting tomorrow","is the board prep still on"],
+  "progress": ["how much have i done this week","what did i do yesterday","how much time on the raise","how many hours did i focus","what did i finish today","how am i doing on focus"],
+  "hours on work": ["the deck will take 8 hours","estimate 3 hours for the letter","the lease is about 45 minutes","budget 2 hours for the review","that one is a 4 hour job"],
+  "clearing": ["clear my afternoon","wipe friday","cancel everything tomorrow","move everything on friday to monday","clear the rest of today"],
+  "polite combos": ["could you book a call with bob friday at 2","would you mind moving my 3pm","please cancel my 4pm","can you find me an hour thursday","do me a favour and clear friday","if you could, move the standup"],
   "out of scope": ["what's the capital of france","what's the weather","tell me a joke","write me a poem","who won the game","translate this","define serendipity"],
 };
 
@@ -64,6 +74,45 @@ if (gaps.length) {
   for (const [g, q] of gaps) console.log(`  [${g}] ${q}`);
 }
 
+/**
+ * Routing, not just recognition.
+ *
+ * Coverage says a message landed somewhere. This says it landed in the right
+ * place — the risk every new pattern carries is stealing a phrasing from an
+ * older intent, and "shorten the exec staff" quietly becoming a move is the
+ * kind of regression a coverage number is blind to.
+ */
+const ROUTES = {
+  "move my 3pm to friday": "move_event",
+  "push the review to friday": "move_event",
+  "cancel my 4pm": "cancel_event",
+  "what does friday look like": "query_day",
+  "when am i free thursday": "query_free",
+  "schedule a call with bob friday at 2": "create_event",
+  "block 2 hours thursday for the deck": "create_event",
+  "add a task to sign the lease": "create_task",
+  "mark the deck done": "complete_task",
+  "delegate the lease to anders": "delegate_task",
+  "plan my week": "plan_day",
+  "what is most urgent": "plan_day",
+  "where is the lease walkthrough": "query_event",
+  "how long is the exec staff": "query_event",
+  "when is the board meeting": "query_event",
+  "what time is my call with bob": "query_event",
+  "how much have i done this week": "query_progress",
+  "what did i do yesterday": "query_progress",
+  "shorten the exec staff to 30": "resize_event",
+  "extend my 3pm by 30 minutes": "resize_event",
+  "cut the standup in half": "resize_event",
+  "make the board prep two hours": "resize_event",
+};
+let misrouted = 0;
+for (const [q, want] of Object.entries(ROUTES)) {
+  const got = parse(q, NOW).intent;
+  if (got !== want) { misrouted++; console.log(`MISROUTED "${q}" → ${got}, wanted ${want}`); }
+}
+console.log(misrouted ? `${misrouted} misrouted` : `${Object.keys(ROUTES).length} route correctly`);
+
 // A courtesy layer that eats requests is worse than one that misses
 // courtesies: the first loses work, the second only looks rude.
 const MUST_REACH_PARSER = [
@@ -83,8 +132,8 @@ for (const q of MUST_REACH_PARSER) {
 console.log(swallowed ? `${swallowed} requests swallowed by small talk` : `${MUST_REACH_PARSER.length} requests still reach the parser`);
 
 const pct = Math.round((got / total) * 100);
-if (pct < 98 || swallowed) {
-  console.log(`\nFAIL — coverage ${pct}%, ${swallowed} swallowed`);
+if (pct < 98 || swallowed || misrouted) {
+  console.log(`\nFAIL — coverage ${pct}%, ${swallowed} swallowed, ${misrouted} misrouted`);
   process.exit(1);
 }
-console.log(`\nPASS — coverage ${pct}%, nothing swallowed`);
+console.log(`\nPASS — coverage ${pct}%, nothing swallowed, nothing misrouted`);

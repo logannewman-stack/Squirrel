@@ -28,6 +28,38 @@ const MONTHS = {
   december: 11, dec: 11,
 };
 
+/**
+ * Numbers as people write them.
+ *
+ * "two and a half hours" and "a couple of days" are how durations and offsets
+ * actually get typed; digits are the exception in conversational input, not
+ * the rule. Kept here rather than in the duration parser because dates need
+ * them just as much — "in two weeks" is the same problem.
+ */
+export const WORD_NUMBERS = {
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20,
+  thirty: 30, forty: 40, forty5: 45, fifty: 50, sixty: 60, ninety: 90,
+  couple: 2, few: 3, several: 3, dozen: 12,
+};
+
+// Longest first, or the alternation matches the "a" in "a couple of days" and
+// then finds no unit behind it.
+const NUM_WORDS = Object.keys(WORD_NUMBERS)
+  .sort((x, y) => y.length - x.length)
+  .join("|");
+
+/**
+ * A written number, with the halves people actually say.
+ * "two and a half" → 2.5, "an hour and a half" is handled by the caller.
+ */
+export function wordNumber(text) {
+  const m = text.match(new RegExp(`\\b(${NUM_WORDS})\\b(?:\\s+of)?(\\s+and\\s+a\\s+half)?`, "i"));
+  if (!m) return null;
+  const base = WORD_NUMBERS[m[1].toLowerCase()];
+  return m[2] ? base + 0.5 : base;
+}
+
 /** Rough parts of day, used when no clock time is given. */
 const DAYPARTS = { morning: 9, afternoon: 14, evening: 18, night: 19, noon: 12, midnight: 0 };
 
@@ -176,12 +208,60 @@ export function parseDate(text, now = new Date()) {
     return { date: d, source: wd[0].trim() };
   }
 
-  // "in 3 days"
-  const inDays = s.match(/\bin\s+(\d+)\s+days?\b/);
-  if (inDays) {
+  // "in 3 days", "in a couple of days", "in two weeks", "in a month"
+  const inN = s.match(new RegExp(`\\bin\\s+(?:an?\\s+)?(\\d+|${NUM_WORDS})\\s*(?:of\\s+)?(day|week|month)s?\\b`));
+  if (inN) {
+    const n = /^\d+$/.test(inN[1]) ? Number(inN[1]) : WORD_NUMBERS[inN[1]];
     const d = new Date(base);
-    d.setDate(d.getDate() + Number(inDays[1]));
-    return { date: d, source: inDays[0] };
+    if (inN[2] === "day") d.setDate(d.getDate() + n);
+    else if (inN[2] === "week") d.setDate(d.getDate() + n * 7);
+    else d.setMonth(d.getMonth() + n);
+    return { date: d, source: inN[0] };
+  }
+
+  // "the 15th", "on the 3rd" — a bare day of the month, which means the next
+  // time that number comes round rather than one that has already gone.
+  const ord = s.match(/\bthe\s+(\d{1,2})(?:st|nd|rd|th)\b/);
+  if (ord) {
+    const n = Number(ord[1]);
+    if (n >= 1 && n <= 31) {
+      const d = new Date(base.getFullYear(), base.getMonth(), n);
+      if (d < base) d.setMonth(d.getMonth() + 1);
+      return { date: d, source: ord[0] };
+    }
+  }
+
+  // Coarse points in a week or a month. Each resolves to one concrete date,
+  // because a range cannot be booked — "early next week" is Monday, and the
+  // confirmation says Monday so a wrong reading is visible and correctable.
+  const coarse = s.match(/\b(early|start|beginning|mid|middle|end|later?)\s+(?:of\s+)?(?:the\s+)?(this\s+|next\s+|coming\s+)?(week|month)\b/);
+  if (coarse) {
+    const [, where, , unitRaw] = coarse;
+    const nextOne = /next|coming/.test(coarse[2] || "");
+    const d = new Date(base);
+    if (unitRaw === "week") {
+      // Monday of the target week, then offset within it.
+      const toMonday = (1 - d.getDay() + 7) % 7;
+      d.setDate(d.getDate() + toMonday + (nextOne ? 7 : 0));
+      if (/mid|middle/.test(where)) d.setDate(d.getDate() + 2);
+      if (/end|later?/.test(where)) d.setDate(d.getDate() + 4);
+    } else {
+      if (nextOne) d.setMonth(d.getMonth() + 1);
+      if (/early|start|beginning/.test(where)) d.setDate(1);
+      else if (/mid|middle/.test(where)) d.setDate(15);
+      else d.setMonth(d.getMonth() + 1, 0);        // last day of that month
+    }
+    return { date: d, source: coarse[0] };
+  }
+
+  // "sometime this week", "later this week" — treated as the end of it, since
+  // vague intent with a deadline attached means "before it runs out".
+  const thisWeek = s.match(/\b(?:some ?time|any ?time|at some point)?\s*(this|next) week\b/);
+  if (thisWeek) {
+    const d = new Date(base);
+    const toFriday = (5 - d.getDay() + 7) % 7;
+    d.setDate(d.getDate() + toFriday + (thisWeek[1] === "next" ? 7 : 0));
+    return { date: d, source: thisWeek[0].trim() };
   }
 
   return null;
@@ -210,7 +290,17 @@ export function parseDuration(text) {
   const s = text.toLowerCase();
 
   if (/\bhalf an hour\b|\bhalf hour\b/.test(s)) return 30;
+  if (/\ban hour and a half\b|\bhour and a half\b/.test(s)) return 90;
   if (/\ban hour\b|\ba hour\b/.test(s)) return 60;
+
+  // "a couple of hours", "two and a half hours", "three quarters of an hour".
+  const wordHours = s.match(new RegExp(`\\b(${NUM_WORDS})\\b(?:\\s+of)?(\\s+and\\s+a\\s+half)?\\s*(?:h\\b|hrs?\\b|hours?\\b)`));
+  if (wordHours) {
+    const base = WORD_NUMBERS[wordHours[1]];
+    return Math.round((base + (wordHours[2] ? 0.5 : 0)) * 60);
+  }
+  const wordMins = s.match(new RegExp(`\\b(${NUM_WORDS})\\b(?:\\s+of)?\\s*(?:m\\b|mins?\\b|minutes?\\b)`));
+  if (wordMins) return WORD_NUMBERS[wordMins[1]];
 
   const hm = s.match(/\b(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b)/);
   const mm = s.match(/\b(\d+)\s*(?:m\b|mins?\b|minutes?\b)/);

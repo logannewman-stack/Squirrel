@@ -18,6 +18,9 @@ export const INTENTS = {
   DELEGATE_TASK: "delegate_task",
   INVITE: "invite",
   QUERY_DAY: "query_day",
+  QUERY_EVENT: "query_event",
+  QUERY_PROGRESS: "query_progress",
+  RESIZE_EVENT: "resize_event",
   QUERY_FREE: "query_free",
   PLAN_DAY: "plan_day",
   HELP: "help",
@@ -32,10 +35,18 @@ const RULES = [
   // "mark ... as done" allows words in between — that is how people write it.
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b/],
   [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|assign|give .* to)\b/],
+  // Before MOVE, because "shorten"/"extend" are edits to length rather than
+  // to when — and "push the review out by an hour" is genuinely ambiguous, so
+  // the explicit length verbs win.
+  [INTENTS.RESIZE_EVENT, /\b(shorten|lengthen|extend|trim|cut)\b.*\b(?:to|by|in half)\b|\bmake\b.*\b(?:\d+|one|two|three|four|five|half)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)/],
+  // Questions about one specific thing on the calendar, which want a fact
+  // rather than a day's worth of listing.
+  [INTENTS.QUERY_EVENT, /\b(?:where(?:'s| is)|how long is|who am i (?:meeting|seeing)|is .* still on|when(?:'s| is) (?:my|the)|what time is (?:my|the))\b/],
+  [INTENTS.QUERY_PROGRESS, /\bhow much (?:time|have i|did i)\b|\bhow am i doing\b|\bwhat did i (?:do|finish|get done)\b|\bhow many hours\b|\bhow'?s my (?:focus|week)\b/],
   [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|any (?:time|gaps?)|when can i)\b/],
   [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on)\b/],
-  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|put .* (?:on|in) (?:my|the) calendar|add .* (?:meeting|call|event))\b/],
+  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|hold|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|add .* (?:meeting|call|event))\b/],
   [INTENTS.CREATE_TASK, /\b(add|create|new|remind me to|need to|todo)\b/],
 ];
 

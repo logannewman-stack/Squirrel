@@ -44,6 +44,9 @@ export function acknowledge(identity, kind, now = new Date()) {
     create_task: "adding that",
     complete_task: "marking that off",
     delegate_task: "handing that over",
+    query_event: "looking that up",
+    query_progress: "adding up the hours",
+    resize_event: "adjusting that",
   }[kind];
   // Small talk gets no "checking your calendar" line — she is not looking
   // anything up, and pretending to is the kind of theatre that gets noticed.
