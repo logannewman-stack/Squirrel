@@ -72,6 +72,7 @@ function capacityOf(day, events, committed, opts) {
     minMins: opts.minBlock,
     start: opts.workStart,
     end: opts.workEnd,
+    after: opts.after,
   });
   const free = slots.reduce((n, s) => n + s.mins, 0);
   const used = committed.get(day) || 0;
@@ -152,6 +153,7 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     workEnd: opts.workEnd ?? WORK_END,
     workWeekend: opts.workWeekend ?? false,
   };
+  o.after = o.from;
   const from = new Date(o.from);
   from.setHours(0, 0, 0, 0);
 
@@ -193,8 +195,14 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
 
     // Pass one: an even share, so the work is spread rather than dumped on the
     // first day with room.
-    const share = Math.max(o.minBlock, Math.ceil(need / keys.length));
-    for (const day of keys) {
+    //
+    // Spread across at most as many days as can each take a real block. An
+    // hour of work over a fortnight was coming out as 45 minutes and then a
+    // stranded 15 — the split is supposed to make work approachable, and a
+    // quarter-hour fragment on its own day is the opposite of that.
+    const usable = keys.slice(0, Math.max(1, Math.floor(need / o.minBlock)));
+    const share = Math.max(o.minBlock, Math.ceil(need / usable.length));
+    for (const day of usable) {
       if (left <= 0) break;
       const room = capacity(day);
       if (room < Math.min(o.minBlock, left)) continue;
@@ -269,6 +277,7 @@ function placeInDay(blocks, events, o) {
       minMins: Math.min(o.minBlock, 15),
       start: o.workStart,
       end: o.workEnd,
+      after: o.after,
     }).map((s) => ({ at: new Date(s.start), end: new Date(s.end) }));
 
     for (const b of list) {

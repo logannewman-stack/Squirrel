@@ -31,7 +31,11 @@ const RULES = [
   [INTENTS.HELP, /\b(help|what can you do|commands?)\b/],
   [INTENTS.INVITE, /\b(invite|send (?:an? )?invit|email .* about|send .* (?:the )?(?:invite|calendar))\b/],
   [INTENTS.MOVE_EVENT, /\b(move|reschedul\w*|push|shift|bump|postpone)\b/],
-  [INTENTS.CANCEL_EVENT, /\b(cancel|delete|remove|drop|call off)\b/],
+  // `cancel\w*` on purpose: "cancelled" and "cancelling" have no word boundary
+  // after "cancel", so the strict form missed every past-tense report — and
+  // people report as often as they command. "The exec staff is cancelled" is
+  // not a request but it means exactly one thing.
+  [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b/],
   // "mark ... as done" allows words in between — that is how people write it.
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b/],
   [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|assign|give .* to)\b/],

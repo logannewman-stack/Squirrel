@@ -181,6 +181,46 @@ const state = {
     pending(many, {}, NOW).length);
 }
 
+// ------------------------------------------------------------- the clock
+{
+  // Half past three on a Monday. Every scenario run at a realistic hour was
+  // producing work booked for eight o'clock that morning — hours into the
+  // past, and the fastest way to lose someone's trust in a planner.
+  const AFTERNOON = new Date(2026, 7, 3, 15, 30, 0);
+  const r = distribute([task({ estimateMins: 360, due: D(4) })], [], [], { now: AFTERNOON });
+  const todays = r.blocks.filter((b) => b.day === D(0) && b.start);
+  t("nothing is scheduled in the past",
+    todays.every((b) => new Date(b.start) >= AFTERNOON),
+    todays.map((b) => b.start).join());
+  t("today still gets used, from now on",
+    todays.length > 0 && new Date(todays[0].start).getHours() >= 15, todays[0]?.start);
+  t("and starts on a tidy quarter hour",
+    todays.every((b) => new Date(b.start).getMinutes() % 15 === 0), todays[0]?.start);
+}
+{
+  // Late enough that today is gone entirely.
+  const EVENING = new Date(2026, 7, 3, 20, 0, 0);
+  const r = distribute([task({ estimateMins: 120, due: D(4) })], [], [], { now: EVENING });
+  t("a day already over is not booked",
+    !r.blocks.some((b) => b.day === D(0) && b.start), JSON.stringify(r.blocks.slice(0, 2)));
+}
+
+// -------------------------------------------------------------- no slivers
+{
+  // An hour of work with a fortnight of runway was coming out as 45 minutes
+  // and then a stranded 15. Splitting is meant to make work approachable; a
+  // quarter hour on its own day is the opposite.
+  const r = distribute([task({ estimateMins: 60, due: D(13) })], [], [], { now: NOW });
+  t("small work is not split into fragments", r.blocks.length === 1, JSON.stringify(r.blocks));
+  t("and keeps all of its minutes", r.blocks[0].mins === 60, r.blocks[0].mins);
+}
+{
+  const r = distribute([task({ estimateMins: 200, due: D(20) })], [], [], { now: NOW });
+  t("every block is worth starting",
+    r.blocks.every((b) => b.mins >= MIN_BLOCK_MINS), r.blocks.map((b) => b.mins).join());
+  t("and they still add up", r.blocks.reduce((n, b) => n + b.mins, 0) === 200);
+}
+
 // ------------------------------------------------------- the project maths
 {
   const { projectLoad, describeLoad, urgencyOf, triage } = await import("../src/lib/schedule.js");

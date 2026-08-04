@@ -39,7 +39,15 @@ export function weekOf(date = new Date()) {
 }
 
 /** Free gaps inside working hours on `day`, after existing events. */
-export function findFreeSlots(day, events, { minMins = 15, start = WORK_START, end = WORK_END } = {}) {
+/**
+ * Open stretches on one day.
+ *
+ * `after` matters more than it looks. Without it the planner cheerfully books
+ * this morning at half past three in the afternoon — every scenario run at a
+ * realistic hour produced work scheduled hours into the past, which is the
+ * kind of output that makes someone stop trusting a planner immediately.
+ */
+export function findFreeSlots(day, events, { minMins = 15, start = WORK_START, end = WORK_END, after = null } = {}) {
   const booked = events
     .filter((e) => dayKey(new Date(e.start)) === day)
     .map((e) => [new Date(e.start), new Date(e.end)])
@@ -48,6 +56,16 @@ export function findFreeSlots(day, events, { minMins = 15, start = WORK_START, e
   const slots = [];
   let cursor = atHour(day, start);
   const close = atHour(day, end);
+
+  // Time already gone is not available. Rounded up to the next quarter hour,
+  // because a block starting at 15:32 reads as a glitch rather than a plan.
+  if (after) {
+    const from = new Date(after);
+    if (from > cursor) {
+      const q = 15 * 60000;
+      cursor = new Date(Math.ceil(from.getTime() / q) * q);
+    }
+  }
 
   for (const [s, e] of booked) {
     if (s > cursor) {
