@@ -286,6 +286,25 @@ const NOW = new Date(2026, 7, 2, 10, 0, 0);
 
   // "ok" has to stay a yes while a proposal is open — checked in the e2e too.
   t("bare yes is not mistaken for small talk", classify("ok") === null, classify("ok"));
+
+  // The failure that started this: anchored patterns meant one trailing word
+  // turned a greeting into an error page.
+  for (const q of ["hi there", "hello again", "hey squirrel", "hey there buddy", "good morning!"]) {
+    t(`"${q}" is a greeting`, classify(q) === "greet", classify(q));
+  }
+  t("thanks with padding still thanks", classify("thanks so much") === "thanks");
+  t("an apology is recognised", classify("sorry my bad") === "sorry");
+  t("and a sign-off", classify("see you later") === "bye", classify("see you later"));
+
+  // But unanchoring must not swallow requests that happen to open politely.
+  for (const q of [
+    "hi, what does friday look like",
+    "thanks, now book lunch friday",
+    "sorry i meant tuesday at 4",
+    "book 2 hours tomorrow morning",
+  ]) {
+    t(`"${q}" reaches the parser`, classify(q) === null, classify(q));
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

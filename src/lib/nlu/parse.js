@@ -32,7 +32,7 @@ const RULES = [
   // "mark ... as done" allows words in between — that is how people write it.
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b/],
   [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|assign|give .* to)\b/],
-  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline)\b/],
+  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|any (?:time|gaps?)|when can i)\b/],
   [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on)\b/],
   [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|put .* (?:on|in) (?:my|the) calendar|add .* (?:meeting|call|event))\b/],

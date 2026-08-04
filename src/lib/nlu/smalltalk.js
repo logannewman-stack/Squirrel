@@ -26,6 +26,8 @@ export const SMALL = {
   WHOAMI: "whoami",
   WHATCANYOUDO: "whatcanyoudo",
   COUNT: "count",
+  SORRY: "sorry",
+  AFFIRM: "affirm",
   OUTSIDE: "outside",
 };
 
@@ -33,13 +35,27 @@ export const SMALL = {
  * Ordered, because a greeting attached to a command is a command.
  * "Hi, what's on Tuesday?" must not be answered with "Good morning."
  */
+/**
+ * Filler that carries no request. Stripped before the anchors below are
+ * applied, so "hi there", "hello again", "hey squirrel, thanks!" are all
+ * still just courtesies — which is what broke first in real use: the anchors
+ * were exact, and a single trailing word turned a greeting into an error.
+ */
+const FILLER = /\b(?:there|again|squirrel|buddy|friend|mate|my friend|to you|so much|a lot|very much|for that|for the help|man|dude|pal|hey|please|well|then|now|though|too|as well)\b/gi;
+
+const trim = (t) =>
+  t.replace(FILLER, " ").replace(/[\s!.,?~-]+/g, " ").trim().toLowerCase();
+
 const RULES = [
-  // Bare courtesies only — anchored, so anything with a request in it falls
-  // through to the real parser.
-  [SMALL.GREET, /^\s*(?:hi|hey+|hello|yo|howdy|hiya|sup|good (?:morning|afternoon|evening)|morning|evening)\b[\s!.,?]*$/i],
-  [SMALL.HOWAREYOU, /^\s*(?:how(?:'s| is| are)?\s*(?:it going|you|things|your day)|you (?:ok|okay|good|alright)|what'?s up)\b[\s!.,?]*$/i],
-  [SMALL.THANKS, /^\s*(?:thanks?|thank you|ty|cheers|nice|great|perfect|awesome|appreciate it|good (?:job|work))\b[\s!.,?]*$/i],
-  [SMALL.BYE, /^\s*(?:bye|goodbye|see ya|see you|later|goodnight|good night|night)\b[\s!.,?]*$/i],
+  // Courtesies. Matched against the filler-stripped text, so the anchors stay
+  // strict — anything with an actual request in it still falls through to the
+  // real parser — without being brittle about the words people pad them with.
+  [SMALL.GREET, /^(?:hi+|hey+|hello+|yo+|howdy|hiya|sup|greetings|good (?:morning|afternoon|evening|day)|morning|afternoon|evening)\b/],
+  [SMALL.HOWAREYOU, /^(?:how(?:'s| is| are| do you| goes)\b|you (?:ok|okay|good|alright|doing)\b|what'?s (?:up|new|good)\b)/],
+  [SMALL.THANKS, /^(?:thanks?|thank you|thx|ty|cheers|nice|great|perfect|awesome|excellent|lovely|brilliant|appreciate|good (?:job|work|stuff)|well done|you'?re the best)\b/],
+  [SMALL.BYE, /^(?:bye+|goodbye|see ya|see you|catch you|goodnight|good night|night|i'?m off|signing off|that (?:i|wi)?s all|that'?(?:s|ll) be all|that will be all|talk (?:soon|to you))\b/],
+  [SMALL.SORRY, /^(?:sorry|my bad|oops|whoops|my mistake|apologies|nevermind|never mind)\b/],
+  [SMALL.AFFIRM, /^(?:cool|got it|understood|makes sense|sounds good|fair enough|alright|indeed|of course|sure thing)\b/],
 
   [SMALL.TIME, /\b(?:what(?:'s| is)? the )?time is it\b|\bwhat time is it\b|\bcurrent time\b|\bwhat'?s the time\b/i],
   [SMALL.DATE, /\bwhat(?:'s| is)? (?:the )?(?:date|day)(?: is it)?\b|\bwhat day is (?:it|today)\b|\btoday'?s date\b|\bwhat'?s today\b/i],
@@ -55,8 +71,42 @@ const RULES = [
   [SMALL.OUTSIDE, /\b(?:capital of|weather|who (?:is|was|invented|won)|what is the (?:capital|population|meaning)|how tall|how far|translate|define|recipe|news|score|stock price|joke|poem|story|write me)\b/i],
 ];
 
+const COURTESY = new Set([
+  SMALL.GREET, SMALL.HOWAREYOU, SMALL.THANKS, SMALL.BYE, SMALL.SORRY, SMALL.AFFIRM,
+]);
+
+/**
+ * Anything that makes a sentence a request rather than a pleasantry.
+ *
+ * This is the guard that lets the courtesy patterns stop being anchored at the
+ * end. Anchoring was the first thing to break in real use — "hi there" is a
+ * greeting and it produced an error page — but simply unanchoring would turn
+ * "hi, what does Friday look like?" into a greeting too. A courtesy is short
+ * and mentions nothing schedulable; that is the actual distinction.
+ */
+const HAS_REQUEST =
+  /\d|\b(?:schedule|book|block|move|cancel|delete|reschedul\w*|push|remind|plan|add|create|task|tasks|meeting|meetings|call|project|projects|deadline|due|calendar|free|busy|today|tomorrow|tonight|yesterday|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|am|pm|hour|hours|minute|minutes)\b/i;
+
 export function classify(text) {
-  for (const [kind, re] of RULES) if (re.test(text)) return kind;
+  const bare = trim(text);
+
+  // Padding with nothing left in it — "hey there", "hi squirrel" — is a
+  // greeting, which is the friendliest reading and always the right one.
+  if (!bare) return SMALL.GREET;
+
+  // Courtesies: short, and about nothing on the calendar. Both conditions
+  // matter. Without the length cap a long complaint that happens to open with
+  // "sorry" becomes an apology; without the request check, "hi, what's Friday
+  // look like" never reaches the parser.
+  if (bare.split(/\s+/).length <= 5 && !HAS_REQUEST.test(bare)) {
+    for (const [kind, re] of RULES) {
+      if (COURTESY.has(kind) && re.test(bare)) return kind;
+    }
+  }
+
+  for (const [kind, re] of RULES) {
+    if (!COURTESY.has(kind) && re.test(text)) return kind;
+  }
   return null;
 }
 
@@ -114,6 +164,18 @@ export function answer(kind, state, now = new Date(), seed = 0) {
 
     case SMALL.THANKS:
       return { text: pick([`Of course${comma}.`, `Any time${comma}.`, `My pleasure${comma}.`], seed), variant: "calendar" };
+
+    case SMALL.SORRY:
+      return {
+        text: pick([`No harm done${comma}.`, `Nothing to apologise for${comma}.`, `All fine${comma} — what did you mean?`], seed),
+        variant: "calendar",
+      };
+
+    case SMALL.AFFIRM:
+      return {
+        text: pick([`Anything else${comma}?`, `What's next${comma}?`, `Ready when you are${comma}.`], seed),
+        variant: "calendar",
+      };
 
     case SMALL.BYE:
       return {

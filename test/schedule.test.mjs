@@ -181,5 +181,59 @@ const state = {
     pending(many, {}, NOW).length);
 }
 
+// ------------------------------------------------------- the project maths
+{
+  const { projectLoad, describeLoad, urgencyOf, triage } = await import("../src/lib/schedule.js");
+
+  // Logan's example, exactly: fifteen tasks averaging an hour, due in fifteen
+  // days, is an hour a day.
+  const proj = { id: "p", name: "Q3 board cycle", due: D(20) };
+  const fifteen = Array.from({ length: 15 }, (_, i) =>
+    task({ id: `t${i}`, projectId: "p", title: `Task ${i}`, estimateMins: 60 }));
+  const load = projectLoad(proj, fifteen, [], [], { now: NOW });
+  t("fifteen hours of work is counted", load.remainingMins === 900, load.remainingMins);
+  t("over the working days that remain", load.workdays === 15, load.workdays);
+  t("comes to an hour a day", load.perDayMins === 60, load.perDayMins);
+  t("and it is reported as fitting", load.fits === true);
+  t("in plain English", /about 1h a day/.test(describeLoad(load)), describeLoad(load));
+
+  // The same work with a quarter of the runway.
+  const tight = projectLoad({ ...proj, due: D(5) }, fifteen, [], [], { now: NOW });
+  t("a shorter deadline raises the daily pace", tight.perDayMins === 180, tight.perDayMins);
+  t("and says so", /about 3h a day/.test(describeLoad(tight)), describeLoad(tight));
+
+  // Impossible, and named as such.
+  const impossible = projectLoad({ ...proj, due: D(2) },
+    Array.from({ length: 40 }, (_, i) => task({ id: `x${i}`, projectId: "p", estimateMins: 60 })),
+    [], [], { now: NOW });
+  t("work that cannot fit is reported short", impossible.fits === false, impossible.slackMins);
+  t("with the shortfall in words", /does not fit/.test(describeLoad(impossible)), describeLoad(impossible));
+
+  // An unestimated task counts at the project average, not at zero — zero
+  // makes a doomed project look achievable.
+  const mixed = fifteen.map((x, i) => (i < 5 ? { ...x, estimateMins: 0 } : x));
+  t("unestimated work is not counted as free",
+    projectLoad(proj, mixed, [], [], { now: NOW }).remainingMins === 900,
+    projectLoad(proj, mixed, [], [], { now: NOW }).remainingMins);
+
+  // ---- urgency, computed rather than declared
+  const set = [
+    task({ id: "deck", title: "Board deck", estimateMins: 480, due: D(9) }),
+    task({ id: "sheet", title: "Term sheet", estimateMins: 90, due: D(1) }),
+    task({ id: "lease", title: "Munich lease", estimateMins: 600, due: D(2) }),
+    task({ id: "fu", title: "Follow up", estimateMins: 30, priority: "low" }),
+  ];
+  const u = (id) => urgencyOf(set.find((x) => x.id === id), set, [], [], { now: NOW });
+  t("work that outruns its runway is critical", u("lease").level === "critical", u("lease").level);
+  t("comfortable work is normal, never low", u("sheet").level === "normal", u("sheet").level);
+  t("an explicit low priority can still be low", u("fu").level === "low", u("fu").level);
+  t("and the ratio is exposed, not just the label",
+    u("lease").ratio >= 1 && u("deck").ratio < 1, `${u("lease").ratio}/${u("deck").ratio}`);
+
+  const order = triage(set, [], [], { now: NOW }).map((x) => x.task.id);
+  t("triage puts the tightest first", order[0] === "lease", order.join(","));
+  t("and the slackest last", order.at(-1) === "fu", order.join(","));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

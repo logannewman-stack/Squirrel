@@ -2,30 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Monochrome by design. The audience's scarce resource is attention, so the
-   interface spends none of it on decoration — hierarchy, density, and rules
-   carry meaning instead of colour. */
+/* Monochrome, with one exception.
+   The audience's scarce resource is attention, so the interface spends almost
+   none of it on decoration — hierarchy, density and rules carry the meaning.
+   The exception is `--alert`, and it is the whole reason the discipline works:
+   held in reserve for the three states that cost real money if missed —
+   overdue, critical, and work that no longer fits before its deadline. Because
+   nothing else on the screen is coloured, it never has to compete. Spend it on
+   a fourth thing and it stops meaning anything. */
 :root {
   --paper: #ffffff;
   --raised: #fafafa;
+  --sunken: #f7f7f8;
   --ink: #0a0a0a;
-  --muted: #71717a;
+  --muted: #6b6b74;
   --faint: #a1a1aa;
   --line: #e4e4e7;
-  --hairline: #f0f0f1;
+  --hairline: #efeff1;
   --hover: #f4f4f5;
+  --alert: #b45309;
+  --alert-bg: #fef6ec;
+
+  /* Two shadows, not five. One for anything that sits on the page, one for
+     anything that sits above it. More levels than that and nothing has a
+     reliable meaning. */
+  --lift: 0 1px 2px rgba(9, 9, 11, 0.04), 0 1px 1px rgba(9, 9, 11, 0.03);
+  --float: 0 12px 32px -8px rgba(9, 9, 11, 0.16), 0 4px 10px -4px rgba(9, 9, 11, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --paper: #08080a;
     --raised: #101013;
+    --sunken: #0d0d10;
     --ink: #fafafa;
-    --muted: #8b8b93;
+    --muted: #9a9aa3;
     --faint: #5f5f68;
     --line: #24242a;
     --hairline: #17171b;
     --hover: #16161a;
+    --alert: #f0a04b;
+    --alert-bg: #201607;
+    /* Shadows do not read on a near-black ground; separation comes from the
+       raised surface itself, so the lift is only a hairline of light. */
+    --lift: 0 0 0 1px rgba(255, 255, 255, 0.04);
+    --float: 0 16px 40px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
 }
 
@@ -51,6 +72,93 @@ body {
 }
 
 .hairline { border-color: var(--hairline); }
+
+/* ------------------------------------------------------------------ type
+   Figures are the content here — times, durations, counts, money — so they
+   are tabular everywhere and tracked tighter than the prose around them.
+   Proportional digits make a column of times visibly ripple, which is the
+   fastest way to make a serious tool look amateur. */
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* The one large number in a stat. Tight, because at this size default
+   tracking looks slack. */
+.figure {
+  font-size: 26px;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.028em;
+  font-variant-numeric: tabular-nums;
+}
+
+.title-xl {
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+/* --------------------------------------------------------------- surfaces */
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--lift);
+}
+
+/* A row that responds to the pointer without moving. Movement on hover in a
+   dense list reads as instability. */
+.row-hover { transition: background-color 120ms ease; }
+.row-hover:hover { background: var(--hover); }
+
+/* --------------------------------------------------------------- emphasis
+   The reserved colour. Three uses, no more: overdue, critical, and work that
+   will not fit. */
+.alert { color: var(--alert); }
+.alert-chip {
+  color: var(--alert);
+  background: var(--alert-bg);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Priority, as a typographic mark rather than a glyph. Three ticks that read
+   as level at a glance and as nothing at all when priority is normal — the
+   common case should be silent. */
+.pri {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 9px;
+}
+.pri i {
+  display: block;
+  width: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.28;
+}
+.pri i:nth-child(1) { height: 4px; }
+.pri i:nth-child(2) { height: 6.5px; }
+.pri i:nth-child(3) { height: 9px; }
+.pri[data-level="low"] i:nth-child(1),
+.pri[data-level="high"] i:nth-child(1),
+.pri[data-level="high"] i:nth-child(2),
+.pri[data-level="critical"] i { opacity: 1; }
+
+/* ------------------------------------------------------------ focus rings
+   Keyboard focus has to be obvious; a mouse click should not leave a ring
+   behind. :focus-visible is the whole difference. */
+:where(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 
 input[type="date"], input[type="time"] { color-scheme: light; }
 @media (prefers-color-scheme: dark) {

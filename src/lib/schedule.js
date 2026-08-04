@@ -296,6 +296,160 @@ const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 
+/**
+ * A project's whole shape: how many hours are left in it, how many days remain,
+ * and therefore the daily pace it demands.
+ *
+ * This is the arithmetic a person does badly in their head and then gets wrong
+ * by a factor of two. Fifteen tasks averaging an hour, due in fifteen days, is
+ * an hour a day — obvious once stated and almost never stated. Where it earns
+ * its keep is the other direction: the same fifteen hours due in four days is
+ * nearly four hours a day, every day, on top of whatever meetings already
+ * exist, and that is a conversation to have on day one rather than day three.
+ *
+ * A task with no estimate is counted at the project's own average rather than
+ * at zero. Zero silently understates the total, which is the failure mode that
+ * matters — a project that looks achievable and is not.
+ */
+export function projectLoad(project, tasks, sessions = [], events = [], opts = {}) {
+  const now = opts.now || new Date();
+  const mine = tasks.filter((t) => t.projectId === project.id);
+  const open = mine.filter((t) => !t.done);
+
+  const estimated = open.filter((t) => t.estimateMins > 0);
+  const avg = estimated.length
+    ? Math.round(estimated.reduce((n, t) => n + t.estimateMins, 0) / estimated.length)
+    : 60;
+
+  const remaining = open.reduce(
+    (n, t) => n + (t.estimateMins > 0 ? remainingMins(t, sessions) : avg), 0);
+
+  // The project's own deadline if it has one, otherwise the last task deadline.
+  const dates = [project.due, ...open.map((t) => t.due)].filter(Boolean).sort();
+  const due = project.due || dates[dates.length - 1] || null;
+
+  const o = { workWeekend: opts.workWeekend ?? false, ...opts };
+  let workdays = 0;
+  let capacity = 0;
+  if (due) {
+    const [y, m, d] = due.split("-").map(Number);
+    const end = new Date(y, m - 1, d);
+    end.setHours(0, 0, 0, 0);
+    const from = new Date(now);
+    from.setHours(0, 0, 0, 0);
+    for (let i = 0; i <= HORIZON_DAYS; i++) {
+      const day = addDays(from, i);
+      if (day > end) break;
+      if (!isWorkday(day, o.workWeekend)) continue;
+      workdays++;
+      capacity += capacityOf(dayKey(day), events, new Map(), {
+        minBlock: MIN_BLOCK_MINS,
+        workStart: opts.workStart ?? WORK_START,
+        workEnd: opts.workEnd ?? WORK_END,
+        dailyCapacity: opts.dailyCapacity ?? DAILY_CAPACITY_MINS,
+      });
+    }
+  }
+
+  const perDay = workdays ? Math.round(remaining / workdays) : null;
+
+  return {
+    projectId: project.id,
+    name: project.name,
+    due,
+    openCount: open.length,
+    doneCount: mine.length - open.length,
+    avgMins: avg,
+    remainingMins: remaining,
+    workdays,
+    // Minutes a day this project needs, if the work is spread evenly.
+    perDayMins: perDay,
+    // Minutes actually open across those days, after existing meetings.
+    capacityMins: capacity,
+    // Negative means it does not fit. This is the number worth surfacing.
+    slackMins: due ? capacity - remaining : null,
+    fits: due ? capacity >= remaining : null,
+  };
+}
+
+/**
+ * How urgent a task actually is, computed rather than declared.
+ *
+ * A user-set priority says how much something matters. It says nothing about
+ * whether there is still time for it, and those are different questions —
+ * "important" and "due in six hours with four hours of work in it" need
+ * different responses. This derives the second from the ratio of work left to
+ * time left:
+ *
+ *   over 1.0  there is not enough time. Something has to give, today.
+ *   over 0.7  no slack for a bad day. Start now.
+ *   over 0.4  comfortable but real.
+ *   under     plenty of room.
+ *
+ * The declared priority breaks ties and lifts the result by one step, so
+ * something the user marked critical is never reported as relaxed just because
+ * the arithmetic is comfortable.
+ */
+export function urgencyOf(task, tasks, events, sessions = [], opts = {}) {
+  const now = opts.now || new Date();
+  const need = remainingMins(task, sessions);
+  if (!need || task.done) return { level: "none", ratio: 0, need, capacity: 0 };
+
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+  const days = eligibleDays(task, from, {
+    bufferDays: opts.bufferDays ?? BUFFER_DAYS,
+    workWeekend: opts.workWeekend ?? false,
+  });
+
+  const o = {
+    minBlock: MIN_BLOCK_MINS,
+    workStart: opts.workStart ?? WORK_START,
+    workEnd: opts.workEnd ?? WORK_END,
+    dailyCapacity: opts.dailyCapacity ?? DAILY_CAPACITY_MINS,
+  };
+  const capacity = days.reduce(
+    (n, d) => n + capacityOf(dayKey(d), events, new Map(), o), 0);
+
+  const ratio = capacity > 0 ? need / capacity : Infinity;
+  const bump = { critical: 2, high: 1, normal: 0, low: -1 }[task.priority] ?? 0;
+  const scale = ["low", "normal", "high", "critical"];
+  // The floor is normal, not low. Comfortable is not the same as unimportant,
+  // and 90 minutes due tomorrow reported as "low" is the kind of answer that
+  // teaches a user to stop trusting the label. Only an explicit low priority,
+  // via the bump below, can reach the bottom of the scale.
+  const base = ratio >= 1 ? 3 : ratio >= 0.7 ? 2 : 1;
+  const level = scale[Math.max(0, Math.min(3, base + bump))];
+
+  return { level, ratio: Number.isFinite(ratio) ? Math.round(ratio * 100) / 100 : null, need, capacity, days: days.length };
+}
+
+/** Everything open, hardest first, with the arithmetic that put it there. */
+export function triage(tasks, events, sessions = [], opts = {}) {
+  const rank = { critical: 0, high: 1, normal: 2, low: 3, none: 4 };
+  return tasks
+    .filter((t) => !t.done)
+    .map((task) => ({ task, ...urgencyOf(task, tasks, events, sessions, opts) }))
+    .filter((x) => x.level !== "none")
+    .sort((a, b) => rank[a.level] - rank[b.level] || (b.ratio ?? 0) - (a.ratio ?? 0));
+}
+
+/** Plain-English version of the above, for the assistant. */
+export function describeLoad(load) {
+  const h = (m) => (m >= 60 ? `${+(m / 60).toFixed(m % 60 ? 1 : 0)}h` : `${m}m`);
+  if (!load.openCount) return `${load.name} is done — nothing open.`;
+  if (!load.due) {
+    return `${load.name}: ${load.openCount} open, ${h(load.remainingMins)} of work left. No deadline set, so I'm not pacing it.`;
+  }
+  const lead =
+    `${load.name}: ${load.openCount} ${load.openCount === 1 ? "task" : "tasks"}, ` +
+    `${h(load.remainingMins)} of work, due ${load.due} — ` +
+    `${load.workdays} working ${load.workdays === 1 ? "day" : "days"} left, ` +
+    `about ${h(load.perDayMins)} a day.`;
+  if (load.fits) return `${lead} That fits, with ${h(load.slackMins)} to spare.`;
+  return `${lead} It does not fit — you're ${h(Math.abs(load.slackMins))} short.`;
+}
+
 /** Human summary of a plan, for the assistant and the day view. */
 export function describePlan(result, tasks) {
   const title = (id) => tasks.find((t) => t.id === id)?.title || "work";

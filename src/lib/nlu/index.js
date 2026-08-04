@@ -24,7 +24,7 @@ import {
   deleteTask, applyPlan, setMemory, setPlan,
 } from "../store";
 import { planDay, findFreeSlots, fmtTime } from "../agenda";
-import { distribute, describePlan } from "../schedule";
+import { distribute, describePlan, projectLoad, describeLoad, triage } from "../schedule";
 import { duration } from "../format";
 
 const DEFAULT_MEETING_MINS = 60;
@@ -601,6 +601,27 @@ export function ask(text, state, opts = {}) {
     }
 
     case INTENTS.PLAN_DAY: {
+      // "how is the board cycle going" / "will the raise fit" — the pacing
+      // arithmetic for one project, which is the question behind most of them.
+      const hit = resolveProject(p.body, state.projects);
+      if (hit.length && isConfident(hit) && /\bproject\b|\bon track\b|\bpace\b|\bhow (?:is|are|much)\b|\bfit\b|\bbehind\b/i.test(p.body)) {
+        const load = projectLoad(hit[0].item, state.tasks, state.sessions, state.events, { now });
+        return reply(describeLoad(load), [], { day: load.due });
+      }
+      // "what's most urgent" — ranked by how little room each has left, which
+      // is not the same as what the user marked important.
+      if (/\bmost urgent\b|\bwhat'?s urgent\b|\bwhat should i (?:do|work on) first\b|\bbehind on\b|\btriage\b/i.test(p.body)) {
+        const ranked = triage(state.tasks, state.events, state.sessions, { now }).slice(0, 5);
+        if (!ranked.length) return reply("Nothing open with time on it.");
+        const h = (m) => (m >= 60 ? `${+(m / 60).toFixed(m % 60 ? 1 : 0)}h` : `${m}m`);
+        return reply(
+          ranked.map((x) =>
+            `${x.level === "critical" ? "⚠ " : ""}${x.task.title} — ${h(x.need)} left` +
+            (x.task.due ? `, due ${x.task.due}` : "") +
+            (x.days ? `, ${x.days} working ${x.days === 1 ? "day" : "days"} to do it` : "")).join("\n"),
+        );
+      }
+
       // "plan my week" and "how do I get this done" want the whole runway, not
       // just today — that is where the deadline maths actually lives.
       if (/\bweek\b|\bdeadlines?\b|\bfit\b|\bahead\b/.test(p.body.toLowerCase())) {

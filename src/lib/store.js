@@ -133,8 +133,11 @@ export const dayKey = (d = new Date()) =>
 export const PRIORITIES = ["critical", "high", "normal", "low"];
 
 // ---------------------------------------------------------------- projects
-export function addProject({ name, client = "", value = null, status = "active" }) {
-  const p = stamp({ id: uid(), name: name.trim() || "Untitled", client, value, status, createdAt: Date.now() });
+export function addProject({ name, client = "", value = null, status = "active", due = null }) {
+  // A project deadline is not the same as its last task's. It is the date the
+  // whole thing is judged on, and it is what makes pacing arithmetic possible
+  // at all — see projectLoad in lib/schedule.js.
+  const p = stamp({ id: uid(), name: name.trim() || "Untitled", client, value, status, due, createdAt: Date.now() });
   update({ projects: [...read().projects, p] });
   return p;
 }

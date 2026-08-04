@@ -1,5 +1,5 @@
 import { dayKey } from "../lib/store";
-import { duration } from "../lib/format";
+import { duration, money } from "../lib/format";
 
 const DAYS_BACK = 14;
 
@@ -125,7 +125,7 @@ export default function Insights({ state }) {
                 </div>
                 <p className="mt-1 text-[11px] tabular-nums text-[var(--faint)]">
                   {done} done · {open} open
-                  {project.value ? ` · $${(project.value / 1000).toFixed(0)}k` : ""}
+                  {project.value ? ` · ${money(project.value)}` : ""}
                 </p>
               </li>
             ))}

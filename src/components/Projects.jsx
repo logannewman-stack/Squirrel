@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { addProject, dayKey } from "../lib/store";
-import { duration } from "../lib/format";
+import { duration, money } from "../lib/format";
 
 export default function Projects({ state, onOpen }) {
   const { projects, tasks, sessions } = state;
@@ -81,7 +81,7 @@ export default function Projects({ state, onOpen }) {
                       <p className="mt-0.5 text-[11px] text-[var(--faint)]">
                         {p.client}
                         {p.client && p.value ? " · " : ""}
-                        {p.value ? `$${(p.value / 1000).toFixed(0)}k` : ""}
+                        {money(p.value)}
                       </p>
                     )}
                   </td>
