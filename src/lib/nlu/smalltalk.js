@@ -41,7 +41,7 @@ export const SMALL = {
  * still just courtesies — which is what broke first in real use: the anchors
  * were exact, and a single trailing word turned a greeting into an error.
  */
-const FILLER = /\b(?:there|again|squirrel|buddy|friend|mate|my friend|to you|so much|a lot|very much|for that|for the help|man|dude|pal|hey|please|well|then|now|though|too|as well)\b/gi;
+const FILLER = /\b(?:there|again|squirrel|buddy|friend|mate|my friend|to you|so much|a lot|very much|for that|for the help|man|dude|pal|please|then|now|though|too|as well)\b/gi;
 
 const trim = (t) =>
   t.replace(FILLER, " ").replace(/[\s!.,?~-]+/g, " ").trim().toLowerCase();
@@ -50,14 +50,14 @@ const RULES = [
   // Courtesies. Matched against the filler-stripped text, so the anchors stay
   // strict — anything with an actual request in it still falls through to the
   // real parser — without being brittle about the words people pad them with.
-  [SMALL.GREET, /^(?:hi+|hey+|hello+|yo+|howdy|hiya|sup|greetings|good (?:morning|afternoon|evening|day)|morning|afternoon|evening)\b/],
-  [SMALL.HOWAREYOU, /^(?:how(?:'s| is| are| do you| goes)\b|you (?:ok|okay|good|alright|doing)\b|what'?s (?:up|new|good)\b)/],
-  [SMALL.THANKS, /^(?:thanks?|thank you|thx|ty|cheers|nice|great|perfect|awesome|excellent|lovely|brilliant|appreciate|good (?:job|work|stuff)|well done|you'?re the best)\b/],
-  [SMALL.BYE, /^(?:bye+|goodbye|see ya|see you|catch you|goodnight|good night|night|i'?m off|signing off|that (?:i|wi)?s all|that'?(?:s|ll) be all|that will be all|talk (?:soon|to you))\b/],
+  [SMALL.GREET, /^(?:hi+|hey+|hello+|yo+|howdy|hiya+|heya+|sup|greetings|gm|gday|g'day|good (?:morning|afternoon|evening|day)|morning|afternoon|evening)\b/],
+  [SMALL.HOWAREYOU, /^(?:how'?s\b|how (?:is|are|do you|goes|have you)\b|you(?: ok| okay| good| alright| doing| around| about)?\b|what'?s (?:up|new|good)\b)/],
+  [SMALL.THANKS, /^(?:thanks?|thank you|thx|ty|cheers|nice|great|perfect|awesome|amazing|excellent|lovely|brilliant|superb|fantastic|appreciate|much appreciated|good (?:job|work|stuff)|well done|nicely done|you'?re the best)\b/],
+  [SMALL.BYE, /^(?:bye+|goodbye|see ya|see you|catch you|goodnight|good night|night|later|i'?m off|signing off|that'?s (?:all|it)|that'?ll be all|that will be all|talk (?:soon|to you)|done for (?:today|now))\b/],
   [SMALL.SORRY, /^(?:sorry|my bad|oops|whoops|my mistake|apologies|nevermind|never mind)\b/],
-  [SMALL.AFFIRM, /^(?:cool|got it|understood|makes sense|sounds good|fair enough|alright|indeed|of course|sure thing)\b/],
+  [SMALL.AFFIRM, /^(?:ok(?:ay)? )?(?:cool|got it|gotcha|understood|makes sense|sounds good|fair enough|alright|indeed|of course|sure thing|no worries|right on)\b/],
 
-  [SMALL.TIME, /\b(?:what(?:'s| is)? the )?time is it\b|\bwhat time is it\b|\bcurrent time\b|\bwhat'?s the time\b/i],
+  [SMALL.TIME, /^\s*time\s*\??\s*$|\b(?:what(?:'s| is)? the )?time is it\b|\bwhat time is it\b|\bcurrent time\b|\bwhat'?s the time\b|\bgot the time\b/i],
   [SMALL.DATE, /\bwhat(?:'s| is)? (?:the )?(?:date|day)(?: is it)?\b|\bwhat day is (?:it|today)\b|\btoday'?s date\b|\bwhat'?s today\b/i],
 
   [SMALL.WHOAMI, /\b(?:who are you|what are you|what'?s your name|your name)\b/i],

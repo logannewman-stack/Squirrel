@@ -51,7 +51,8 @@ const needs = (text) => ({ text, actions: [], choices: null, pending: true });
  * a pronoun ("schedule it for Friday").
  */
 const isFollowUp = (p) =>
-  p.repair || p.amend || p.fragment || (p.pronoun && !p.slots.title);
+  p.repair || p.amend || p.fragment || p.slots.rename ||
+  (p.pronoun && !p.slots.title);
 
 /**
  * Yes and no, and nothing else.
