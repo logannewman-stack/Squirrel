@@ -42,7 +42,7 @@ export function carryable(slots) {
 
 /**
  * @param {object} memory
- * @param {{intent: string, slots: object, entity: object|null, day: string|null, text: string}} turn
+ * @param {{intent, slots, entity, set, day, text}} turn
  */
 export function remember(memory, turn, at = Date.now()) {
   const turns = [...(memory?.turns || []), { at, ...turn }];
@@ -69,6 +69,31 @@ export function focusOf(memory, state, now = new Date()) {
   const pool = t.entity.kind === "event" ? state.events : state.tasks;
   const item = pool.find((x) => x.id === t.entity.id);
   return item ? { kind: t.entity.kind, item } : null;
+}
+
+/**
+ * The group of things the conversation just put on the table.
+ *
+ * "What's on Friday?" → three meetings → "remove them". Held separately from
+ * `entity` because they answer different words: "it" points at one thing, and
+ * resolving "them" against a single-entity memory cancels one meeting out of
+ * three and reports that it is done.
+ *
+ * Walked back through recent turns like the topic day, so a question in
+ * between does not drop the thread. Ids are re-read from live state, so
+ * anything deleted in the meantime simply falls out of the set.
+ */
+export function setOf(memory, state, now = new Date()) {
+  const turns = memory?.turns || [];
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (now.getTime() - t.at > STALE_MS) return null;
+    if (!t.set?.ids?.length) continue;
+    const pool = t.set.kind === "task" ? state.tasks : state.events;
+    const items = t.set.ids.map((id) => pool.find((x) => x.id === id)).filter(Boolean);
+    if (items.length) return { kind: t.set.kind, items, label: t.set.label || null };
+  }
+  return null;
 }
 
 /**

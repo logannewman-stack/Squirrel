@@ -18,6 +18,7 @@ import {
 import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
 import { distribute } from "./lib/schedule";
+import { planOpts } from "./lib/hours";
 // Aliased: `pending` is already the task waiting for a focus length in this
 // component, and shadowing it silently turns this into a call on null.
 import { pending as dueReminders } from "./lib/reminders";
@@ -102,16 +103,17 @@ export default function App() {
   useEffect(() => nudge(), [state.projects, state.tasks, state.events]);
 
   // The plan is derived, so it is recomputed rather than stored by hand:
-  // whenever the work or the meetings move, the distribution moves with them.
+  // whenever the work, the meetings, or the working day itself moves, the
+  // distribution moves with them. `settings.hours` is in the dependency list
+  // for exactly that reason — changing your finish time has to re-plan the
+  // week, or the panel is decoration.
   useEffect(() => {
-    const plan = distribute(state.tasks, state.events, state.sessions, {
-      workWeekend: state.settings?.workWeekend,
-    });
+    const plan = distribute(state.tasks, state.events, state.sessions, planOpts(state.settings));
     const same =
       JSON.stringify(plan.blocks) === JSON.stringify(state.blocks) &&
       JSON.stringify(plan.shortfalls) === JSON.stringify(state.shortfalls);
     if (!same) setPlan(plan);
-  }, [state.tasks, state.events, state.sessions, state.settings?.workWeekend]);
+  }, [state.tasks, state.events, state.sessions, state.settings?.hours, state.settings?.workWeekend]);
 
   // And the device's queue follows the plan. Diffed rather than rebuilt, since
   // a phone holds a limited number of pending notifications.

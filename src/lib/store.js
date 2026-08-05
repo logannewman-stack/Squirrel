@@ -65,6 +65,15 @@ export const getState = () => read();
 const update = (patch) => commit({ ...read(), ...patch });
 
 /**
+ * Back to nothing.
+ *
+ * Clearing the key on its own is not enough — `cache` still holds the old state
+ * and every subsequent read returns it, which is why erasing used to need a
+ * full page reload to take effect.
+ */
+export const resetAll = () => commit({ ...EMPTY, settings: {} });
+
+/**
  * UUIDs, because Postgres holds these as `uuid` and a device that invents its
  * own key has to produce one the server will accept. Random enough that two
  * offline devices creating rows at the same moment cannot collide.

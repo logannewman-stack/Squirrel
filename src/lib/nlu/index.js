@@ -14,18 +14,19 @@
 import { parse, INTENTS } from "./parse.js";
 import { classify as smallTalk, answer as smallAnswer } from "./smalltalk.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
-import { describe, toLocalIso, dayKey, atLocal } from "./datetime.js";
-import { acknowledge, describeDay, addressOf, confirmLine, composeTitle } from "./voice.js";
+import { describe, toLocalIso, dayKey, atLocal, parseRange, dayRange, fixDateWords } from "./datetime.js";
+import { acknowledge, describeDay, addressOf, confirmLine, composeTitle, joinNames } from "./voice.js";
 import {
-  EMPTY_MEMORY, remember, carryable, lastTurn, focusOf, topicDay, inherit,
+  EMPTY_MEMORY, remember, carryable, lastTurn, focusOf, setOf, topicDay, inherit,
 } from "./context.js";
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
   deleteTask, applyPlan, setMemory, setPlan,
-} from "../store";
-import { planDay, findFreeSlots, fmtTime } from "../agenda";
-import { distribute, describePlan, projectLoad, describeLoad, triage } from "../schedule";
-import { duration } from "../format";
+} from "../store.js";
+import { planDay, findFreeSlots, fmtTime } from "../agenda.js";
+import { distribute, describePlan, projectLoad, describeLoad, triage } from "../schedule.js";
+import { planOpts, hoursOf, describeHours, sayMins, sayHour, weeklyMins } from "../hours.js";
+import { duration } from "../format.js";
 
 const DEFAULT_MEETING_MINS = 60;
 const DEFAULT_TASK_MINS = 30;
@@ -84,7 +85,7 @@ function revisePatch(patch, slots, base, now) {
 }
 
 /** Fold a stored patch back onto a freshly parsed command. */
-function applyPatch(slots, patch) {
+function applyPatch(slots, patch, now = new Date()) {
   if (!patch) return slots;
   if (patch.whenIso) {
     const d = new Date(patch.whenIso);
@@ -93,6 +94,10 @@ function applyPatch(slots, patch) {
     slots.timeOnly = { h: d.getHours(), m: d.getMinutes(), source: "confirmed" };
     slots.hadDate = true;
     slots.hadTime = true;
+    // "Clear Friday" → "no, Thursday" has to re-aim the span as well as the
+    // moment. Patching only `when` left the original range in place, so the
+    // revision was acknowledged and then Friday was cleared anyway.
+    slots.range = dayRange(d, now);
   }
   if (patch.durationMins != null) slots.durationMins = patch.durationMins;
   if (patch.people) slots.people = patch.people;
@@ -106,9 +111,38 @@ function applyPatch(slots, patch) {
 /** Lookups scan the calendar; changes write to it. The art should match. */
 const PEN_INTENTS = new Set([
   INTENTS.CREATE_EVENT, INTENTS.CREATE_TASK, INTENTS.MOVE_EVENT,
-  INTENTS.CANCEL_EVENT, INTENTS.COMPLETE_TASK, INTENTS.DELEGATE_TASK,
-  INTENTS.RESIZE_EVENT,
+  INTENTS.CANCEL_EVENT, INTENTS.CLEAR_RANGE, INTENTS.COMPLETE_TASK,
+  INTENTS.DELEGATE_TASK, INTENTS.RESIZE_EVENT,
 ]);
+
+/** Events starting inside a half-open range, in the order they happen. */
+const inRange = (events, range) =>
+  events
+    .filter((e) => {
+      const at = new Date(e.start);
+      return at >= range.from && at < range.to;
+    })
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+/**
+ * A set, read back before it is deleted.
+ *
+ * The weekday appears as soon as the set spans more than one day. Without it a
+ * week's worth reads "11:00 AM, 9:00 AM, 12:00 PM" — times marching backwards,
+ * which looks like a bug in the very sentence that is asking permission to
+ * delete four meetings.
+ */
+const listEvents = (events, limit = 4) => {
+  const days = new Set(events.map((e) => dayKey(new Date(e.start))));
+  const named = events.slice(0, limit).map((e) => {
+    const at = new Date(e.start);
+    const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const day = days.size > 1 ? `${at.toLocaleDateString([], { weekday: "short" })} ` : "";
+    return `${day}${time} ${e.title}`;
+  });
+  const more = events.length - named.length;
+  return joinNames(named) + (more > 0 ? `, and ${more} more` : "");
+};
 
 export const EXAMPLES = [
   "What time is it?",
@@ -134,6 +168,10 @@ export function ask(text, state, opts = {}) {
   // On unless turned off. Reading a change back before making it is cheap;
   // finding out next week that a board meeting moved is not.
   const confirms = state.settings?.confirm !== false;
+  // Every scheduling answer is measured against the user's own day — their
+  // hours, their working days, their breaks — rather than against a constant
+  // that was right for nobody in particular.
+  const work = planOpts(state.settings);
 
   const openTasks = state.tasks.filter((t) => !t.done);
 
@@ -162,7 +200,7 @@ export function ask(text, state, opts = {}) {
     // Anything else is a genuinely new command, and the proposal lapses.
   }
 
-  if (patch) applyPatch(p.slots, patch);
+  if (patch) applyPatch(p.slots, patch, now);
 
   // Courtesies and questions about the clock, answered before anything else
   // touches the calendar. Checked after the confirmation branch above, so
@@ -229,6 +267,10 @@ export function ask(text, state, opts = {}) {
             res.entity !== undefined ? res.entity
             : res.pending ? null
             : (prior?.entity ?? null),
+          // A set is written only by the turn that produced one. Older sets
+          // stay reachable — setOf walks back — so a question in between does
+          // not lose what "them" refers to.
+          set: res.set ?? null,
           day: res.day ?? (slots.dateOnly ? dayKey(slots.dateOnly) : prior?.day ?? null),
         },
         now.getTime(),
@@ -244,7 +286,7 @@ export function ask(text, state, opts = {}) {
   return decorate(res);
 
   function decorate(r) {
-    const { entity, day, pending: _p, proposal, ...rest } = r;
+    const { entity, set, day, pending: _p, proposal, ...rest } = r;
     return {
       ...rest,
       intent: p.intent,
@@ -401,6 +443,40 @@ export function ask(text, state, opts = {}) {
       if (!slots.when) {
         return needs("Move it to when? Give me a day and a time — “Wednesday at 2”, say.");
       }
+
+      // "Move everything on Friday to Monday" — a whole day picked up and set
+      // down elsewhere, each meeting keeping its own hour. Slid by whole days
+      // rather than stacked on one time, because six meetings all at 9:00 is
+      // not what anyone meant by "move them".
+      const fromRange = p.plural ? parseRange(slots.subjectPhrase, now) : null;
+      if (fromRange) {
+        const moving = inRange(state.events, fromRange);
+        if (!moving.length) {
+          return reply(`Nothing on ${fromRange.label} to move.`, [], { day: dayKey(fromRange.from) });
+        }
+        const shift = Math.round(
+          (atLocal(slots.when, 0) - atLocal(new Date(moving[0].start), 0)) / 86400000,
+        );
+        const target = describe(atLocal(slots.when, 9), now).split(" at ")[0];
+        return gate(
+          `moving all ${moving.length} from ${fromRange.label} to ${target}, keeping the times`,
+          () => {
+            for (const e of moving) {
+              const s = new Date(e.start);
+              const en = new Date(e.end);
+              s.setDate(s.getDate() + shift);
+              en.setDate(en.getDate() + shift);
+              updateEvent(e.id, { start: toLocalIso(s), end: toLocalIso(en) });
+            }
+            return reply(
+              `Moved ${moving.length} ${moving.length === 1 ? "meeting" : "meetings"} to ${target}.`,
+              [{ summary: `Moved ${moving.length} → ${target}` }],
+              { entity: null, set: { kind: "event", ids: moving.map((e) => e.id) }, day: dayKey(slots.when) },
+            );
+          },
+        );
+      }
+
       const ranked = opts.resolvedId
         ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
         : resolveEvent(slots.subjectPhrase, state.events, now);
@@ -459,6 +535,115 @@ export function ask(text, state, opts = {}) {
         () => {
           deleteEvent(ev.id);
           return reply(`Cancelled “${ev.title}”.`, [{ summary: `Cancelled “${ev.title}”` }], { entity: null });
+        },
+      );
+    }
+
+    // ------------------------------------------------- clear a whole stretch
+    /**
+     * Emptying a span of calendar.
+     *
+     * This existed only as a single-event cancel for far too long, and the
+     * result was an assistant that answered "I couldn't find that on your
+     * calendar" to "can you clear my calendar" — a sentence with nothing
+     * ambiguous about it. Three things make it safe rather than alarming:
+     * the scope is always named back before anything happens, the count is in
+     * the confirmation, and a request with no scope at all is asked about
+     * rather than guessed at.
+     */
+    case INTENTS.CLEAR_RANGE: {
+      const wantsTasks = /\b(?:tasks?|to-?dos?|to do list|todos)\b/i.test(p.body);
+
+      // "Remove them" — the set the last turn put on the table. Checked before
+      // any date parsing, because "them" carries the scope by itself.
+      const remembered = p.plural && !slots.range ? setOf(memory, state, now) : null;
+      if (remembered?.items.length) {
+        const items = remembered.items;
+        const what = remembered.kind === "task" ? "task" : "meeting";
+        return gate(
+          `removing ${items.length === 1 ? `“${items[0].title}”` : `all ${items.length} — ${listEvents(items)}`}`,
+          () => {
+            for (const it of items) {
+              if (remembered.kind === "task") deleteTask(it.id);
+              else deleteEvent(it.id);
+            }
+            return reply(
+              `Cleared ${items.length} ${items.length === 1 ? what : `${what}s`}.`,
+              [{ summary: `Cleared ${items.length} ${items.length === 1 ? what : `${what}s`}` }],
+              { entity: null, set: null },
+            );
+          },
+        );
+      }
+
+      // The stretch, read the forward way. A typo gets one retry — "remove my
+      // appointments for this wek" is not an ambiguous request.
+      const asked =
+        slots.range ||
+        parseRange(fixDateWords(p.body), now) ||
+        (topicDay(memory, now) ? dayRange(topicDay(memory, now), now) : null);
+
+      // Bulk clearing never reaches backwards.
+      //
+      // "Clear this week", said on Thursday, cannot mean the three days that
+      // already happened — those are a record, and a record deleted in passing
+      // by a forward-looking instruction is not recoverable. Anything already
+      // begun is left alone; naming it specifically still cancels it.
+      const range = asked && asked.from < now ? { ...asked, from: now } : asked;
+
+      if (asked && asked.to <= now) {
+        return reply(`${asked.label[0].toUpperCase()}${asked.label.slice(1)} has already been and gone.`);
+      }
+
+      if (!range) {
+        // No scope at all. "Clear my calendar" spans months on the honest
+        // reading, so this is the one place a question beats a default.
+        return askWhich("Happy to. Which stretch should I clear?", {
+          kind: "range",
+          text: p.body,
+          options: [
+            { id: "today", label: "Today" },
+            { id: "tomorrow", label: "Tomorrow" },
+            { id: "this week", label: "The rest of this week" },
+            { id: "cancel", label: "Never mind" },
+          ],
+        });
+      }
+
+      // "Cancel my meetings with Bob this week" — the span narrowed by who.
+      const named = slots.people.map((x) => x.toLowerCase());
+      const matches = (e) =>
+        !named.length ||
+        (e.attendees || []).some((a) => named.includes((typeof a === "string" ? a : a.name || "").toLowerCase()));
+
+      const events = wantsTasks ? [] : inRange(state.events, range).filter(matches);
+      const tasks = wantsTasks
+        ? openTasks.filter((t) => t.due && t.due >= dayKey(range.from) && t.due <= dayKey(new Date(range.to - 1)))
+        : [];
+      const items = wantsTasks ? tasks : events;
+      const noun = wantsTasks ? "task" : "meeting";
+
+      if (!items.length) {
+        const who = named.length ? ` with ${joinNames(slots.people)}` : "";
+        return reply(`Nothing${who} on ${range.label} — it's already clear.`, [], {
+          day: dayKey(range.from), set: null,
+        });
+      }
+
+      const who = named.length ? ` with ${joinNames(slots.people)}` : "";
+      return gate(
+        `clearing ${range.label}${who} — ${items.length} ${items.length === 1 ? noun : `${noun}s`}: ${listEvents(items)}`,
+        () => {
+          for (const it of items) {
+            if (wantsTasks) deleteTask(it.id);
+            else deleteEvent(it.id);
+          }
+          return reply(
+            `${range.label[0].toUpperCase()}${range.label.slice(1)} is clear — ` +
+              `removed ${items.length} ${items.length === 1 ? noun : `${noun}s`}.`,
+            [{ summary: `Cleared ${range.label} · ${items.length} ${items.length === 1 ? noun : `${noun}s`}` }],
+            { entity: null, set: null, day: dayKey(range.from) },
+          );
         },
       );
     }
@@ -590,8 +775,12 @@ export function ask(text, state, opts = {}) {
       const label = rawLabel[0].toUpperCase() + rawLabel.slice(1);
 
       // The day asked about becomes the topic, so a bare "book a 2pm" next
-      // lands here rather than on today.
-      return reply(describeDay(label, events, due), [], { day });
+      // lands here rather than on today — and the meetings just listed become
+      // the set, so "cancel them" has something to point at.
+      return reply(describeDay(label, events, due), [], {
+        day,
+        set: events.length ? { kind: "event", ids: events.map((e) => e.id), label } : null,
+      });
     }
 
     // ------------------------------------------------------- one thing
@@ -667,6 +856,31 @@ export function ask(text, state, opts = {}) {
       );
     }
 
+    // ------------------------------------------------------ the working day
+    /**
+     * "What are my working hours?" — answered from the settings, in the same
+     * words the planner reasons in.
+     *
+     * Worth its own intent because these numbers govern every "that does not
+     * fit" the assistant ever says, and a user who cannot ask what they are
+     * has no way to tell a wrong plan from a wrong setting.
+     */
+    case INTENTS.QUERY_HOURS: {
+      const h = hoursOf(state.settings);
+      const bits = [`You work ${describeHours(h)}`];
+      bits.push(`with ${sayMins(h.capacityMins)} a day set aside for focused work`);
+      if (h.breaks.length) {
+        bits.push(
+          `and ${joinNames(h.breaks.map((b) => `${b.label.toLowerCase()} ${sayHour(b.start)}–${sayHour(b.end)}`))} kept clear`,
+        );
+      }
+      const week = weeklyMins(h);
+      return reply(
+        `${bits.join(", ")}. That's about ${sayMins(week)} of focus a week — ` +
+        `it's what I measure every deadline against. Change it in Settings.`,
+      );
+    }
+
     // --------------------------------------------------- change its length
     case INTENTS.RESIZE_EVENT: {
       const ranked = opts.resolvedId
@@ -712,7 +926,10 @@ export function ask(text, state, opts = {}) {
 
     case INTENTS.QUERY_FREE: {
       const day = dayKey(slots.dateOnly || now);
-      const slots_ = findFreeSlots(day, state.events, { minMins: slots.durationMins || 30 });
+      const slots_ = findFreeSlots(day, state.events, {
+        minMins: slots.durationMins || 30,
+        start: work.workStart, end: work.workEnd, breaks: work.breaks,
+      });
       if (!slots_.length) return reply("Nothing open that day inside working hours.", [], { day });
       const lines = slots_.map((s) => `${fmtTime(s.start)}–${fmtTime(s.end)} (${duration(s.mins * 60000)})`);
       return reply(`Open time:\n${lines.join("\n")}`, [], { day });
@@ -723,13 +940,13 @@ export function ask(text, state, opts = {}) {
       // arithmetic for one project, which is the question behind most of them.
       const hit = resolveProject(p.body, state.projects);
       if (hit.length && isConfident(hit) && /\bproject\b|\bon track\b|\bpace\b|\bhow (?:is|are|much)\b|\bfit\b|\bbehind\b/i.test(p.body)) {
-        const load = projectLoad(hit[0].item, state.tasks, state.sessions, state.events, { now });
+        const load = projectLoad(hit[0].item, state.tasks, state.sessions, state.events, { ...work, now });
         return reply(describeLoad(load), [], { day: load.due });
       }
       // "what's most urgent" — ranked by how little room each has left, which
       // is not the same as what the user marked important.
       if (/\bmost urgent\b|\bwhat'?s urgent\b|\bwhat should i (?:do|work on) first\b|\bbehind on\b|\btriage\b/i.test(p.body)) {
-        const ranked = triage(state.tasks, state.events, state.sessions, { now }).slice(0, 5);
+        const ranked = triage(state.tasks, state.events, state.sessions, { ...work, now }).slice(0, 5);
         if (!ranked.length) return reply("Nothing open with time on it.");
         const h = (m) => (m >= 60 ? `${+(m / 60).toFixed(m % 60 ? 1 : 0)}h` : `${m}m`);
         return reply(
@@ -743,7 +960,7 @@ export function ask(text, state, opts = {}) {
       // "plan my week" and "how do I get this done" want the whole runway, not
       // just today — that is where the deadline maths actually lives.
       if (/\bweek\b|\bdeadlines?\b|\bfit\b|\bahead\b/.test(p.body.toLowerCase())) {
-        const spread = distribute(state.tasks, state.events, state.sessions, { now });
+        const spread = distribute(state.tasks, state.events, state.sessions, { ...work, now });
         if (!spread.blocks.length && !spread.shortfalls.length) {
           return reply("Nothing to lay out — no open work with time on it.");
         }
@@ -760,7 +977,7 @@ export function ask(text, state, opts = {}) {
         );
       }
       const day = dayKey(slots.dateOnly || now);
-      const plan = planDay(state.tasks, state.events, { day, now });
+      const plan = planDay(state.tasks, state.events, { ...work, day, now });
       if (!plan.tasks.length) return reply("Nothing to plan — no open tasks.");
       return gate(
         `laying ${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"} into the gaps around your meetings`,
@@ -800,6 +1017,14 @@ export function resolveChoice(choice, id, state, now = new Date()) {
   // Tapping and typing take the same path, so both behave identically and
   // there is only one place where a confirmation can be granted.
   if (choice.kind === "confirm") return ask(id === "yes" ? "yes" : "no", state, { now });
+
+  // The scope question. The original sentence is re-asked with the answer
+  // appended, so it runs down exactly the path a fully specified request
+  // would have — one route to the calendar, not two.
+  if (choice.kind === "range") {
+    if (id === "cancel") return ask("no", state, { now });
+    return ask(`${choice.text} ${id}`, state, { now });
+  }
 
   const verb = {
     move: `move it to ${choice.when}`,

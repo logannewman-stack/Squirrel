@@ -10,6 +10,13 @@
  *   coverage — anything falling through to "I didn't catch that"
  *   swallowing — a real request eaten by the politeness layer, which is what
  *                widening the courtesy patterns risks every time
+ *
+ * What it deliberately cannot see: whether the handler behind an intent does
+ * anything. This file scored 100% while "can you clear my calendar" was
+ * answered with "I couldn't find that on your calendar" — classified
+ * perfectly, then handed to a routine that could only ever cancel one meeting.
+ * `act.test.mjs` is the answer to that, and any phrasing added here that can
+ * change or destroy data belongs there too.
  */
 import { classify } from "../src/lib/nlu/smalltalk.js";
 import { parse } from "../src/lib/nlu/parse.js";
@@ -50,10 +57,12 @@ const CORPUS = {
   "about one thing": ["when is the board meeting","what time is my call with bob","where is the lease walkthrough","who am i meeting friday","how long is the exec staff","what's my next meeting","when's my first meeting tomorrow","is the board prep still on"],
   "progress": ["how much have i done this week","what did i do yesterday","how much time on the raise","how many hours did i focus","what did i finish today","how am i doing on focus"],
   "hours on work": ["the deck will take 8 hours","estimate 3 hours for the letter","the lease is about 45 minutes","budget 2 hours for the review","that one is a 4 hour job"],
-  "clearing": ["clear my afternoon","wipe friday","cancel everything tomorrow","move everything on friday to monday","clear the rest of today"],
+  "clearing": ["clear my afternoon","wipe friday","cancel everything tomorrow","move everything on friday to monday","clear the rest of today","clear my calendar","can you clear my calendar","remove them","remove my appointments for this week","clear next week","empty my thursday","blank out friday","scrub friday afternoon","purge my week","clear friday morning","get rid of everything on friday","nuke my afternoon","clear my whole week","cancel my meetings with bob this week","clear my tasks for today","clear this weekend","free up my monday","wipe my calendar for tomorrow","clear from monday to wednesday","cancel the next 3 days"],
+  "working hours": ["what are my working hours","what hours do i work","when do i finish","what days do i work","how many hours can i work a day","do i work weekends","my daily capacity","what is my working week"],
   "polite combos": ["could you book a call with bob friday at 2","would you mind moving my 3pm","please cancel my 4pm","can you find me an hour thursday","do me a favour and clear friday","if you could, move the standup"],
   "removing": ["cancel my 4pm","delete the board prep","remove the standup","drop the friday lunch","call off the review","get rid of my 3pm","take the standup off my calendar","scrap the monday sync","kill the 2pm","bin the review","cancel tomorrow's lunch","i don't need the 3pm anymore","the exec staff is cancelled","cancel the meeting with bob","remove bob's meeting","delete everything friday","cancel all my meetings tomorrow","clear my calendar friday","wipe out thursday afternoon","cancel the rest of today","no longer need the board prep","drop everything monday morning","take friday off my calendar","cancel my meetings this week","free up my whole afternoon","empty out tuesday","that meeting is off","we cancelled the review","cancel and don't rebook","remove the term sheet call"],
-  "adding": ["add a meeting with bob friday at 2","put a call with priya on friday","new meeting thursday at 10","create an event monday at 9","book bob for 2pm friday","set up a call with dana","schedule time with anders tuesday","i need a meeting with sarah friday","let's do 3pm thursday with bob","get me 30 minutes with priya","stick lunch in friday at noon","add a 1:1 with sarah mondays at 3","put down a review for wednesday","slot in a call with bob","throw a meeting on friday at 4","i want to meet bob friday at 2","need to see anders tuesday","meeting friday 2pm bob","book the boardroom thursday 9 to 11","reserve two hours friday morning","pop in a coffee with priya","arrange a call with the client friday","organise a review for thursday","line up a call with dana monday","have bob at 3 on friday","put bob in for friday at 2","give me an hour thursday","open a slot for the deck friday"],
+  "compound": ["cancel my meeting for friday at 1 and reschedule it for saturday at 2","cancel the 3pm and rebook it for tuesday","delete friday's call and move it to monday at 10","drop the standup and put it at 11","scrap the review and rearrange it for next week"],
+  "adding": ["put a meeting with ronnie at 11","add a meeting with bob friday at 2","put a call with priya on friday","new meeting thursday at 10","create an event monday at 9","book bob for 2pm friday","set up a call with dana","schedule time with anders tuesday","i need a meeting with sarah friday","let's do 3pm thursday with bob","get me 30 minutes with priya","stick lunch in friday at noon","add a 1:1 with sarah mondays at 3","put down a review for wednesday","slot in a call with bob","throw a meeting on friday at 4","i want to meet bob friday at 2","need to see anders tuesday","meeting friday 2pm bob","book the boardroom thursday 9 to 11","reserve two hours friday morning","pop in a coffee with priya","arrange a call with the client friday","organise a review for thursday","line up a call with dana monday","have bob at 3 on friday","put bob in for friday at 2","give me an hour thursday","open a slot for the deck friday"],
   "out of scope": ["what's the capital of france","what's the weather","tell me a joke","write me a poem","who won the game","translate this","define serendipity"],
 };
 
@@ -107,6 +116,22 @@ const ROUTES = {
   "extend my 3pm by 30 minutes": "resize_event",
   "cut the standup in half": "resize_event",
   "make the board prep two hours": "resize_event",
+  "clear my calendar": "clear_range",
+  "can you clear my calendar": "clear_range",
+  "wipe friday": "clear_range",
+  "cancel everything tomorrow": "clear_range",
+  "remove my appointments for this week": "clear_range",
+  "remove them": "clear_range",
+  "take friday off my calendar": "clear_range",
+  "clear my afternoon": "clear_range",
+  // Bulk removal must not swallow single removal, which is the failure mode
+  // that comes free with teaching an assistant to delete in quantity.
+  "cancel my 4pm": "cancel_event",
+  "delete the board prep": "cancel_event",
+  "take the standup off my calendar": "cancel_event",
+  "cancel my meeting for friday at 1 and reschedule it for saturday at 2": "move_event",
+  "what are my working hours": "query_hours",
+  "put a meeting with ronnie at 11": "create_event",
 };
 let misrouted = 0;
 for (const [q, want] of Object.entries(ROUTES)) {

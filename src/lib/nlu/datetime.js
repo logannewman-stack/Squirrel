@@ -114,14 +114,18 @@ export function parseTime(text) {
   }
 
   // 3pm, 3:30 pm, 15:00, at 2
-  const m = s.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/);
-  if (m) {
-    const hour = Number(m[1]);
-    const mins = m[2] ? Number(m[2]) : 0;
-    const mer = m[3] ? m[3].replace(/\./g, "").slice(0, 2) : null;
-    // A bare number with no meridiem, no colon, and no "at" is more likely a
-    // duration or a count than a time — leave it to the duration parser.
-    const explicit = Boolean(mer || m[2] || /\bat\s+\d/.test(s));
+  //
+  // Every number is tried, not just the first. "30 minute call with Dana at
+  // 11" leads with a duration, and stopping at the first match read it as an
+  // impossible hour and then gave up — so the sentence carried no time at all
+  // and the booking never happened.
+  for (const m of s.matchAll(/\b(at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/g)) {
+    const hour = Number(m[2]);
+    const mins = m[3] ? Number(m[3]) : 0;
+    const mer = m[4] ? m[4].replace(/\./g, "").slice(0, 2) : null;
+    // A bare number with no meridiem, no colon, and no "at" in front of it is
+    // more likely a duration or a count — leave it to the duration parser.
+    const explicit = Boolean(mer || m[3] || m[1]);
     if (hour <= 23 && mins <= 59 && explicit) {
       return { h: disambiguateHour(hour, mer), m: mins, source: m[0].trim() };
     }
@@ -265,6 +269,236 @@ export function parseDate(text, now = new Date()) {
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------- ranges
+/**
+ * A stretch of calendar, rather than a point on it.
+ *
+ * "Cancel my 4pm" needs a moment. "Clear my calendar this week" needs a span,
+ * and the two readings of the same words genuinely differ: as a deadline,
+ * "this week" resolves to Friday — before it runs out — which is why
+ * `parseDate` sends it there. As a span it means Monday through Sunday, and
+ * using the deadline reading to select events for deletion would clear one day
+ * and report success.
+ *
+ * Everything returned is half-open — `from` inclusive, `to` exclusive — so a
+ * meeting at exactly midnight belongs to the day it starts and to nothing else.
+ */
+
+/** Boundaries of the rough parts of a day, for "clear my afternoon". */
+const DAYPART_SPAN = {
+  morning: [0, 12],
+  afternoon: [12, 17],
+  evening: [17, 24],
+  tonight: [17, 24],
+  night: [17, 24],
+  "the day": [0, 24],
+};
+
+const startOfDay = (d) => atLocal(d, 0);
+const nextDay = (d, n = 1) => {
+  const x = atLocal(d, 0);
+  x.setDate(x.getDate() + n);
+  return x;
+};
+const mondayOf = (d, weeksOut = 0) => {
+  const x = atLocal(d, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7) + weeksOut * 7);
+  return x;
+};
+const at = (d, h) => {
+  const x = atLocal(d, 0);
+  x.setMinutes(Math.round(h * 60));
+  return x;
+};
+
+/**
+ * Date words, recognised through a typo.
+ *
+ * Narrower than the command vocabulary in parse.js and used only as a retry:
+ * "remove my appointments for this wek" is unmistakably about this week, and
+ * answering "which stretch?" to it is the kind of pedantry that makes people
+ * stop typing to an assistant. Only ever consulted after a clean parse found
+ * nothing, so a sentence that already makes sense is never rewritten.
+ */
+const DATE_VOCAB = [
+  "today", "tonight", "tomorrow", "yesterday", "week", "weekend", "weeks",
+  "month", "morning", "afternoon", "evening", "calendar", "schedule",
+  "everything", "monday", "tuesday", "wednesday", "thursday", "friday",
+  "saturday", "sunday",
+];
+
+/**
+ * One edit away, counting a swapped pair as one edit.
+ *
+ * Transposition has to count as a single mistake, or "friady" — which is how
+ * Friday actually gets mistyped — sits two plain edits from the word and is
+ * never recognised. One edit is the whole budget: allow two and "monthly"
+ * corrects to "month", so a question about a monthly review starts clearing
+ * the month.
+ */
+function nearlyEqual(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a === b) return true;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  let j = 0;
+  while (j < a.length - i && j < b.length - i && a[a.length - 1 - j] === b[b.length - 1 - j]) j++;
+  const ra = a.slice(i, a.length - j);
+  const rb = b.slice(i, b.length - j);
+  // One insertion, deletion, or substitution.
+  if (ra.length <= 1 && rb.length <= 1) return true;
+  // Or one swapped pair.
+  return ra.length === 2 && rb.length === 2 && ra[0] === rb[1] && ra[1] === rb[0];
+}
+
+/** Nudge date words onto their spelling. Only ever run after a clean parse failed. */
+export function fixDateWords(text) {
+  return text.replace(/[a-z']+/gi, (w) => {
+    const low = w.toLowerCase();
+    if (low.length < 3 || DATE_VOCAB.includes(low)) return w;
+    return DATE_VOCAB.find((v) => nearlyEqual(low, v)) ?? w;
+  });
+}
+
+/**
+ * @param {string} text
+ * @param {Date} now
+ * @param {{clampToNow?: boolean}} [opts]  Trim a range that starts in the past.
+ * @returns {{from: Date, to: Date, label: string, scope: string} | null}
+ */
+export function parseRange(text, now = new Date(), opts = {}) {
+  const s = text.toLowerCase();
+  const today = startOfDay(now);
+  const clamp = (r) => {
+    // Clearing "this week" on Thursday means the part of it still ahead. The
+    // days already spent hold history, and deleting history is never what was
+    // meant by a forward-looking instruction.
+    if (opts.clampToNow !== false && r.from < today && r.to > today) {
+      return { ...r, from: today };
+    }
+    return r;
+  };
+
+  // "from Monday to Wednesday", "Monday through Friday" — an explicit span,
+  // checked first because both halves would otherwise parse as one date.
+  const span = s.match(/\b(?:from\s+)?(.{2,24}?)\s+(?:to|until|till|through|thru|[-–])\s+(.{2,24}?)\s*$/);
+  if (span) {
+    const a = parseDate(span[1], now);
+    const b = parseDate(span[2], now);
+    if (a && b && b.date >= a.date) {
+      return clamp({
+        from: startOfDay(a.date),
+        to: nextDay(b.date),
+        label: `${label(a.date, now)} through ${label(b.date, now)}`,
+        scope: "span",
+      });
+    }
+  }
+
+  // "the rest of today", "the rest of this week", "the rest of my afternoon".
+  const rest = s.match(/\b(?:the\s+)?rest of (?:the\s+|my\s+|this\s+)?(day|today|morning|afternoon|evening|week|month)\b/);
+  if (rest) {
+    const unit = rest[1];
+    if (unit === "week") {
+      return { from: now, to: nextDay(mondayOf(now, 1), 0), label: "the rest of this week", scope: "week" };
+    }
+    if (unit === "month") {
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      return { from: now, to: end, label: "the rest of this month", scope: "month" };
+    }
+    const [, hi] = DAYPART_SPAN[unit === "today" ? "the day" : unit] ?? DAYPART_SPAN["the day"];
+    return { from: now, to: at(today, hi), label: `the rest of ${unit === "day" || unit === "today" ? "today" : `the ${unit}`}`, scope: "part" };
+  }
+
+  // A part of a named day: "friday afternoon", "tomorrow morning", "tonight".
+  const part = s.match(/\b(morning|afternoon|evening|tonight|night)\b/);
+  if (part) {
+    const kind = part[1];
+    // "tonight" carries its own day; anything else takes whatever day the
+    // sentence named, defaulting to today.
+    const on = kind === "tonight" ? today : (parseDate(s, now)?.date ?? today);
+    const [lo, hi] = DAYPART_SPAN[kind];
+    return clamp({
+      from: at(on, lo),
+      to: at(on, hi),
+      label: kind === "tonight" ? "tonight" : `${label(on, now)} ${kind}`,
+      scope: "part",
+    });
+  }
+
+  // "the next three days", "the next 2 weeks"
+  const nextN = s.match(new RegExp(`\\b(?:the\\s+)?next\\s+(\\d+|${NUM_WORDS})\\s*(day|week|month)s?\\b`));
+  if (nextN) {
+    const n = /^\d+$/.test(nextN[1]) ? Number(nextN[1]) : WORD_NUMBERS[nextN[1]];
+    const to = startOfDay(now);
+    if (nextN[2] === "day") to.setDate(to.getDate() + n);
+    else if (nextN[2] === "week") to.setDate(to.getDate() + n * 7);
+    else to.setMonth(to.getMonth() + n);
+    return { from: now, to, label: `the next ${n} ${nextN[2]}${n === 1 ? "" : "s"}`, scope: "span" };
+  }
+
+  if (/\bthis weekend\b/.test(s)) {
+    const sat = new Date(today);
+    sat.setDate(sat.getDate() + ((6 - sat.getDay() + 7) % 7));
+    return clamp({ from: sat, to: nextDay(sat, 2), label: "this weekend", scope: "span" });
+  }
+
+  // Whole weeks and months. "this week" is Monday to Sunday here, deliberately
+  // unlike the deadline reading.
+  if (/\bnext week\b/.test(s)) {
+    return { from: mondayOf(now, 1), to: mondayOf(now, 2), label: "next week", scope: "week" };
+  }
+  if (/\b(?:this|the|my|current)\s+(?:whole\s+|entire\s+|full\s+)?week\b/.test(s)) {
+    return clamp({ from: mondayOf(now), to: mondayOf(now, 1), label: "this week", scope: "week" });
+  }
+  if (/\bnext month\b/.test(s)) {
+    return {
+      from: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+      to: new Date(now.getFullYear(), now.getMonth() + 2, 1),
+      label: "next month",
+      scope: "month",
+    };
+  }
+  if (/\b(?:this|the|my)\s+(?:whole\s+|entire\s+|full\s+)?month\b/.test(s)) {
+    return clamp({
+      from: new Date(now.getFullYear(), now.getMonth(), 1),
+      to: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+      label: "this month",
+      scope: "month",
+    });
+  }
+
+  // A single named day covers that whole day.
+  const one = parseDate(s, now);
+  if (one) {
+    return { from: startOfDay(one.date), to: nextDay(one.date), label: label(one.date, now), scope: "day" };
+  }
+
+  // "everything", with no day attached at all. Not a range — a request to be
+  // asked which one, because the honest reading spans months.
+  return null;
+}
+
+/** One whole day, as a range. Used when a revision re-aims a clear. */
+export const dayRange = (date, now = new Date()) => ({
+  from: startOfDay(date),
+  to: nextDay(date),
+  label: label(date, now),
+  scope: "day",
+});
+
+/** "today", "tomorrow", "Friday", "Tue, Aug 18" — a day, said the short way. */
+function label(d, now) {
+  const k = dayKey(d);
+  if (k === dayKey(now)) return "today";
+  const t = new Date(now);
+  t.setDate(t.getDate() + 1);
+  if (k === dayKey(t)) return "tomorrow";
+  const within = (atLocal(d, 0) - atLocal(now, 0)) / 86400000;
+  if (within > 0 && within < 7) return d.toLocaleDateString([], { weekday: "long" });
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 
 /**

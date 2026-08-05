@@ -7,11 +7,12 @@
  * rather than a guess.
  */
 
-import { parseDateTime, parseDuration, parseTime, parseDate } from "./datetime.js";
+import { parseDateTime, parseDuration, parseTime, parseDate, parseRange } from "./datetime.js";
 
 export const INTENTS = {
   MOVE_EVENT: "move_event",
   CANCEL_EVENT: "cancel_event",
+  CLEAR_RANGE: "clear_range",
   CREATE_EVENT: "create_event",
   CREATE_TASK: "create_task",
   COMPLETE_TASK: "complete_task",
@@ -20,6 +21,7 @@ export const INTENTS = {
   QUERY_DAY: "query_day",
   QUERY_EVENT: "query_event",
   QUERY_PROGRESS: "query_progress",
+  QUERY_HOURS: "query_hours",
   RESIZE_EVENT: "resize_event",
   QUERY_FREE: "query_free",
   PLAN_DAY: "plan_day",
@@ -27,15 +29,129 @@ export const INTENTS = {
   UNKNOWN: "unknown",
 };
 
+/**
+ * Emptying a stretch of calendar, as opposed to cancelling one thing.
+ *
+ * These were the same intent for far too long, and the single-event resolver
+ * answered "I couldn't find that on your calendar" to "can you clear my
+ * calendar" — a sentence with nothing ambiguous in it. Three separate signals
+ * point at a bulk operation and any one is enough:
+ */
+
+/** Verbs that only ever mean "empty this out". */
+const CLEAR_VERB = /\b(?:clear|clean|wipe|empty|blank|scrub|purge|nuke|blow away|free up|freeing up|get rid of)\b/;
+
+/** Verbs that remove one thing or many, depending on what follows. */
+const REMOVE_VERB = /\b(?:cancel\w*|delete|remove|drop|kill|scrap|bin|axe|ditch|nix|call off|take off|clear out)\b/;
+
+/** An object that is plainly plural or total. */
+const BULK_OBJECT =
+  /\b(?:everything|every ?thing|anything|all|whole|entire|the rest|the lot|meetings|appointments|events|calls|bookings|commitments|things|them|those|these|both)\b/;
+
+/** A span of time, as opposed to a thing sitting inside one. */
+const SPAN_WORD =
+  /\b(?:calendar|schedule|diary|agenda|day|days|morning|afternoon|evening|tonight|week|weekend|month|today|tomorrow|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/;
+
+/**
+ * Words that survive the strip only if the sentence names something specific.
+ *
+ * "Clear my Friday" leaves nothing behind; "cancel the board prep" leaves
+ * "board prep". That residue is the whole test — a sentence made entirely of
+ * verbs, possessives, calendar nouns, and dates is talking about a span, and a
+ * sentence with a noun left in it is talking about a thing.
+ */
+const SPAN_FILLER = new RegExp(
+  "\\b(?:" +
+  "can|could|would|will|you|please|kindly|mind|do|me|a|favou?r|i|id|i'd|want|need|would like|lets|let's|" +
+  "my|our|the|this|that|these|those|all|whole|entire|full|rest|lot|of|for|on|in|at|from|to|and|out|off|up|" +
+  "next|last|coming|following|upcoming|couple|few|several|\\d+|" +
+  "clear|clean|wipe|empty|blank|scrub|purge|nuke|blow|away|free|get|rid|take|" +
+  "cancel\\w*|delete|remove|drop|kill|scrap|bin|axe|ditch|nix|" +
+  "calendar|schedule|diary|agenda|day|days|everything|every|thing|things|anything|" +
+  "meetings?|appointments?|events?|calls?|bookings?|commitments?|blocks?|slots?|" +
+  "please|now|entirely|completely|totally|just|already|" +
+  "them|those|it|there" +
+  ")\\b", "gi");
+
+/**
+ * True when what is left after stripping is nothing at all.
+ * Temporal phrases go first, so "clear my Friday afternoon" empties out.
+ */
+function spanOnly(body) {
+  const rest = stripTemporal(body)
+    .replace(SPAN_FILLER, " ")
+    .replace(/[^a-z0-9]/gi, "");
+  return rest.length === 0;
+}
+
+/**
+ * Booking time is not clearing time.
+ *
+ * "Free up an hour Thursday" and "free up Thursday" share a verb and mean
+ * opposite things. A duration means make room; a span means empty it.
+ */
+const WANTS_ROOM = /\b(?:free up|make|find|carve out|set aside|squeeze in|block(?: out)?)\b[^.]*\b(?:\d+\s*(?:h|hrs?|hours?|m|mins?|minutes?)|an? hour|half an hour|some time|time)\b/;
+
+/** "take Friday off my calendar" — a removal verb split around its object. */
+const TAKE_OFF = /\btake\s+(.{2,24}?)\s+off (?:my|the)\s+(?:calendar|schedule|diary)\b/i;
+
+/** Does this sentence ask for a whole stretch to be emptied? */
+export function isClearRange(body) {
+  const s = body.toLowerCase();
+  if (WANTS_ROOM.test(s)) return false;
+  // "Take Friday off my calendar" names a day; "take the standup off my
+  // calendar" names a meeting. Same shape, and only the object separates them.
+  const takeOff = s.match(TAKE_OFF);
+  if (takeOff) return spanOnly(takeOff[1]) && SPAN_WORD.test(takeOff[1]);
+  const clears = CLEAR_VERB.test(s);
+  const removes = REMOVE_VERB.test(s);
+  if (!clears && !removes) return false;
+  // A clearing verb aimed at a span: "wipe Friday", "clear my afternoon".
+  if (clears && (SPAN_WORD.test(s) || BULK_OBJECT.test(s))) return true;
+  // A removal verb aimed at something plural: "cancel all my meetings Friday".
+  if (removes && BULK_OBJECT.test(s)) return true;
+  // A removal verb aimed at a bare day, with no thing named and no clock time
+  // to pick one out: "cancel Friday", "take Thursday off my calendar".
+  return removes && SPAN_WORD.test(s) && spanOnly(body) && !hasClock(s);
+}
+
+/**
+ * A time made of digits, as opposed to a part of the day.
+ *
+ * "Cancel my 4pm" names one meeting; "clear my afternoon" names a stretch.
+ * `parseTime` answers both with an hour, so the distinction has to be drawn
+ * here or every "cancel my 4pm" becomes a request to empty the afternoon.
+ */
+const hasClock = (s) => /\d\s*(?:am|pm|a\.m\.|p\.m\.|:\d{2})|\bat\s+\d|\b\d{1,2}\s*o'?\s*c?l[o0]?c?k\b/i.test(s);
+
+/**
+ * "Cancel Friday's 1pm and rebook it Saturday at 2" — two verbs, one intention.
+ *
+ * Read literally this is a cancellation followed by a booking, and handling it
+ * that way loses the attendees, the length, and the title. It is a move, and
+ * the only hard part is that the two halves each carry a date: without the
+ * split, the target time parses out of the first half and the meeting moves to
+ * where it already was.
+ */
+const CANCEL_THEN_REBOOK =
+  /\b(?:cancel\w*|delete|remove|drop|scrap|move|push)\b(.+?)(?:,\s*)?\b(?:and|then|&)\s+(?:can you\s+|please\s+)?(?:re-?schedul\w*|re-?book\w*|re-?arrange|rearrange|move|put|book|set|slot|pop|stick|do)\b\s*(?:it|that|this|them|the\s+\w+)?\s*(?:back\s+)?(?:for|to|on|at|in)\b(.+)$/i;
+
 const RULES = [
   [INTENTS.HELP, /\b(help|what can you do|commands?)\b/],
   [INTENTS.INVITE, /\b(invite|send (?:an? )?invit|email .* about|send .* (?:the )?(?:invite|calendar))\b/],
+  // Very early, and deliberately narrow. "Finish" belongs to completing a task
+  // and "how many hours" to progress, so both are only surrendered when the
+  // sentence is unmistakably about the shape of the working day itself.
+  [INTENTS.QUERY_HOURS, /\b(?:my |the )?working (?:hours|day|days|week)\b|\bwhat (?:are|is) my hours\b|\bwhat hours do i (?:work|do)\b|\bwhen do i (?:start|finish|stop|knock off)(?:\s+work(?:ing)?)?\s*[?.!]*$|\bhow (?:many|much) (?:hours|time) (?:do|can|should) i (?:work|focus)\b|\bmy (?:daily )?capacity\b|\bwhat days do i work\b|\bdo i work (?:weekends?|saturdays?|sundays?)\b/],
   [INTENTS.MOVE_EVENT, /\b(move|reschedul\w*|push|shift|bump|postpone)\b/],
+  // Before cancel, after move: "move everything on Friday to Monday" is a bulk
+  // move and stays a move; "cancel everything on Friday" is a bulk clear.
+  [INTENTS.CLEAR_RANGE, isClearRange],
   // `cancel\w*` on purpose: "cancelled" and "cancelling" have no word boundary
   // after "cancel", so the strict form missed every past-tense report — and
   // people report as often as they command. "The exec staff is cancelled" is
   // not a request but it means exactly one thing.
-  [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b/],
+  [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b|\b(?:don'?t|do not|dont|didn'?t) (?:need|want)\b.*\b(?:any ?more|any longer)?\b|\bnot happening\b|\bfell through\b|\bwe'?re not doing\b/],
   // "mark ... as done" allows words in between — that is how people write it.
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b/],
   [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|assign|give .* to)\b/],
@@ -50,7 +166,10 @@ const RULES = [
   [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|any (?:time|gaps?)|when can i)\b/],
   [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on)\b/],
-  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|hold|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|add .* (?:meeting|call|event))\b/],
+  // Booking verbs, which is most of them. Every one of these was a real
+  // sentence that fell through to "I didn't catch that" — people reach for a
+  // startling number of words for "put this on the calendar".
+  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hour|minutes?|time|slot)|add .* (?:meeting|call|event))\b/],
   [INTENTS.CREATE_TASK, /\b(add|create|new|remind me to|need to|todo)\b/],
 ];
 
@@ -73,6 +192,9 @@ const REPAIR = /^\s*(?:no+|nope|nah|actually|sorry|wait|whoops|oops|i meant|i sa
 const AMEND = /^\s*(?:make|change|set|push|move|shift|bump)\s+(?:it|that|this|them)\b/i;
 
 const PRONOUN = /\b(?:it|that one|that|this one|them|those|the meeting|the event|the task|the call)\b/i;
+
+/** A reference to more than one thing already mentioned. */
+const PLURAL_PRONOUN = /\b(?:them|those|these|they|both|all of (?:them|it|those)|the rest of (?:them|it)|everything)\b/i;
 
 /** The noun that decides whether a bare booking is a "Call" or a "Meeting". */
 const KIND_NOUN = /\b(call|meeting|sync|standup|stand-up|interview|review|1:1|one on one|lunch|dinner|coffee|appointment|catch ?up)\b/i;
@@ -165,18 +287,41 @@ function despell(text) {
     .join("");
 }
 
+/**
+ * A rule is a regex or a predicate. Most questions are answerable by pattern;
+ * "is this a span or a thing?" is not, and forcing it into one produced a
+ * regex nobody could safely edit.
+ */
 const classify = (s) => {
-  for (const [name, re] of RULES) if (re.test(s)) return name;
+  for (const [name, rule] of RULES) {
+    if (typeof rule === "function" ? rule(s) : rule.test(s)) return name;
+  }
   return INTENTS.UNKNOWN;
 };
 
-/** Strip leading command verbs so the remainder reads as a title. */
+/**
+ * Strip leading command verbs so the remainder reads as a title.
+ *
+ * The list is long because the verb is the one word nobody notices they typed.
+ * "Put a meeting with Ronnie at 11" was landing on the calendar as "Put" —
+ * every slot correctly extracted, and the one field a human reads left holding
+ * the imperative.
+ */
 function stripVerbs(text) {
   return text
-    .replace(/^\s*(?:can you|could you|please|hey|ok|okay)\s+/i, "")
-    .replace(/^\s*(?:add|create|new|schedule|book|block|set up|remind me to|i need to)\s+/i, "")
-    .replace(/\bput\s+(?:it|this|that)?\s*(?:on|in)\s+(?:my|the)\s+calendar\b/i, " ")
+    // "on my calendar" goes first. Strip the leading verb ahead of it and the
+    // phrase loses its anchor, leaving the word "calendar" behind as a title.
+    .replace(/\s*(?:it|this|that|them)?\s*\b(?:on|in)(?:to)?\s+(?:my|the)\s+(?:calendar|schedule|diary)\b/i, " ")
+    .replace(/^\s*(?:can you|could you|would you|will you|please|hey|ok|okay|i'?d like(?: you)? to|i want(?: you)? to|i need(?: you)? to|let'?s|lets)\s+/i, "")
+    .replace(
+      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to)\s+/i,
+      "",
+    )
     .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder)\s+(?:to|for|called|named)?\s*/i, "")
+    // "new task review the deck" — the noun with no article in front of it.
+    .replace(/^\s*(?:task|meeting|call|event|reminder)\s+(?:to|for|called|named)?\s*/i, "")
+    // "make time for the letter" — the object of the verb is the time itself.
+    .replace(/^\s*(?:some\s+)?time\s+(?:for|on|to)\s+/i, "")
     .trim();
 }
 
@@ -185,6 +330,10 @@ function stripTemporal(text) {
   return text
     .replace(/\b(?:on|at|for|by|due)?\s*\b(?:next|this|coming)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?\b/gi, " ")
     .replace(/\b(?:today|tomorrow|tonight|yesterday|tmrw)\b/gi, " ")
+    // "2 to 4", "9 until 11:30" — a span written as two clock times. Left in,
+    // it becomes the title: "hold thursday 2 to 4" booked a meeting called
+    // "2 to 4".
+    .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:to|until|till|–|-)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/gi, " ")
     .replace(/\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/gi, " ")
     // Bare "at 10" with no meridiem — otherwise it survives into a title or
     // subject as trailing noise.
@@ -193,6 +342,7 @@ function stripTemporal(text) {
     .replace(/\b\d{1,2}:\d{2}\b/g, " ")
     .replace(/\b\d+(?:\.\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b/gi, " ")
     .replace(/\b(?:half an hour|an hour|a hour)\b/gi, " ")
+    .replace(/\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple|few|several|half)\s+(?:of\s+)?(?:and a half\s+)?(?:hours?|hrs?|minutes?|mins?)\b/gi, " ")
     .replace(/\b(?:in\s+\d+\s+days?)\b/gi, " ")
     .replace(/\b(?:morning|afternoon|evening|noon|midnight|night)\b/gi, " ")
     .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\w*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, " ")
@@ -296,8 +446,8 @@ function cleanTitle(text, people = [], subject = null) {
   let prev;
   do {
     prev = t;
-    t = t.replace(/^(?:for|about|on|to|with|re|called|named|and|it|that|this|them|those|a|an|the)\s+/i, "");
-    t = t.replace(/\s+(?:for|about|on|to|with|and|it|that)$/i, "");
+    t = t.replace(/^(?:for|about|on|in|at|to|with|re|called|named|and|it|that|this|them|those|a|an|the|my|our)\s+/i, "");
+    t = t.replace(/\s+(?:for|about|on|in|at|to|by|from|with|and|it|that)$/i, "");
     t = t.replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "").trim();
   } while (t !== prev);
   // A bare "meeting" is not a title. Returning null lets the caller compose one
@@ -330,10 +480,18 @@ export function parse(text, now = new Date()) {
   }
   const s = body.toLowerCase();
 
-  // "move X to Y" — the target time is what follows the last "to"/"until".
+  // "cancel the Friday 1pm and rebook it Saturday at 2" — a move written as
+  // two commands. Checked before anything else reads the sentence, because
+  // every slot below would otherwise be pulled from the wrong half of it.
   let targetPhrase = body;
   let subjectPhrase = body;
-  if (intent === INTENTS.MOVE_EVENT) {
+  const compound = body.match(CANCEL_THEN_REBOOK);
+  if (compound) {
+    intent = INTENTS.MOVE_EVENT;
+    subjectPhrase = compound[1].trim();
+    targetPhrase = compound[2].trim();
+  } else if (intent === INTENTS.MOVE_EVENT) {
+    // "move X to Y" — the target time is what follows the first "to"/"until".
     const split = body.match(/^(.*?)\s+\b(?:to|until|till|->)\b\s+(.*)$/i);
     if (split) {
       subjectPhrase = split[1];
@@ -356,8 +514,11 @@ export function parse(text, now = new Date()) {
   const toPerson = body.match(/\b(?:to|with|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/);
   const people = extractPeople(body);
   const subject = extractSubject(body, people);
-  const dateOnly = parseDate(body, now)?.date ?? null;
-  const timeOnly = parseTime(body);
+  // A compound carries two of everything. The half after "and rebook it" is
+  // the one that says where the meeting is going.
+  const whenPhrase = compound ? targetPhrase : body;
+  const dateOnly = parseDate(whenPhrase, now)?.date ?? null;
+  const timeOnly = parseTime(whenPhrase);
   const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;
 
   // "lunch with priya friday at 12" — nobody writes a verb in front of that.
@@ -386,6 +547,13 @@ export function parse(text, now = new Date()) {
     isDue: /\bdue\b|\bby\b/.test(s),
     dateOnly,
     timeOnly,
+    // The stretch of calendar this names, if it names one. Distinct from
+    // `dateOnly`: "this week" is Friday as a deadline and Monday-to-Sunday as
+    // a span, and only one of those is right for emptying a calendar.
+    range: parseRange(body, now),
+    // Digits, not "afternoon" — the difference between naming one meeting and
+    // naming a stretch of the day.
+    hadClock: hasClock(s),
   };
 
   // A fragment carries information but no verb: "for friday", "make it 30 min",
@@ -402,6 +570,11 @@ export function parse(text, now = new Date()) {
     repair,
     amend: AMEND.test(body),
     pronoun: PRONOUN.test(s),
+    // "remove them" points at a set, "remove it" at one thing. Answering the
+    // first as though it were the second cancels one meeting out of four and
+    // reports success.
+    plural: PLURAL_PRONOUN.test(s),
+    compound: Boolean(compound),
     fragment,
     slots,
   };

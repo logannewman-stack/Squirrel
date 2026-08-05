@@ -47,8 +47,41 @@ const addDays = (d, n) => {
   return x;
 };
 
-/** Weekends are off by default — the setting is per user, not per task. */
-const isWorkday = (d, workWeekend) => workWeekend || (d.getDay() !== 0 && d.getDay() !== 6);
+/**
+ * Does this date fall on a day the user works?
+ *
+ * `workDays` is the real answer — an explicit list, because Tuesday-to-Saturday
+ * is a normal week for plenty of people and "weekends off" cannot express it.
+ * The older `workWeekend` boolean is still honoured so settings written before
+ * the list existed keep meaning what they meant.
+ */
+function isWorkday(d, opts = {}) {
+  const days = opts.workDays;
+  if (Array.isArray(days) && days.length) return days.includes(d.getDay());
+  return opts.workWeekend || (d.getDay() !== 0 && d.getDay() !== 6);
+}
+
+/**
+ * One reading of the options, shared by every entry point here.
+ *
+ * The same four numbers were being defaulted independently in four functions,
+ * which is how `distribute` came to respect a user's working hours while
+ * `urgencyOf` — the thing that decides whether work *fits* in them — quietly
+ * kept using 08:00 to 19:00. Two answers to the same question is worse than
+ * one wrong answer, because only one of them is visible.
+ */
+function windowOf(opts = {}) {
+  return {
+    minBlock: opts.minBlock ?? MIN_BLOCK_MINS,
+    bufferDays: opts.bufferDays ?? BUFFER_DAYS,
+    dailyCapacity: opts.dailyCapacity ?? DAILY_CAPACITY_MINS,
+    workStart: opts.workStart ?? WORK_START,
+    workEnd: opts.workEnd ?? WORK_END,
+    workDays: Array.isArray(opts.workDays) && opts.workDays.length ? opts.workDays : null,
+    workWeekend: opts.workWeekend ?? false,
+    breaks: opts.breaks ?? [],
+  };
+}
 
 /**
  * How much of a task is left to do, in minutes.
@@ -73,6 +106,7 @@ function capacityOf(day, events, committed, opts) {
     start: opts.workStart,
     end: opts.workEnd,
     after: opts.after,
+    breaks: opts.breaks,
   });
   const free = slots.reduce((n, s) => n + s.mins, 0);
   const used = committed.get(day) || 0;
@@ -91,7 +125,7 @@ function eligibleDays(task, from, opts) {
     // crowd out work that actually has one.
     for (let i = 0; out.length < 5 && i < 14; i++) {
       const d = addDays(from, i);
-      if (isWorkday(d, opts.workWeekend)) out.push(d);
+      if (isWorkday(d, opts)) out.push(d);
     }
     return out;
   }
@@ -103,7 +137,7 @@ function eligibleDays(task, from, opts) {
   for (let i = 0; i <= HORIZON_DAYS; i++) {
     const d = addDays(from, i);
     if (d > last) break;
-    if (isWorkday(d, opts.workWeekend)) out.push(d);
+    if (isWorkday(d, opts)) out.push(d);
   }
   // Everything is already inside the buffer, or past due. Use what is left up
   // to the deadline itself rather than refusing to plan at all — a late plan
@@ -112,7 +146,7 @@ function eligibleDays(task, from, opts) {
     for (let i = 0; i <= HORIZON_DAYS; i++) {
       const d = addDays(from, i);
       if (d > due) break;
-      if (isWorkday(d, opts.workWeekend)) out.push(d);
+      if (isWorkday(d, opts)) out.push(d);
     }
   }
   return out;
@@ -144,15 +178,7 @@ function byUrgency(a, b) {
  *   totals     {plannedMins, shortfallMins, taskCount}
  */
 export function distribute(tasks, events, sessions = [], opts = {}) {
-  const o = {
-    from: opts.now || new Date(),
-    minBlock: opts.minBlock ?? MIN_BLOCK_MINS,
-    bufferDays: opts.bufferDays ?? BUFFER_DAYS,
-    dailyCapacity: opts.dailyCapacity ?? DAILY_CAPACITY_MINS,
-    workStart: opts.workStart ?? WORK_START,
-    workEnd: opts.workEnd ?? WORK_END,
-    workWeekend: opts.workWeekend ?? false,
-  };
+  const o = { ...windowOf(opts), from: opts.now || new Date() };
   o.after = o.from;
   const from = new Date(o.from);
   from.setHours(0, 0, 0, 0);
@@ -278,6 +304,7 @@ function placeInDay(blocks, events, o) {
       start: o.workStart,
       end: o.workEnd,
       after: o.after,
+      breaks: o.breaks,
     }).map((s) => ({ at: new Date(s.start), end: new Date(s.end) }));
 
     for (const b of list) {
@@ -337,7 +364,7 @@ export function projectLoad(project, tasks, sessions = [], events = [], opts = {
   const dates = [project.due, ...open.map((t) => t.due)].filter(Boolean).sort();
   const due = project.due || dates[dates.length - 1] || null;
 
-  const o = { workWeekend: opts.workWeekend ?? false, ...opts };
+  const o = windowOf(opts);
   let workdays = 0;
   let capacity = 0;
   if (due) {
@@ -349,14 +376,9 @@ export function projectLoad(project, tasks, sessions = [], events = [], opts = {
     for (let i = 0; i <= HORIZON_DAYS; i++) {
       const day = addDays(from, i);
       if (day > end) break;
-      if (!isWorkday(day, o.workWeekend)) continue;
+      if (!isWorkday(day, o)) continue;
       workdays++;
-      capacity += capacityOf(dayKey(day), events, new Map(), {
-        minBlock: MIN_BLOCK_MINS,
-        workStart: opts.workStart ?? WORK_START,
-        workEnd: opts.workEnd ?? WORK_END,
-        dailyCapacity: opts.dailyCapacity ?? DAILY_CAPACITY_MINS,
-      });
+      capacity += capacityOf(dayKey(day), events, new Map(), o);
     }
   }
 
@@ -406,17 +428,9 @@ export function urgencyOf(task, tasks, events, sessions = [], opts = {}) {
 
   const from = new Date(now);
   from.setHours(0, 0, 0, 0);
-  const days = eligibleDays(task, from, {
-    bufferDays: opts.bufferDays ?? BUFFER_DAYS,
-    workWeekend: opts.workWeekend ?? false,
-  });
+  const o = windowOf(opts);
+  const days = eligibleDays(task, from, o);
 
-  const o = {
-    minBlock: MIN_BLOCK_MINS,
-    workStart: opts.workStart ?? WORK_START,
-    workEnd: opts.workEnd ?? WORK_END,
-    dailyCapacity: opts.dailyCapacity ?? DAILY_CAPACITY_MINS,
-  };
   const capacity = days.reduce(
     (n, d) => n + capacityOf(dayKey(d), events, new Map(), o), 0);
 

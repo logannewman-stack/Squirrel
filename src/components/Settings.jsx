@@ -1,7 +1,8 @@
-import { setSetting, totals } from "../lib/store";
+import { setSetting, totals, resetAll } from "../lib/store";
 import Identity from "./Identity";
 import Account from "./Account";
 import Reminders from "./Reminders";
+import WorkingHours from "./WorkingHours";
 import { duration } from "../lib/format";
 
 export default function Settings({ state, onBack }) {
@@ -30,6 +31,15 @@ export default function Settings({ state, onBack }) {
           Used when the assistant greets you.
         </p>
         <Identity value={state.settings?.identity || {}} compact />
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">Your working day</h2>
+        <p className="mb-5 max-w-prose text-sm text-[var(--muted)]">
+          Every deadline calculation in the app is measured against this — whether work fits,
+          how thinly a project has to be spread, what counts as urgent.
+        </p>
+        <WorkingHours state={state} />
       </section>
 
       <section className="mb-10">
@@ -84,10 +94,7 @@ export default function Settings({ state, onBack }) {
         </p>
         <button
           onClick={() => {
-            if (confirm("Erase all projects, tasks, and sessions? This cannot be undone.")) {
-              localStorage.removeItem("squirrel.v2");
-              location.reload();
-            }
+            if (confirm("Erase all projects, tasks, and sessions? This cannot be undone.")) resetAll();
           }}
           className="mt-4 rounded-full border border-[var(--line)] px-5 py-2 text-sm
                      transition-colors hover:border-[var(--ink)]"

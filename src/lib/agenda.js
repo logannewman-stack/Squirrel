@@ -8,19 +8,38 @@
  */
 
 import { dayKey } from "./store.js";
+import { DEFAULT_HOURS, breaksOn } from "./hours.js";
 
-export const WORK_START = 8;   // 08:00
-export const WORK_END = 19;    // 19:00
-/** Executive days are meeting-dense; this is deep-work capacity, not hours awake. */
-export const DAILY_CAPACITY_MINS = 300;
+/**
+ * The defaults, and only the defaults. Every one of them is overridable per
+ * user — see lib/hours.js. They live here as named constants so a caller that
+ * genuinely has no settings to hand still lands somewhere sensible instead of
+ * on zero.
+ */
+export const WORK_START = DEFAULT_HOURS.start;
+export const WORK_END = DEFAULT_HOURS.end;
+export const DAILY_CAPACITY_MINS = DEFAULT_HOURS.capacityMins;
+export const WORK_DAYS = DEFAULT_HOURS.days;
 /**
  * Hard cap on the daily list. A twenty-item list is itself a reason to avoid
  * the list — overflow stays in the project.
  */
 export const MAX_DAILY_TASKS = 7;
 
-export const atHour = (day, hour, min = 0) =>
-  new Date(`${day}T${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}:00`);
+/**
+ * Hours may be fractional — 8.5 is half past eight — because a working day
+ * that starts at 09:30 is completely ordinary and an integer-only clock made
+ * it unrepresentable.
+ */
+export const atHour = (day, hour, min = 0) => {
+  const total = Math.round(hour * 60) + min;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  // 24:00 is the end of the day, which Date will not parse — take the last
+  // instant of it instead.
+  if (h >= 24) return new Date(`${day}T23:59:59`);
+  return new Date(`${day}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`);
+};
 
 export const fmtTime = (iso) =>
   new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -47,11 +66,25 @@ export function weekOf(date = new Date()) {
  * realistic hour produced work scheduled hours into the past, which is the
  * kind of output that makes someone stop trusting a planner immediately.
  */
-export function findFreeSlots(day, events, { minMins = 15, start = WORK_START, end = WORK_END, after = null } = {}) {
-  const booked = events
-    .filter((e) => dayKey(new Date(e.start)) === day)
-    .map((e) => [new Date(e.start), new Date(e.end)])
-    .sort((a, b) => a[0] - b[0]);
+export function findFreeSlots(
+  day,
+  events,
+  { minMins = 15, start = WORK_START, end = WORK_END, after = null, breaks = [] } = {},
+) {
+  // Recurring commitments are busy time that nobody should have to re-enter as
+  // a meeting every week. Lunch is not on the calendar and the hour is still
+  // gone; planning into it is how a schedule stops being believable.
+  const weekday = new Date(`${day}T12:00:00`).getDay();
+  const standing = breaks?.length
+    ? breaksOn({ breaks }, weekday).map((b) => [atHour(day, b.start), atHour(day, b.end)])
+    : [];
+
+  const booked = [
+    ...events
+      .filter((e) => dayKey(new Date(e.start)) === day)
+      .map((e) => [new Date(e.start), new Date(e.end)]),
+    ...standing,
+  ].sort((a, b) => a[0] - b[0]);
 
   const slots = [];
   let cursor = atHour(day, start);
@@ -115,10 +148,16 @@ export function score(task, now = new Date()) {
  * Choose today's tasks and fit them into the gaps between meetings.
  * Capacity is the lesser of the deep-work budget and the day's actual free time.
  */
-export function planDay(tasks, events, { day = dayKey(), now = new Date() } = {}) {
+export function planDay(tasks, events, opts = {}) {
+  const {
+    day = dayKey(), now = new Date(),
+    workStart = WORK_START, workEnd = WORK_END,
+    dailyCapacity = DAILY_CAPACITY_MINS, breaks = [],
+  } = opts;
+  const window = { start: workStart, end: workEnd, breaks };
   const open = tasks.filter((t) => !t.done && !t.delegatedTo);
   const ranked = [...open].sort((a, b) => score(b, now) - score(a, now));
-  const capacity = Math.min(DAILY_CAPACITY_MINS, Math.max(60, freeMinutes(day, events)));
+  const capacity = Math.min(dailyCapacity, Math.max(60, freeMinutes(day, events, window)));
 
   const picked = [];
   let used = 0;
@@ -139,7 +178,7 @@ export function planDay(tasks, events, { day = dayKey(), now = new Date() } = {}
   }
 
   // Lay them into real gaps so the plan has times, not just an order.
-  const slots = findFreeSlots(day, events);
+  const slots = findFreeSlots(day, events, window);
   const blocks = [];
   let si = 0;
   let cursor = slots[0] ? new Date(slots[0].start) : null;

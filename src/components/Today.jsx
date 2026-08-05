@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { planDay, todaysPlan, findFreeSlots, fmtTime, MAX_DAILY_TASKS } from "../lib/agenda";
 import { dayKey, toggleTask, applyPlan, eventsOn } from "../lib/store";
+import { planOpts } from "../lib/hours";
 import { duration } from "../lib/format";
 import TaskRow from "./TaskRow";
 
@@ -9,10 +10,14 @@ export default function Today({ state, onFocus, onNewEvent }) {
   const day = dayKey();
   const events = eventsOn(day, state.events);
   const pinned = todaysPlan(state.tasks, day);
-  const plan = planDay(state.tasks, state.events, { day });
+  // The same working day the assistant and the planner use.
+  const work = planOpts(state.settings);
+  const plan = planDay(state.tasks, state.events, { ...work, day });
   const list = pinned.length ? pinned : plan.tasks;
 
-  const free = findFreeSlots(day, state.events).reduce((s, x) => s + x.mins, 0);
+  const free = findFreeSlots(day, state.events, {
+    start: work.workStart, end: work.workEnd, breaks: work.breaks,
+  }).reduce((s, x) => s + x.mins, 0);
   const meetingMins = events.reduce((s, e) => s + (new Date(e.end) - new Date(e.start)) / 60000, 0);
   const focusedToday = state.sessions
     .filter((s) => dayKey(new Date(s.endedAt)) === day)
