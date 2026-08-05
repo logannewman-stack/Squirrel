@@ -88,6 +88,52 @@ const titles = () => S().events.map((e) => e.title).sort();
   t("and names the count", /3/.test(r.text) || /three/i.test(r.text), r.text);
 }
 
+/**
+ * A second reported transcript, verbatim. Four distinct failures in four turns,
+ * all of the same family: politeness in front of a request, and a pronoun
+ * pointing back at it.
+ */
+{
+  seed({ confirm: true });
+  say("are you able to schedule an appointment for me this thursday at 4:00pm with john");
+  say("yes");
+  const ev = S().events.find((e) => e.start.startsWith("2026-08-06T16:00"));
+  t("a request wrapped in politeness is still a request", !!ev, S().events.length);
+  t("and is not titled with the question that asked for it",
+    ev?.title === "Appointment with John", ev?.title);
+
+  const r = say("actually can you go ahead and move that appointment from tomorrow at 4:00 to saturday at 2:00");
+  t("“move it from X to Y” reads the second time, not the first",
+    !/already/i.test(r.text), r.text);
+  say("yes");
+  const moved = S().events.find((e) => e.title === "Appointment with John");
+  t("so the appointment actually moves", moved?.start === "2026-08-08T14:00:00", moved?.start);
+}
+{
+  seed({ confirm: false });
+  store.addEvent({ title: "Appointment with John", start: iso(2026, 8, 6, 16), end: iso(2026, 8, 6, 17) });
+  say("what time is my appointment with john");
+  say("can you move it to saturday at 2:00");
+  const moved = S().events.find((e) => e.title === "Appointment with John");
+  t("“can you move it” points at what was just discussed",
+    moved?.start === "2026-08-08T14:00:00", moved?.start);
+}
+{
+  seed({ confirm: false });
+  store.addEvent({ title: "Ops review", start: iso(2026, 8, 6, 9), end: iso(2026, 8, 6, 9, 30) });
+  say("would you mind moving the ops review to friday");
+  const moved = S().events.find((e) => e.title === "Ops review");
+  t("a gerund is still the verb — “moving” contains no “move”",
+    moved?.start.startsWith("2026-08-07"), moved?.start);
+}
+{
+  seed({ confirm: false });
+  say("when you get a chance book lunch with priya friday at 12");
+  const ev = S().events.find((e) => e.title.includes("Priya"));
+  t("“when you get a chance” is courtesy, not a question about when", !!ev, S().events.length);
+  t("and the booking is named for what it is", ev?.title === "Lunch with Priya", ev?.title);
+}
+
 // --------------------------------------------------------------- every phrasing
 /**
  * The clearing vocabulary, executed.

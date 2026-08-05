@@ -9,9 +9,11 @@
 
 import {
   getState, addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
-  addProject, applyPlan, startFocus, dayKey,
+  addProject, setPlan, startFocus, dayKey,
 } from "./store";
-import { planDay, findFreeSlots, fmtTime } from "./agenda";
+import { findFreeSlots, fmtTime, workOn } from "./agenda";
+import { distribute } from "./schedule.js";
+import { planOpts } from "./hours.js";
 
 const iso = { type: "string", description: "ISO 8601 local datetime, e.g. 2026-08-05T14:00:00" };
 const date = { type: "string", description: "Date as YYYY-MM-DD" };
@@ -269,12 +271,16 @@ export function runTool(name, input) {
     }
 
     case "plan_day": {
-      const { tasks, blocks } = planDay(s.tasks, s.events, { day: input.date });
-      applyPlan(tasks.map((t) => t.id), input.date);
+      // Reads the live distribution rather than running a second planner —
+      // see lib/schedule.js. The plan is derived, so there is nothing to
+      // "apply": it is already what the calendar shows.
+      const spread = distribute(s.tasks, s.events, s.sessions, planOpts(s.settings));
+      setPlan(spread);
+      const mine = workOn(spread.blocks, s.tasks, input.date);
       return {
-        content: ok(blocks.map((b) => ({ task: b.task.title, start: b.start.toISOString().slice(0, 19) }))),
+        content: ok(mine.map((b) => ({ task: b.task.title, start: b.start, mins: b.mins }))),
         isError: false,
-        summary: `Planned ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} for ${input.date}`,
+        summary: `${mine.length} ${mine.length === 1 ? "block" : "blocks"} planned for ${input.date}`,
       };
     }
 

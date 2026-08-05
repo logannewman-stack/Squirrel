@@ -23,7 +23,7 @@ import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
   deleteTask, applyPlan, setMemory, setPlan,
 } from "../store.js";
-import { planDay, findFreeSlots, fmtTime } from "../agenda.js";
+import { findFreeSlots, fmtTime, workOn } from "../agenda.js";
 import { distribute, describePlan, projectLoad, describeLoad, triage } from "../schedule.js";
 import { planOpts, hoursOf, describeHours, sayMins, sayHour, weeklyMins } from "../hours.js";
 import { duration } from "../format.js";
@@ -76,7 +76,7 @@ function revisePatch(patch, slots, base, now) {
     next.whenIso = toLocalIso(d);
   }
   if (slots.durationMins) next.durationMins = slots.durationMins;
-  if (slots.people.length) next.people = slots.people;
+  if (slots.people?.length) next.people = slots.people;
   if (slots.subject) next.subject = slots.subject;
   if (slots.priority) next.priority = slots.priority;
   if (slots.rename) next.title = slots.rename;
@@ -345,7 +345,7 @@ export function ask(text, state, opts = {}) {
         start: toLocalIso(start),
         end: toLocalIso(new Date(start.getTime() + mins * 60000)),
       };
-      if (slots.people.length) patch.attendees = slots.people.map((name) => ({ name }));
+      if (slots.people?.length) patch.attendees = slots.people.map((name) => ({ name }));
       if (slots.subject) patch.notes = slots.subject;
       if (slots.rename) patch.title = slots.rename;
 
@@ -619,7 +619,7 @@ export function ask(text, state, opts = {}) {
       }
 
       // "Cancel my meetings with Bob this week" — the span narrowed by who.
-      const named = slots.people.map((x) => x.toLowerCase());
+      const named = (slots.people || []).map((x) => x.toLowerCase());
       const matches = (e) =>
         !named.length ||
         (e.attendees || []).some((a) => named.includes((typeof a === "string" ? a : a.name || "").toLowerCase()));
@@ -984,21 +984,34 @@ export function ask(text, state, opts = {}) {
           },
         );
       }
+      // "Plan my day" is a question now, not a command.
+      //
+      // The plan is derived and always current — it moves the moment a task or
+      // a meeting does. There was a second planner behind this branch with its
+      // own scoring and its own capacity arithmetic, so asking produced a
+      // different answer from the one already on the calendar. Reading the
+      // real plan back is both simpler and the only version that can be true.
       const day = dayKey(slots.dateOnly || now);
-      const plan = planDay(state.tasks, state.events, { ...work, day, now });
-      if (!plan.tasks.length) return reply("Nothing to plan — no open tasks.");
-      return gate(
-        `laying ${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"} into the gaps around your meetings`,
-        () => {
-          applyPlan(plan.tasks.map((t) => t.id), day);
-          const lines = plan.blocks.map((b) => `${fmtTime(b.start)} — ${b.task.title}`);
-          return reply(
-            `Planned ${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"} around your meetings.` +
-              (lines.length ? `\n${lines.join("\n")}` : ""),
-            [{ summary: `Planned ${plan.tasks.length} tasks` }],
-            { day },
-          );
-        },
+      const spread = distribute(state.tasks, state.events, state.sessions, { ...work, now });
+      setPlan(spread);
+      const mine = workOn(spread.blocks, state.tasks, day);
+      const label = slots.dateOnly ? describe(atLocal(slots.dateOnly, 9), now).split(" at ")[0] : "today";
+      const late = spread.shortfalls.length
+        ? `\n\n⚠ ${spread.shortfalls.length} ${spread.shortfalls.length === 1 ? "task does" : "tasks do"} not fit before ` +
+          `${spread.shortfalls.length === 1 ? "its deadline" : "their deadlines"} — ask me what is short.`
+        : "";
+      if (!mine.length) {
+        const why = spread.totals.unestimatedCount
+          ? ` ${spread.totals.unestimatedCount} ${spread.totals.unestimatedCount === 1 ? "task has" : "tasks have"} no time on ${spread.totals.unestimatedCount === 1 ? "it" : "them"}, so I can't place ${spread.totals.unestimatedCount === 1 ? "it" : "them"}.`
+          : "";
+        return reply(`Nothing laid out for ${label} — no open work with a deadline near enough to schedule.${why}${late}`, [], { day });
+      }
+      const lines = mine.map((b) => `${fmtTime(b.start)} — ${b.task.title}, ${duration(b.mins * 60000)}`);
+      const total = mine.reduce((n, b) => n + b.mins, 0);
+      return reply(
+        `${duration(total * 60000)} of work laid into the gaps ${label === "today" ? "today" : `on ${label}`}:\n${lines.join("\n")}${late}`,
+        [],
+        { day },
       );
     }
 

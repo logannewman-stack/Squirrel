@@ -117,85 +117,35 @@ export function findFreeSlots(
 export const freeMinutes = (day, events, opts) =>
   findFreeSlots(day, events, opts).reduce((s, x) => s + x.mins, 0);
 
-const PRIORITY_WEIGHT = { critical: 900, high: 450, normal: 0, low: -250 };
-
-function dayDiff(due, now) {
-  if (!due) return null;
-  return Math.round((new Date(due + "T00:00:00") - new Date(dayKey(now) + "T00:00:00")) / 86400000);
-}
-
-/** Higher scores get scheduled first. */
-export function score(task, now = new Date()) {
-  let s = PRIORITY_WEIGHT[task.priority] ?? 0;
-  const days = dayDiff(task.due, now);
-  if (days !== null) {
-    if (days < 0) s += 1000 + Math.min(200, -days * 20);
-    else if (days === 0) s += 800;
-    else if (days === 1) s += 500;
-    else s += Math.max(0, 320 - days * 22);
-  }
-  // Cheap work earns a real bonus: the first item decides whether the list gets
-  // touched at all, so a small win up front is worth more than strict ordering.
-  if (task.estimateMins <= 15) s += 130;
-  else if (task.estimateMins <= 30) s += 45;
-  // Delegated work is tracked, not personally scheduled.
-  if (task.delegatedTo) s -= 600;
-  s += Math.min(70, ((now - task.createdAt) / 86400000) * 7); // age, so nothing rots
-  return s;
-}
-
 /**
- * Choose today's tasks and fit them into the gaps between meetings.
- * Capacity is the lesser of the deep-work budget and the day's actual free time.
+ * Work planned for one day, from the distribution.
+ *
+ * There used to be a second planner here — its own scoring, its own capacity
+ * arithmetic, its own idea of what deserved the day — and the Today screen
+ * used it while the calendar, the reminders and the assistant used
+ * `distribute`. Two answers to "what should I work on today", and no way for a
+ * user to know which one they were looking at. This is now a lookup into the
+ * one plan rather than a second opinion about it.
  */
-export function planDay(tasks, events, opts = {}) {
-  const {
-    day = dayKey(), now = new Date(),
-    workStart = WORK_START, workEnd = WORK_END,
-    dailyCapacity = DAILY_CAPACITY_MINS, breaks = [],
-  } = opts;
-  const window = { start: workStart, end: workEnd, breaks };
-  const open = tasks.filter((t) => !t.done && !t.delegatedTo);
-  const ranked = [...open].sort((a, b) => score(b, now) - score(a, now));
-  const capacity = Math.min(dailyCapacity, Math.max(60, freeMinutes(day, events, window)));
+export const blocksOn = (blocks = [], day = dayKey()) =>
+  blocks
+    .filter((b) => b.day === day)
+    .sort((a, b) => (a.start || "").localeCompare(b.start || ""));
 
-  const picked = [];
-  let used = 0;
-  for (const t of ranked) {
-    if (picked.length >= MAX_DAILY_TASKS) break;
-    if (used + t.estimateMins > capacity && picked.length > 0) continue;
-    picked.push(t);
-    used += t.estimateMins;
+/** Those blocks, joined to the tasks they belong to. */
+export const workOn = (blocks = [], tasks = [], day = dayKey()) =>
+  blocksOn(blocks, day)
+    .map((b) => ({ ...b, task: tasks.find((t) => t.id === b.taskId) }))
+    .filter((b) => b.task && !b.task.done);
+
+/** Distinct tasks the plan gives to a day, in the order they are worked. */
+export function tasksOn(blocks = [], tasks = [], day = dayKey()) {
+  const seen = new Set();
+  const out = [];
+  for (const b of workOn(blocks, tasks, day)) {
+    if (seen.has(b.taskId)) continue;
+    seen.add(b.taskId);
+    out.push(b.task);
   }
-
-  // Lead with the shortest task that made the cut.
-  if (picked.length > 1) {
-    const quickest = picked.reduce((a, b) => (b.estimateMins < a.estimateMins ? b : a));
-    if (quickest !== picked[0]) {
-      picked.splice(picked.indexOf(quickest), 1);
-      picked.unshift(quickest);
-    }
-  }
-
-  // Lay them into real gaps so the plan has times, not just an order.
-  const slots = findFreeSlots(day, events, window);
-  const blocks = [];
-  let si = 0;
-  let cursor = slots[0] ? new Date(slots[0].start) : null;
-  for (const t of picked) {
-    while (si < slots.length && cursor && (slots[si].end - cursor) / 60000 < t.estimateMins) {
-      si++;
-      cursor = slots[si] ? new Date(slots[si].start) : null;
-    }
-    if (!cursor || si >= slots.length) break;
-    const start = new Date(cursor);
-    const end = new Date(start.getTime() + t.estimateMins * 60000);
-    blocks.push({ task: t, start, end });
-    cursor = end;
-  }
-
-  return { tasks: picked, blocks, overflow: ranked.filter((t) => !picked.includes(t)), plannedMins: used, capacity };
+  return out;
 }
-
-export const todaysPlan = (tasks, day = dayKey()) =>
-  tasks.filter((t) => t.scheduledFor === day && !t.done).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

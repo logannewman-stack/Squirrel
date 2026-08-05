@@ -158,7 +158,9 @@ const RULES = [
   // and "how many hours" to progress, so both are only surrendered when the
   // sentence is unmistakably about the shape of the working day itself.
   [INTENTS.QUERY_HOURS, /\b(?:my |the )?working (?:hours|day|days|week)\b|\bwhat (?:are|is) my hours\b|\bwhat hours do i (?:work|do)\b|\bwhen do i (?:start|finish|stop|knock off)(?:\s+work(?:ing)?)?\s*[?.!]*$|\bhow (?:many|much) (?:hours|time) (?:do|can|should) i (?:work|focus)\b|\bmy (?:daily )?capacity\b|\bwhat days do i work\b|\bdo i work (?:weekends?|saturdays?|sundays?)\b/],
-  [INTENTS.MOVE_EVENT, /\b(move|reschedul\w*|push|shift|bump|postpone)\b/],
+  // `mov(?:e|ing|ed)` rather than `move\w*`: English drops the e, so "moving my
+  // 3pm" — which is how half of these arrive — contains no "move" at all.
+  [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|slid(?:e|ing))\b/],
   // Before cancel, after move: "move everything on Friday to Monday" is a bulk
   // move and stays a move; "cancel everything on Friday" is a bulk clear.
   [INTENTS.CLEAR_RANGE, isClearRange],
@@ -315,6 +317,58 @@ const classify = (s) => {
 };
 
 /**
+ * Everything people put in front of a request.
+ *
+ * Applied in a loop rather than once: "actually, could you please go ahead
+ * and…" stacks four of these, and stripping one leaves the rest shielding the
+ * verb behind it from the pass meant to remove it. That is how "are you able
+ * to schedule an appointment for me this Thursday" landed on the calendar
+ * titled "Are you able to schedule an appointment for me" — every slot read
+ * correctly, and the one field a person actually looks at holding the question.
+ */
+/**
+ * The wrapper around a request, which is never itself a message.
+ *
+ * Safe to remove before the sentence is classified, because none of these can
+ * stand alone. "When you get a chance, book lunch Friday" was reading as a
+ * question about *when*, purely because the courtesy in front of the verb got
+ * to the classifier first.
+ */
+const POLITE_WRAPPER =
+  /^\s*(?:please|kindly|just|quickly|go ahead and|do me a favou?r and|if you (?:could|can|would)|whenever you (?:get|have) a (?:chance|moment|sec|second)|when you (?:get|have) a (?:chance|moment|sec|second)|i was wondering if you (?:could|can)|any chance (?:you )?(?:could|can)|do you think you could|is it possible to|would it be possible to|are you able to|would you be able to|can you|could you|would you|will you|would you mind|do you mind|i'?d like(?: you)? to|i want(?: you)? to|i need(?: you)? to|we need to|help me)\b[\s,]*/i;
+
+/**
+ * Softer openers, removed only when composing a title.
+ *
+ * "Hey", "hello" and "okay" are messages in their own right — stripping them
+ * before classification would turn "hey there" into "there" and lose the
+ * greeting entirely.
+ */
+const POLITE_SOFT = /^\s*(?:actually|so|ok|okay|hey|hi|hello|right|well|mind|let'?s|lets|we should|for me)\b[\s,]*/i;
+
+/** Peel openers until none is left; people stack three or four of them. */
+function stripPolite(text, re = POLITE_WRAPPER) {
+  let t = text;
+  for (let i = 0; i < 8; i++) {
+    const next = t.replace(re, "").replace(POLITE_SOFT, "");
+    if (next === t) break;
+    t = next;
+  }
+  return t;
+}
+
+/** Only the wrappers, for the classifier. */
+export const unwrap = (text) => {
+  let t = text;
+  for (let i = 0; i < 6; i++) {
+    const next = t.replace(POLITE_WRAPPER, "");
+    if (next === t) break;
+    t = next;
+  }
+  return t;
+};
+
+/**
  * Strip leading command verbs so the remainder reads as a title.
  *
  * The list is long because the verb is the one word nobody notices they typed.
@@ -323,16 +377,15 @@ const classify = (s) => {
  * the imperative.
  */
 function stripVerbs(text) {
-  return text
+  return stripPolite(text)
     // "on my calendar" goes first. Strip the leading verb ahead of it and the
     // phrase loses its anchor, leaving the word "calendar" behind as a title.
     .replace(/\s*(?:it|this|that|them)?\s*\b(?:on|in)(?:to)?\s+(?:my|the)\s+(?:calendar|schedule|diary)\b/i, " ")
-    .replace(/^\s*(?:can you|could you|would you|will you|please|hey|ok|okay|i'?d like(?: you)? to|i want(?: you)? to|i need(?: you)? to|let'?s|lets)\s+/i, "")
     .replace(
-      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to)\s+/i,
+      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|mov(?:e|ing)|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
       "",
     )
-    .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder)\s+(?:to|for|called|named)?\s*/i, "")
+    .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder|appointment|sync|standup|stand-up|catch ?up|chat|block|slot|interview|review|1:1|one on one)\s+(?:to|for|called|named)?\s*/i, "")
     // "new task review the deck" — the noun with no article in front of it.
     .replace(/^\s*(?:task|meeting|call|event|reminder)\s+(?:to|for|called|named)?\s*/i, "")
     // "make time for the letter" — the object of the verb is the time itself.
@@ -426,7 +479,7 @@ function extractSubject(text, people = []) {
  * sentence was all slots, and the caller should compose a title instead.
  */
 const BARE_NOUN =
-  /^(?:meetings?|calls?|events?|syncs?|chats?|1:1|one on one|appointments?|catch ?up|blocks?|times?|slots?|lunch|dinner|breakfast|coffee|drinks|standups?|stand-ups?|interviews?|reviews?|for|about|on|to|with|and|it|that|this|them|those|an?|the|re)$/i;
+  /^(?:meetings?|calls?|events?|syncs?|chats?|1:1|one on one|appointments?|catch ?up|blocks?|times?|slots?|lunch|dinner|breakfast|coffee|drinks|standups?|stand-ups?|interviews?|reviews?|for|about|on|in|at|to|by|from|with|and|it|that|this|them|those|an?|the|re|my|our|your|me|us|you|i|mine|ours)$/i;
 
 /**
  * Produce the title a human would have typed.
@@ -461,8 +514,8 @@ function cleanTitle(text, people = [], subject = null) {
   let prev;
   do {
     prev = t;
-    t = t.replace(/^(?:for|about|on|in|at|to|with|re|called|named|and|it|that|this|them|those|a|an|the|my|our)\s+/i, "");
-    t = t.replace(/\s+(?:for|about|on|in|at|to|by|from|with|and|it|that)$/i, "");
+    t = t.replace(/^(?:for|about|on|in|at|to|with|re|called|named|and|it|that|this|them|those|a|an|the|my|our|me|us|you|from)\s+/i, "");
+    t = t.replace(/\s+(?:for|about|on|in|at|to|by|from|with|and|it|that|me|us)$/i, "");
     t = t.replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "").trim();
   } while (t !== prev);
   // A bare "meeting" is not a title. Returning null lets the caller compose one
@@ -482,12 +535,15 @@ export function parse(text, now = new Date()) {
   const repair = REPAIR.test(raw);
   let body = repair ? raw.replace(REPAIR, "").trim() : raw;
 
-  let intent = classify(body.toLowerCase());
+  // Classified without the courtesy in front of it. "When you get a chance,
+  // book lunch Friday" is a booking; left wrapped, the "when" made it a
+  // question about the calendar.
+  let intent = classify(unwrap(body).toLowerCase());
   if (intent === INTENTS.UNKNOWN) {
     // Nothing matched — before giving up, try it as though it were typed in a
     // hurry. "can you scheduke a 3 o clok" is a booking, not a mystery.
     const fixed = despell(body);
-    const retry = classify(fixed.toLowerCase());
+    const retry = classify(unwrap(fixed).toLowerCase());
     if (retry !== INTENTS.UNKNOWN) {
       intent = retry;
       body = fixed;
@@ -529,9 +585,11 @@ export function parse(text, now = new Date()) {
   const toPerson = body.match(/\b(?:to|with|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/);
   const people = extractPeople(body);
   const subject = extractSubject(body, people);
-  // A compound carries two of everything. The half after "and rebook it" is
-  // the one that says where the meeting is going.
-  const whenPhrase = compound ? targetPhrase : body;
+  // A move carries two of everything: where it is now, and where it is going.
+  // Scanning the whole sentence finds the first date in it, which is the one
+  // being moved *away from* — so "move that appointment from tomorrow at 4 to
+  // Saturday at 2" resolved to tomorrow at 4 and reported nothing had changed.
+  const whenPhrase = targetPhrase === body ? body : targetPhrase;
   const dateOnly = parseDate(whenPhrase, now)?.date ?? null;
   const timeOnly = parseTime(whenPhrase);
   const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;

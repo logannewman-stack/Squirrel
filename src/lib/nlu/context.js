@@ -144,10 +144,16 @@ export function inherit(p, prior) {
     const present = Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined && v !== false;
     if (present) fresh[k] = v;
   }
+  // A remembered slot of null means "nothing was carried", not "explicitly
+  // empty". Letting those through overwrote `people: []` with `people: null`,
+  // and every caller that treated it as an array threw.
+  const carried = Object.fromEntries(
+    Object.entries(prior.slots || {}).filter(([, v]) => v !== null && v !== undefined),
+  );
   return {
     ...p,
     inherited: true,
     intent: p.intent === "unknown" ? prior.intent : p.intent,
-    slots: { ...p.slots, ...(prior.slots || {}), ...fresh },
+    slots: { ...p.slots, ...carried, ...fresh },
   };
 }

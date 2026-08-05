@@ -39,6 +39,22 @@ export const BUFFER_DAYS = 1;
 /** How far out to plan at all. Past this, a deadline is not yet actionable. */
 export const HORIZON_DAYS = 60;
 
+/**
+ * Most tasks one day may carry.
+ *
+ * Not a capacity limit — capacity is minutes. This is about shape: a day cut
+ * into eight pieces is a day of context switches, and the plan that produces
+ * it looks thorough and is unfollowable. Fewer, longer sittings finish more
+ * work than a schedule that is technically optimal.
+ */
+export const MAX_TASKS_PER_DAY = 4;
+
+/** Below this a placed piece is an interruption, not a sitting. */
+const MIN_FRAGMENT_MINS = 15;
+
+/** Allocations are quarter-hour multiples, so remainders are too. */
+const QUARTER = 15;
+
 const DAY_MS = 86400000;
 const addDays = (d, n) => {
   const x = new Date(d);
@@ -80,6 +96,7 @@ function windowOf(opts = {}) {
     workDays: Array.isArray(opts.workDays) && opts.workDays.length ? opts.workDays : null,
     workWeekend: opts.workWeekend ?? false,
     breaks: opts.breaks ?? [],
+    maxPerDay: opts.maxPerDay ?? MAX_TASKS_PER_DAY,
   };
 }
 
@@ -160,6 +177,17 @@ function eligibleDays(task, from, opts) {
  * task due next Tuesday, and sorting by date gets that backwards.
  */
 function byUrgency(a, b) {
+  // Work that cannot fit goes last, however alarming its slack.
+  //
+  // Slack alone put the most impossible task first, and being greedy it took
+  // every hour in the window — so forty hours of work due Saturday consumed
+  // Wednesday, Thursday and Friday, and two three-hour tasks that would each
+  // have finished comfortably were reported as fitting in nothing at all.
+  // Three missed deadlines where one was unavoidable. Missing a deadline by
+  // thirty hours is missing it whether or not the other two are also blown.
+  const aLost = a.slack < 0;
+  const bLost = b.slack < 0;
+  if (aLost !== bLost) return aLost ? 1 : -1;
   if (a.slack !== b.slack) return a.slack - b.slack;
   const rank = { critical: 0, high: 1, normal: 2, low: 3 };
   if (rank[a.task.priority] !== rank[b.task.priority]) {
@@ -171,11 +199,12 @@ function byUrgency(a, b) {
 /**
  * Distribute open work across the days before each deadline.
  *
- * @returns {{blocks, shortfalls, byDay, totals}}
- *   blocks     [{taskId, day, mins, start, end}] — placed work, in day order
- *   shortfalls [{taskId, title, needMins, availableMins, due}] — what does not fit
- *   byDay      Map(day → minutes committed)
- *   totals     {plannedMins, shortfallMins, taskCount}
+ * @returns {{blocks, shortfalls, unestimated, byDay, totals}}
+ *   blocks      [{taskId, day, mins, start, end}] — placed work, in day order
+ *   shortfalls  what does not fit, and what would make it fit
+ *   unestimated tasks with no duration on them, which cannot be planned at all
+ *   byDay       Map(day → minutes committed)
+ *   totals      {plannedMins, shortfallMins, taskCount}
  */
 export function distribute(tasks, events, sessions = [], opts = {}) {
   const o = { ...windowOf(opts), from: opts.now || new Date() };
@@ -183,8 +212,21 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
   const from = new Date(o.from);
   from.setHours(0, 0, 0, 0);
 
-  const open = tasks
-    .filter((t) => !t.done && remainingMins(t, sessions) > 0)
+  // Delegated work is tracked, not personally scheduled. Handing something to
+  // Anders and then finding it blocked out in your own Thursday is the planner
+  // arguing with a decision you already made.
+  const mine = tasks.filter((t) => !t.done && !t.delegatedTo);
+
+  // A task with no duration on it cannot be laid anywhere. It used to be
+  // dropped in silence, which is the worst of the options: the week looks like
+  // it fits because a third of the work was never counted. It comes back as
+  // its own list instead.
+  const unestimated = mine
+    .filter((t) => !(t.estimateMins > 0))
+    .map((t) => ({ taskId: t.id, title: t.title, due: t.due || null }));
+
+  const open = mine
+    .filter((t) => t.estimateMins > 0 && remainingMins(t, sessions) > 0)
     .map((task) => {
       const need = remainingMins(task, sessions);
       const days = eligibleDays(task, from, o);
@@ -197,11 +239,23 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
   const committed = new Map();
   const capacityCache = new Map();
   const capacity = (day) => {
-    const key = day;
-    if (!capacityCache.has(key)) {
-      capacityCache.set(key, capacityOf(key, events, new Map(), o));
+    if (!capacityCache.has(day)) {
+      capacityCache.set(day, capacityOf(day, events, new Map(), o));
     }
-    return Math.max(0, capacityCache.get(key) - (committed.get(key) || 0));
+    return Math.max(0, capacityCache.get(day) - (committed.get(day) || 0));
+  };
+
+  // How many distinct jobs each day has already been given. Minutes are not
+  // the only budget; attention is one too.
+  const jobsOn = new Map();
+  const hasRoomFor = (day, taskId) => {
+    const set = jobsOn.get(day);
+    return !set || set.has(taskId) || set.size < o.maxPerDay;
+  };
+  const claim = (day, taskId, mins) => {
+    if (!jobsOn.has(day)) jobsOn.set(day, new Set());
+    jobsOn.get(day).add(taskId);
+    committed.set(day, (committed.get(day) || 0) + mins);
   };
 
   // Rank by slack, which needs each task's available time first.
@@ -226,15 +280,29 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     // hour of work over a fortnight was coming out as 45 minutes and then a
     // stranded 15 — the split is supposed to make work approachable, and a
     // quarter-hour fragment on its own day is the opposite of that.
+    //
+    // The share is rounded up to a quarter of an hour. Sixty-nine-minute
+    // shares are arithmetically neat and produce nine-minute leftovers the
+    // moment a meeting cuts the day, and nine minutes is not a sitting.
     const usable = keys.slice(0, Math.max(1, Math.floor(need / o.minBlock)));
-    const share = Math.max(o.minBlock, Math.ceil(need / usable.length));
+    const even = Math.ceil(need / usable.length);
+    let share = Math.max(o.minBlock, Math.ceil(even / QUARTER) * QUARTER);
+    // Rounding up can strand the last day with a stub — 200 minutes at a
+    // 60-minute share is 60, 60, 60, and then 20. Spreading the same work over
+    // one fewer sitting fixes it without leaving a fragment anywhere.
+    const full = Math.floor(need / share);
+    const tail = need - full * share;
+    if (full >= 1 && tail > 0 && tail < o.minBlock) {
+      share = Math.max(o.minBlock, Math.ceil(need / full / QUARTER) * QUARTER);
+    }
     for (const day of usable) {
       if (left <= 0) break;
+      if (!hasRoomFor(day, task.id)) continue;
       const room = capacity(day);
       if (room < Math.min(o.minBlock, left)) continue;
       const take = Math.min(left, share, room);
       if (take <= 0) continue;
-      committed.set(day, (committed.get(day) || 0) + take);
+      claim(day, task.id, take);
       blocks.push({ taskId: task.id, day, mins: take });
       left -= take;
     }
@@ -245,26 +313,20 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     if (left > 0) {
       for (const day of keys) {
         if (left <= 0) break;
+        if (!hasRoomFor(day, task.id)) continue;
         const room = capacity(day);
         if (room <= 0) continue;
         const take = Math.min(left, room);
         const at = blocks.find((b) => b.taskId === task.id && b.day === day);
         if (at) at.mins += take;
         else blocks.push({ taskId: task.id, day, mins: take });
-        committed.set(day, (committed.get(day) || 0) + take);
+        claim(day, task.id, take);
         left -= take;
       }
     }
 
     if (left > 0) {
-      shortfalls.push({
-        taskId: task.id,
-        title: task.title,
-        needMins: need,
-        availableMins: need - left,
-        shortMins: left,
-        due: task.due,
-      });
+      shortfalls.push(shortfallFor(task, need, left, days, events, o, capacityCache));
     }
   }
 
@@ -274,12 +336,68 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
   return {
     blocks: placed,
     shortfalls,
+    unestimated,
     byDay: committed,
     totals: {
       plannedMins: placed.reduce((n, b) => n + b.mins, 0),
       shortfallMins: shortfalls.reduce((n, s) => n + s.shortMins, 0),
       taskCount: new Set(placed.map((b) => b.taskId)).size,
+      unestimatedCount: unestimated.length,
     },
+  };
+}
+
+/**
+ * What does not fit, and what would make it.
+ *
+ * "You are eight hours short" is a fact. "You are eight hours short; two more
+ * hours a day would do it, or moving the deadline to Tuesday" is a decision
+ * someone can act on this morning. The second is the whole reason to compute
+ * the first, and reporting only the gap leaves the user to do the arithmetic
+ * that the planner just did and threw away.
+ */
+function shortfallFor(task, need, short, days, events, o, cache) {
+  const workdays = days.length;
+  const fresh = (day) => {
+    if (!cache.has(day)) cache.set(day, capacityOf(day, events, new Map(), o));
+    return cache.get(day);
+  };
+
+  // The first date by which the work would fit, ignoring the buffer — the
+  // answer to "so when could this be done?"
+  let fitsBy = null;
+  let running = 0;
+  for (let i = 0; i <= HORIZON_DAYS; i++) {
+    const d = addDays(days[0] || new Date(), i);
+    if (!isWorkday(d, o)) continue;
+    running += fresh(dayKey(d));
+    if (running >= need) {
+      fitsBy = dayKey(d);
+      break;
+    }
+  }
+
+  const perDay = workdays ? Math.ceil(need / workdays) : null;
+  const extraPerDay = workdays ? Math.ceil(short / workdays) : null;
+
+  return {
+    taskId: task.id,
+    title: task.title,
+    needMins: need,
+    availableMins: need - short,
+    shortMins: short,
+    due: task.due,
+    workdays,
+    // Minutes a day this would need to fit in the time that is left.
+    perDayMins: perDay,
+    // Extra minutes a day on top of what is already free.
+    extraPerDayMins: extraPerDay,
+    // Whether that extra is a thing a person could actually do. "Ten more
+    // hours a day" is arithmetic, not advice, and offering it as an option
+    // makes the rest of the sentence untrustworthy.
+    catchUpIsPossible: perDay != null && perDay <= o.dailyCapacity,
+    // The date it *would* fit by, if the deadline could move.
+    fitsBy,
   };
 }
 
@@ -476,23 +594,53 @@ export function describeLoad(load) {
 /** Human summary of a plan, for the assistant and the day view. */
 export function describePlan(result, tasks) {
   const title = (id) => tasks.find((t) => t.id === id)?.title || "work";
-  const hours = (m) => (m >= 60 ? `${+(m / 60).toFixed(1)}h` : `${m}m`);
   const lines = [];
 
   const days = [...new Set(result.blocks.map((b) => b.day))].sort();
   for (const day of days) {
-    const of = result.blocks.filter((b) => b.day === day);
-    const total = of.reduce((n, b) => n + b.mins, 0);
+    // Merged per task. A block split around lunch is one job with a gap in it,
+    // not two — "Board deck 1h, Board deck 1h 45m" reads as a scheduling bug.
+    const of = new Map();
+    for (const b of result.blocks.filter((x) => x.day === day)) {
+      of.set(b.taskId, (of.get(b.taskId) || 0) + b.mins);
+    }
+    const total = [...of.values()].reduce((n, m) => n + m, 0);
     lines.push(
-      `${new Date(`${day}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} — ${hours(total)}: ` +
-        of.map((b) => `${title(b.taskId)} ${hours(b.mins)}`).join(", "),
+      `${new Date(`${day}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} — ${say(total)}: ` +
+        [...of.entries()].map(([id, mins]) => `${title(id)} ${say(mins)}`).join(", "),
     );
   }
 
   for (const s of result.shortfalls) {
+    const fix = [
+      s.catchUpIsPossible && s.extraPerDayMins ? `${say(s.extraPerDayMins)} more a day` : null,
+      s.fitsBy && s.fitsBy !== s.due ? `a deadline of ${s.fitsBy}` : null,
+    ].filter(Boolean);
     lines.push(
-      `⚠ ${s.title} needs ${hours(s.needMins)} and only ${hours(s.availableMins)} fits before ${s.due || "the deadline"} — ${hours(s.shortMins)} short.`,
+      `⚠ ${s.title} needs ${say(s.needMins)} and ` +
+      `${s.availableMins > 0 ? `only ${say(s.availableMins)} fits` : "none of it fits"} before ` +
+      `${s.due || "the deadline"} — ${say(s.shortMins)} short` +
+      (fix.length ? `; ${fix.join(" or ")} would close it.` : "."),
+    );
+  }
+
+  // A plan that silently omits a third of the work is worse than no plan.
+  if (result.unestimated?.length) {
+    const n = result.unestimated.length;
+    lines.push(
+      `${n} ${n === 1 ? "task has" : "tasks have"} no estimate, so ${n === 1 ? "it is" : "they are"} ` +
+      `not in this: ${result.unestimated.slice(0, 3).map((u) => u.title).join(", ")}` +
+      (n > 3 ? `, and ${n - 3} more` : "") + ".",
     );
   }
   return lines.join("\n");
+}
+
+/** "1h 45m", not "1.8h". Durations are read, not computed with. */
+function say(mins) {
+  const n = Math.max(0, Math.round(mins || 0));
+  if (n < 60) return `${n}m`;
+  const h = Math.floor(n / 60);
+  const r = n % 60;
+  return r ? `${h}h ${r}m` : `${h}h`;
 }

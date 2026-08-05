@@ -57,7 +57,7 @@ const HEARD = [
   ["book bob at three thirty p m friday", "3:30", { h: 15, m: 30 }],
   ["schedule a call at three p m", "3pm", { h: 15, m: 0 }],
   ["put a meeting with ronnie at eleven", "at 11", { h: 11, m: 0 }],
-  ["move my three o'clock to friday", "3 o'clock", { h: 15, m: 0 }],
+  ["book the review at three o'clock friday", "3 o'clock", { h: 15, m: 0 }],
   ["book lunch at half past twelve", "12:30", { h: 12, m: 30 }],
   ["meeting at a quarter past nine", "9:15", { h: 9, m: 15 }],
   ["call bob at quarter to four", "3:45", { h: 15, m: 45 }],
@@ -95,6 +95,17 @@ for (const [heard, contains, time] of HEARD) {
   t("spoken punctuation is punctuation",
     fromSpeech("add a task comma high priority").includes(","),
     fromSpeech("add a task comma high priority"));
+}
+
+// In a move the two halves mean different things, and dictation must not blur
+// them: the hour said first is the meeting being moved, not where it is going.
+{
+  const p = parse(fromSpeech("move my three o'clock to friday"), new Date(2026, 7, 5, 9));
+  t("a dictated move is a move", p.intent === "move_event", p.intent);
+  t("the spoken hour identifies which meeting", /3 o'clock/.test(p.slots.subjectPhrase), p.slots.subjectPhrase);
+  t("and the target is the day, keeping the hour it already had",
+    p.slots.when?.getDay() === 5 && p.slots.timeOnly === null,
+    `${p.slots.when} / ${JSON.stringify(p.slots.timeOnly)}`);
 }
 
 // A dictated command has to survive the whole round trip, not just the clock.

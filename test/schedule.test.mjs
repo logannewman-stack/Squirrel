@@ -2,7 +2,7 @@
  * Spreading work over the time available, and deciding what earns a
  * notification. Both are pure, so both run with no browser and no device.
  */
-import { distribute, remainingMins, MIN_BLOCK_MINS } from "../src/lib/schedule.js";
+import { distribute, describePlan, remainingMins, MIN_BLOCK_MINS } from "../src/lib/schedule.js";
 import { pending, reconcile, DEFAULTS } from "../src/lib/reminders.js";
 
 let pass = 0, fail = 0;
@@ -219,6 +219,67 @@ const state = {
   t("every block is worth starting",
     r.blocks.every((b) => b.mins >= MIN_BLOCK_MINS), r.blocks.map((b) => b.mins).join());
   t("and they still add up", r.blocks.reduce((n, b) => n + b.mins, 0) === 200);
+}
+
+// ------------------------------------------------- what the planner refuses
+/**
+ * The three things a planner must not do quietly: schedule work you handed to
+ * someone else, drop work it cannot measure, and shred a day into so many
+ * pieces that none of them gets started.
+ */
+{
+  const r = distribute(
+    [task({ id: "d", estimateMins: 120, due: D(6), delegatedTo: "Anders" })],
+    [], [], { now: NOW },
+  );
+  t("delegated work is tracked, not scheduled", r.blocks.length === 0, JSON.stringify(r.blocks));
+  t("and is not reported as a shortfall either", r.shortfalls.length === 0);
+}
+{
+  const r = distribute(
+    [
+      task({ id: "a", estimateMins: 60, due: D(6) }),
+      task({ id: "b", estimateMins: 0, due: D(6), title: "Sign the lease" }),
+      { id: "c", title: "Call the bank", due: D(6), priority: "normal", done: false, createdAt: 0 },
+    ],
+    [], [], { now: NOW },
+  );
+  t("work with no estimate is named, not dropped",
+    r.unestimated.length === 2, JSON.stringify(r.unestimated));
+  t("with enough to act on", r.unestimated[0].title && r.unestimated[0].due, JSON.stringify(r.unestimated[0]));
+  t("and it is counted in the totals", r.totals.unestimatedCount === 2, r.totals.unestimatedCount);
+  t("while estimated work still plans", r.totals.plannedMins === 60, r.totals.plannedMins);
+}
+{
+  // Eight small jobs all due the same day. Minutes are not the only budget.
+  const many = Array.from({ length: 8 }, (_, i) =>
+    task({ id: `t${i}`, title: `Job ${i}`, estimateMins: 45, due: D(2) }));
+  const r = distribute(many, [], [], { now: NOW });
+  const perDay = new Map();
+  for (const b of r.blocks) {
+    if (!perDay.has(b.day)) perDay.set(b.day, new Set());
+    perDay.get(b.day).add(b.taskId);
+  }
+  t("no day is cut into more pieces than it can hold",
+    [...perDay.values()].every((set) => set.size <= 4),
+    [...perDay.entries()].map(([d, set]) => `${d}:${set.size}`).join(" "));
+}
+
+// --------------------------------------------------- a shortfall names a fix
+{
+  // Forty hours due in five days, against a five-hour day. It cannot fit, and
+  // the useful output is the arithmetic that says by how much and what would.
+  const r = distribute([task({ estimateMins: 2400, due: D(5) })], [], [], { now: NOW });
+  const s = r.shortfalls[0];
+  t("a shortfall is reported", !!s, JSON.stringify(r.totals));
+  t("with the gap", s.shortMins > 0, s.shortMins);
+  t("the daily pace it would need", s.perDayMins > 0, s.perDayMins);
+  t("the extra it would take on top of what is free", s.extraPerDayMins > 0, s.extraPerDayMins);
+  t("and the date it would fit by", /^\d{4}-\d{2}-\d{2}$/.test(s.fitsBy || ""), s.fitsBy);
+  t("which is later than the deadline it missed", s.fitsBy > s.due, `${s.fitsBy} vs ${s.due}`);
+  t("the prose says what would close it",
+    /would close it/.test(describePlan(r, [task({ estimateMins: 2400, due: D(5) })])),
+    describePlan(r, []));
 }
 
 // ------------------------------------------------------- the project maths

@@ -10,7 +10,7 @@
  * no setting at all.
  */
 import { hoursOf, planOpts, weeklyMins, usableMinsOn, describeHours, toHours, toClock } from "../src/lib/hours.js";
-import { findFreeSlots, freeMinutes, planDay } from "../src/lib/agenda.js";
+import { findFreeSlots, freeMinutes, workOn } from "../src/lib/agenda.js";
 import { distribute, projectLoad, urgencyOf } from "../src/lib/schedule.js";
 
 let pass = 0, fail = 0;
@@ -158,20 +158,30 @@ const task = (over) => ({
 }
 
 // ------------------------------------------------------------------ the day
+/**
+ * Today's list is a view of the one distribution, not a second planner. What
+ * matters is that the settings reach it: a one-hour window must not produce a
+ * day of blocks stretching to seven in the evening.
+ */
 {
   const tasks = [
-    { id: "a", title: "Review", estimateMins: 60, due: null, priority: "high", done: false, createdAt: 0 },
-    { id: "b", title: "Letter", estimateMins: 60, due: null, priority: "high", done: false, createdAt: 0 },
+    { id: "a", title: "Review", estimateMins: 60, due: "2026-08-07", priority: "high", done: false, createdAt: 0 },
+    { id: "b", title: "Letter", estimateMins: 60, due: "2026-08-07", priority: "high", done: false, createdAt: 0 },
   ];
   const events = [{ id: "e", title: "Standup", start: iso(5, 9), end: iso(5, 10) }];
-  const short = planDay(tasks, events, {
-    day: "2026-08-05", now: NOW, workStart: 9, workEnd: 11, dailyCapacity: 60,
+  const plan = distribute(tasks, events, [], {
+    now: NOW, ...planOpts({ hours: { start: "09:00", end: "12:00", capacityMins: 120, days: [1, 2, 3, 4, 5] } }),
   });
-  t("today's list respects the capacity set for it",
-    short.capacity <= 60, `${short.capacity}`);
-  t("and lays blocks inside the window",
-    short.blocks.every((b) => b.start.getHours() >= 9 && b.end.getHours() <= 11),
-    short.blocks.map((b) => `${b.start.getHours()}–${b.end.getHours()}`).join(" "));
+  const today = workOn(plan.blocks, tasks, "2026-08-05");
+  t("today's blocks come from the one plan", today.length > 0, plan.blocks.length);
+  t("they sit inside the window",
+    today.every((b) => new Date(b.start).getHours() >= 9 && new Date(b.end).getHours() <= 12),
+    today.map((b) => `${b.start}–${b.end}`).join(" "));
+  t("they do not run through the meeting",
+    today.every((b) => new Date(b.start) >= new Date(iso(5, 10)) || new Date(b.end) <= new Date(iso(5, 9))),
+    today.map((b) => b.start).join(" "));
+  t("and no day is given more than its capacity",
+    today.reduce((n, b) => n + b.mins, 0) <= 120, today.reduce((n, b) => n + b.mins, 0));
 }
 
 console.log(`\nWorking hours: ${pass} passed, ${fail} failed`);
