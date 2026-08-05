@@ -235,3 +235,26 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 @media (prefers-reduced-motion: reduce) {
   .sq-squirrel * { animation: none !important; }
 }
+
+/* ------------------------------------------------------------------ voice
+   Two signals, both quiet. The ripple says the microphone is genuinely open —
+   a static "listening" label is indistinguishable from one that has silently
+   died, which is the failure people notice. The ear-tilt says she is taking
+   something in rather than working something out, so listening and thinking do
+   not look identical. */
+.sq-ripple {
+  animation: sq-ripple 1.6s ease-out infinite;
+}
+@keyframes sq-ripple {
+  0% { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+
+.sq-hears .sq-her {
+  animation: sq-listen 1.8s ease-in-out infinite;
+  transform-origin: 60% 70%;
+}
+@keyframes sq-listen {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-4deg) translateY(-0.5px); }
+}

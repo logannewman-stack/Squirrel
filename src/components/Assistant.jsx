@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ask, resolveChoice, EXAMPLES } from "../lib/nlu";
 import { addressOf } from "../lib/nlu/voice";
-import { appendChat, clearChat } from "../lib/store";
+import { appendChat, clearChat, setSetting } from "../lib/store";
+import { canSpeak, canListen, speak, stopSpeaking, listen, voiceSettings } from "../lib/speech";
 import Thinking from "./Thinking";
 import Squirrel from "./Squirrel";
 
@@ -20,17 +21,76 @@ export default function Assistant({ state }) {
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(null);
   const [pendingChoice, setPendingChoice] = useState(null);
+  const [heard, setHeard] = useState("");
+  const [listening, setListening] = useState(false);
+  const [talking, setTalking] = useState(false);
   const scroller = useRef(null);
   const timer = useRef(null);
+  const mic = useRef(null);
   const chat = state.chat;
   const who = addressOf(state.settings?.identity || {});
 
+  const voice = voiceSettings(state.settings);
+  const hasEars = canListen();
+  const hasVoice = canSpeak();
+
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [chat.length, thinking, pendingChoice]);
+  }, [chat.length, thinking, pendingChoice, heard]);
 
-  // A pending timeout that fires after unmount would append to a dead view.
-  useEffect(() => () => clearTimeout(timer.current), []);
+  // A pending timeout that fires after unmount would append to a dead view —
+  // and a microphone left open, or a sentence still being spoken, outlives the
+  // screen it belongs to.
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      mic.current?.abort();
+      stopSpeaking();
+    },
+    [],
+  );
+
+  /** Stop listening without sending whatever was half-heard. */
+  const dropMic = useCallback(() => {
+    mic.current?.abort();
+    mic.current = null;
+    setListening(false);
+    setHeard("");
+  }, []);
+
+  /**
+   * Open the microphone.
+   *
+   * Anything being spoken is cut off first. Talking over your own assistant is
+   * how conversation works, and a synthesiser that carries on while you are
+   * mid-sentence is also feeding itself into the microphone.
+   */
+  const startListening = useCallback(() => {
+    if (!hasEars || mic.current) return;
+    stopSpeaking();
+    setTalking(false);
+    setHeard("");
+    setListening(true);
+    mic.current = listen({
+      onInterim: (t) => setHeard(t),
+      onFinal: (t) => {
+        mic.current = null;
+        setListening(false);
+        setHeard("");
+        runRef.current(t);
+      },
+      onEnd: (gotSomething) => {
+        mic.current = null;
+        setListening(false);
+        if (!gotSomething) setHeard("");
+      },
+      onError: () => {
+        mic.current = null;
+        setListening(false);
+        setHeard("");
+      },
+    });
+  }, [hasEars]);
 
   function present(res) {
     setThinking({ line: res.ack, variant: res.variant });
@@ -38,17 +98,43 @@ export default function Assistant({ state }) {
       setThinking(null);
       appendChat({ role: "assistant", text: res.text, actions: res.actions });
       if (res.choices) setPendingChoice(res.choices);
+
+      if (!voice.speak || !hasVoice) return;
+      // The reply alone. On screen the action line and the sentence read as a
+      // receipt above an answer and the eye skips one; spoken, they are the
+      // same fact twice in a row — "Added Meeting with Ronnie, tomorrow at
+      // 3:30. Booked one hour with Ronnie tomorrow at 3:30."
+      const said = res.text || (res.actions || []).map((a) => a.summary).join(". ");
+      setTalking(true);
+      speak(said, {
+        voiceURI: voice.voiceURI,
+        rate: voice.rate,
+        onEnd: () => {
+          setTalking(false);
+          // Hands-free: reopen the microphone, but only where the turn is
+          // plainly unfinished. Listening on after a closed answer means the
+          // room is being recorded for no reason.
+          if (voice.handsFree && hasEars && res.choices) startListening();
+        },
+      });
     }, THINK_MS[res.variant] ?? 800);
   }
 
   function run(text) {
     const msg = (text ?? input).trim();
     if (!msg || thinking) return;
+    stopSpeaking();
+    setTalking(false);
     setInput("");
     setPendingChoice(null);
     appendChat({ role: "user", text: msg });
     present(ask(msg, state));
   }
+
+  // The microphone callbacks are created once and would otherwise close over
+  // the first render's `run`, sending every dictated command against stale state.
+  const runRef = useRef(run);
+  runRef.current = run;
 
   function pick(option) {
     const choice = pendingChoice;
@@ -60,20 +146,47 @@ export default function Assistant({ state }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-[var(--line)] px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Squirrel size={34} pose={thinking ? "thinking" : "idle"} title="Squirrel" />
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Assistant</h1>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">
-              {who ? `At your service, ${who}.` : "Changes your calendar and tasks directly."}
+        <div className="flex min-w-0 items-center gap-3">
+          <span className={`relative ${listening ? "sq-hears" : ""}`}>
+            <Squirrel size={34} pose={thinking || talking ? "thinking" : "idle"} title="Squirrel" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-semibold tracking-tight">Assistant</h1>
+            <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+              {listening
+                ? "Listening…"
+                : talking
+                  ? "Speaking — say anything to interrupt."
+                  : who
+                    ? `At your service, ${who}.`
+                    : "Changes your calendar and tasks directly."}
             </p>
           </div>
         </div>
-        {chat.length > 0 && (
-          <button onClick={clearChat} className="text-xs text-[var(--muted)] hover:text-[var(--ink)]">
-            Clear
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {hasVoice && (
+            <button
+              onClick={() => {
+                stopSpeaking();
+                setTalking(false);
+                setSetting("voice", { ...(state.settings?.voice || {}), speak: !voice.speak });
+              }}
+              role="switch"
+              aria-checked={voice.speak}
+              title={voice.speak ? "Reading replies aloud" : "Replies are silent"}
+              className={`rounded-md p-2 transition-colors hover:bg-[var(--hover)] ${
+                voice.speak ? "text-[var(--ink)]" : "text-[var(--faint)]"
+              }`}
+            >
+              <SpeakerIcon on={voice.speak} />
+            </button>
+          )}
+          {chat.length > 0 && (
+            <button onClick={clearChat} className="px-2 text-xs text-[var(--muted)] hover:text-[var(--ink)]">
+              Clear
+            </button>
+          )}
+        </div>
       </header>
 
       <div ref={scroller} className="flex-1 overflow-y-auto px-6 py-6">
@@ -156,25 +269,73 @@ export default function Assistant({ state }) {
         }}
         className="border-t border-[var(--line)] px-6 py-4"
       >
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
+        <div className="mx-auto flex max-w-2xl items-center gap-2 sm:gap-3">
+          {hasEars && (
+            <button
+              type="button"
+              onClick={() => (listening ? dropMic() : startListening())}
+              aria-pressed={listening}
+              aria-label={listening ? "Stop listening" : "Speak"}
+              title={listening ? "Stop listening" : "Speak"}
+              className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-full border
+                          transition-colors ${
+                            listening
+                              ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--paper)]"
+                              : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--ink)] hover:text-[var(--ink)]"
+                          }`}
+            >
+              {listening && (
+                <span className="sq-ripple absolute inset-0 rounded-full border border-[var(--ink)]" />
+              )}
+              <MicIcon />
+            </button>
+          )}
           <input
-            value={input}
+            value={listening ? heard : input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="What do I have Tuesday?"
-            className="flex-1 rounded-md border border-[var(--line)] bg-transparent px-4 py-2.5
-                       text-sm outline-none transition-colors placeholder:text-[var(--faint)]
-                       focus:border-[var(--ink)]"
+            onFocus={dropMic}
+            readOnly={listening}
+            placeholder={listening ? "Listening…" : hasEars ? "Ask, or tap the mic" : "What do I have Tuesday?"}
+            className={`min-w-0 flex-1 rounded-md border bg-transparent px-4 py-2.5 text-sm outline-none
+                        transition-colors placeholder:text-[var(--faint)] ${
+                          listening ? "border-[var(--ink)] text-[var(--muted)]" : "border-[var(--line)] focus:border-[var(--ink)]"
+                        }`}
           />
           <button
             type="submit"
-            disabled={!input.trim() || !!thinking}
-            className="rounded-md bg-[var(--ink)] px-5 py-2.5 text-sm font-medium
-                       text-[var(--paper)] transition-opacity disabled:opacity-30"
+            disabled={!input.trim() || !!thinking || listening}
+            className="shrink-0 rounded-md bg-[var(--ink)] px-4 py-2.5 text-sm font-medium
+                       text-[var(--paper)] transition-opacity disabled:opacity-30 sm:px-5"
           >
             Send
           </button>
         </div>
+        {hasEars && voice.speak && (
+          <p className="mx-auto mt-2 max-w-2xl text-[11px] text-[var(--faint)]">
+            {voice.handsFree
+              ? "Hands-free: she reopens the mic when she asks you something."
+              : "Reading replies aloud. Hands-free is in Settings."}
+          </p>
+        )}
       </form>
     </div>
   );
 }
+
+const MicIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0014 0M12 18v3" strokeLinecap="round" />
+  </svg>
+);
+
+const SpeakerIcon = ({ on }) => (
+  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
+    <path d="M4 9h3l4.5-3.5v13L7 15H4z" strokeLinejoin="round" />
+    {on ? (
+      <path d="M15.5 9.5a3.5 3.5 0 010 5M18 7a7 7 0 010 10" strokeLinecap="round" />
+    ) : (
+      <path d="M16 9.5l4 5M20 9.5l-4 5" strokeLinecap="round" />
+    )}
+  </svg>
+);

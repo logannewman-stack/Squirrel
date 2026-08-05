@@ -3,6 +3,7 @@ import Identity from "./Identity";
 import Account from "./Account";
 import Reminders from "./Reminders";
 import WorkingHours from "./WorkingHours";
+import VoiceSettings from "./VoiceSettings";
 import { duration } from "../lib/format";
 
 export default function Settings({ state, onBack }) {
@@ -74,6 +75,14 @@ export default function Settings({ state, onBack }) {
           The assistant runs entirely on this device. No account, no API key, no per-message
           cost — which is why every plan gets unlimited chats.
         </p>
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">Voice</h2>
+        <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
+          Talk to her, and have her talk back.
+        </p>
+        <VoiceSettings state={state} />
       </section>
 
       <section className="mb-10">

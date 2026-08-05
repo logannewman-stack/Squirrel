@@ -452,7 +452,8 @@ await p.getByPlaceholder(/^About/).fill("the Q3 pipeline");
 await p.getByRole("button", { name: "Add" }).click();
 
 await p.getByRole("button", { name: "Assistant" }).click();
-await p.getByPlaceholder("What do I have Tuesday?").fill("what do i have today");
+// Selected by role: the placeholder changes with whether the browser can hear.
+await p.getByRole("textbox").fill("what do i have today");
 await p.getByRole("button", { name: "Send" }).click();
 
 const ui = [];
