@@ -578,10 +578,18 @@ export function ask(text, state, opts = {}) {
 
       // The stretch, read the forward way. A typo gets one retry — "remove my
       // appointments for this wek" is not an ambiguous request.
+      //
+      // The day under discussion is inherited only when the sentence actually
+      // points back at it — "what does Friday look like?" then "clear it".
+      // A bare "clear my calendar" after booking something tomorrow inherits
+      // nothing: it read as "clearing tomorrow, 1 meeting", which is a
+      // confident answer to a question the user had not asked, about the one
+      // operation where guessing the scope costs the most.
+      const pointsBack = p.pronoun || p.plural;
       const asked =
         slots.range ||
         parseRange(fixDateWords(p.body), now) ||
-        (topicDay(memory, now) ? dayRange(topicDay(memory, now), now) : null);
+        (pointsBack && topicDay(memory, now) ? dayRange(topicDay(memory, now), now) : null);
 
       // Bulk clearing never reaches backwards.
       //

@@ -133,6 +133,28 @@ for (const [q, want] of CLEARS) {
   t(`clears something: “${q}”`, count() === want, `${count()} left, wanted ${want} — ${r.text}`);
 }
 
+/**
+ * A scope is never inherited from an unrelated turn.
+ *
+ * Booking something tomorrow and then saying "clear my calendar" produced
+ * "clearing tomorrow — 1 meeting": a confident answer to a question nobody
+ * asked, on the one operation where guessing the scope costs the most.
+ */
+{
+  seed();
+  say("put a meeting with ronnie at 11 tomorrow");
+  const r = say("can you clear my calendar");
+  t("a fresh clear with no scope still asks",
+    r.choices?.kind === "range" && count() === 9, `${r.choices?.kind} / ${count()}`);
+}
+{
+  seed();
+  say("what does friday look like");
+  say("clear it");
+  t("but an explicit back-reference inherits the day",
+    count() === 5 && !titles().includes("Exec staff"), titles().join(" · "));
+}
+
 // ------------------------------------------------------------ nothing to clear
 {
   seed();

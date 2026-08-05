@@ -41,6 +41,19 @@ export const INTENTS = {
 /** Verbs that only ever mean "empty this out". */
 const CLEAR_VERB = /\b(?:clear|clean|wipe|empty|blank|scrub|purge|nuke|blow away|free up|freeing up|get rid of)\b/;
 
+/**
+ * The subset that cannot mean anything else.
+ *
+ * "Clear it" and "wipe it" are about a stretch of time — there is no such
+ * thing as clearing a single meeting. "Get rid of it" and "free up" are softer
+ * and can point at one thing, so they are left out: with them in, "get rid of
+ * it" after naming one meeting would empty the day it sits in.
+ */
+const SWEEP_VERB = /\b(?:clear|clean|wipe|empty|blank|scrub|purge|nuke|blow away)\b/;
+
+/** A back-reference to whatever was just being discussed. */
+const POINTS_BACK = /\b(?:it|that|this|them|those|these|my day|the day|my week|the week)\b/;
+
 /** Verbs that remove one thing or many, depending on what follows. */
 const REMOVE_VERB = /\b(?:cancel\w*|delete|remove|drop|kill|scrap|bin|axe|ditch|nix|call off|take off|clear out)\b/;
 
@@ -108,6 +121,8 @@ export function isClearRange(body) {
   if (!clears && !removes) return false;
   // A clearing verb aimed at a span: "wipe Friday", "clear my afternoon".
   if (clears && (SPAN_WORD.test(s) || BULK_OBJECT.test(s))) return true;
+  // Or at whatever was just being talked about: "clear it", "wipe that".
+  if (SWEEP_VERB.test(s) && POINTS_BACK.test(s)) return true;
   // A removal verb aimed at something plural: "cancel all my meetings Friday".
   if (removes && BULK_OBJECT.test(s)) return true;
   // A removal verb aimed at a bare day, with no thing named and no clock time
