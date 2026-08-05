@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Today from "./components/Today";
-import WeekCalendar from "./components/WeekCalendar";
+import Calendar from "./components/Calendar";
 import Projects from "./components/Projects";
 import ProjectDetail from "./components/ProjectDetail";
 import Insights from "./components/Insights";
@@ -232,7 +232,7 @@ export default function App() {
     view.name === "today" ? (
       <Today state={state} onFocus={setPending} onNewEvent={() => setNewEvent(true)} />
     ) : view.name === "calendar" ? (
-      <WeekCalendar state={state} onNewEvent={() => setNewEvent(true)} />
+      <Calendar state={state} onNewEvent={() => setNewEvent(true)} />
     ) : view.name === "projects" ? (
       <Projects state={state} onOpen={(id) => setView({ name: "project", id })} />
     ) : view.name === "project" ? (
@@ -259,15 +259,17 @@ export default function App() {
         {body}
       </div>
 
-      <nav className="flex shrink-0 items-center justify-center gap-1 border-t border-[var(--line)]
-                      bg-[var(--paper)] px-4 py-2">
+      {/* Flexible rather than fixed-width tabs: six at a 64px minimum overflow a
+          390px phone, which scrolls the whole page sideways. */}
+      <nav className="flex shrink-0 items-center justify-center gap-0.5 border-t border-[var(--line)]
+                      bg-[var(--paper)] px-2 py-2 sm:gap-1 sm:px-4">
         {TABS.map(([name, label, d]) => (
           <button
             key={name}
             onClick={() => setView({ name })}
             aria-current={isActive(name)}
-            className={`flex min-w-[64px] flex-col items-center gap-1 rounded-md px-3 py-1.5
-                        transition-colors ${
+            className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5
+                        transition-colors sm:max-w-[76px] sm:px-3 ${
                           isActive(name) ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
                         }`}
           >
@@ -278,14 +280,14 @@ export default function App() {
             ) : (
               <Squirrel size={19} className="sq-tab" />
             )}
-            <span className="text-[10px] font-medium tracking-wide">{label}</span>
+            <span className="w-full truncate text-center text-[10px] font-medium">{label}</span>
           </button>
         ))}
         <span className="mx-1 h-6 w-px bg-[var(--line)]" />
         <button
           onClick={() => setView({ name: "settings" })}
           aria-current={view.name === "settings"}
-          className={`flex min-w-[64px] flex-col items-center gap-1 rounded-md px-3 py-1.5 ${
+          className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5 sm:max-w-[76px] sm:px-3 ${
             view.name === "settings" ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
           }`}
         >
@@ -293,7 +295,7 @@ export default function App() {
             <circle cx="12" cy="12" r="3" />
             <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" strokeLinecap="round" />
           </svg>
-          <span className="text-[10px] font-medium tracking-wide">Settings</span>
+          <span className="w-full truncate text-center text-[10px] font-medium">Settings</span>
         </button>
       </nav>
 
