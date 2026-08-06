@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ask, resolveChoice, EXAMPLES } from "../lib/nlu";
+import { askAsync, resolveChoice, EXAMPLES } from "../lib/nlu";
 import { addressOf } from "../lib/nlu/voice";
 import { appendChat, clearChat, setSetting } from "../lib/store";
 import { canSpeak, canListen, speak, stopSpeaking, listen, voiceSettings } from "../lib/speech";
@@ -92,8 +92,13 @@ export default function Assistant({ state }) {
     });
   }, [hasEars]);
 
-  function present(res) {
+  function present(res, elapsed = 0) {
     setThinking({ line: res.ack, variant: res.variant });
+    // Time already spent waiting counts towards the beat. Without this, a turn
+    // that went out to the fallback pauses twice — once for the network, then
+    // again for a pause meant to stand in for thinking that has already
+    // visibly happened.
+    const wait = Math.max(0, (THINK_MS[res.variant] ?? 800) - elapsed);
     timer.current = setTimeout(() => {
       setThinking(null);
       appendChat({ role: "assistant", text: res.text, actions: res.actions });
@@ -117,10 +122,18 @@ export default function Assistant({ state }) {
           if (voice.handsFree && hasEars && res.choices) startListening();
         },
       });
-    }, THINK_MS[res.variant] ?? 800);
+    }, wait);
   }
 
-  function run(text) {
+  /**
+   * Send one message.
+   *
+   * `askAsync` is awaited, but in the ordinary case it has already finished
+   * before the await — the rules answer without leaving the browser. It only
+   * goes anywhere when the rules miss *and* a fallback has been turned on, so
+   * the promise here costs a microtask, not a round trip.
+   */
+  async function run(text) {
     const msg = (text ?? input).trim();
     if (!msg || thinking) return;
     stopSpeaking();
@@ -128,7 +141,12 @@ export default function Assistant({ state }) {
     setInput("");
     setPendingChoice(null);
     appendChat({ role: "user", text: msg });
-    present(ask(msg, state));
+
+    const started = Date.now();
+    const res = await askAsync(msg, state, {
+      onFirst: (r) => setThinking({ line: r.ack, variant: r.variant }),
+    });
+    present(res, Date.now() - started);
   }
 
   // The microphone callbacks are created once and would otherwise close over

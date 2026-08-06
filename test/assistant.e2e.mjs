@@ -497,7 +497,45 @@ const span = await p.evaluate(async () => {
 });
 ui.push(["derived end time stays in local time", span === 60, `${span} mins`]);
 
-await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
+// ---- the miss log, end to end ----
+// A panel that throws on render looks identical to a parser that never misses,
+// so this drives the real path: say something she cannot handle, then go and
+// read it back off the settings screen.
+await p.evaluate(() => localStorage.removeItem("squirrel.misses"));
+
+await p.getByRole("textbox").fill("order me a coffee");
+await p.getByRole("button", { name: "Send" }).click();
+await p.waitForTimeout(1400);
+
+const missed = await p.evaluate(async () => {
+  const m = await import("/src/lib/misses.js");
+  return { count: m.count(), text: m.all()[0]?.text ?? null };
+});
+ui.push(["a miss typed into the UI reaches the log", missed.count === 1, JSON.stringify(missed)]);
+ui.push(["and the log holds what was typed", missed.text === "order me a coffee", missed.text]);
+
+await p.getByRole("button", { name: "Settings" }).click();
+const panel = p.locator("section").filter({ hasText: "What she missed" }).first();
+await panel.waitFor({ state: "visible", timeout: 4000 });
+const panelText = await panel.textContent();
+ui.push(["the panel renders the pattern", /order me a coffee/.test(panelText), panelText?.slice(0, 140)]);
+ui.push(["the panel counts it", /1 message/.test(panelText), panelText?.slice(0, 140)]);
+
+await panel.getByRole("button", { name: "Clear" }).click();
+const cleared = await p.evaluate(async () => (await import("/src/lib/misses.js")).count());
+ui.push(["clearing empties the log", cleared === 0, cleared]);
+ui.push(["and the panel says so",
+  /Nothing logged/.test((await panel.textContent()) || ""),
+  (await panel.textContent())?.slice(0, 100)]);
+
+// Off by default, and nothing may install a resolver behind anyone's back.
+const socket = await p.evaluate(async () => (await import("/src/lib/nlu/fallback.js")).hasResolver());
+ui.push(["no fallback is installed by default", socket === false, socket]);
+
+await p.evaluate(() => {
+  localStorage.removeItem("squirrel.v2");
+  localStorage.removeItem("squirrel.misses");
+});
 
 let failed = 0;
 for (const [name, ok, detail] of [...results, ...convo, ...confirms, ...ui]) {

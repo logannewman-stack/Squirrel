@@ -17,6 +17,7 @@ import {
 } from "./lib/store";
 import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
+import { clearResolver } from "./lib/nlu/fallback";
 import { distribute } from "./lib/schedule";
 import { planOpts } from "./lib/hours";
 // Aliased: `pending` is already the task waiting for a focus length in this
@@ -101,6 +102,24 @@ export default function App() {
 
   // Any local write is worth sending; nudge coalesces the burst from typing.
   useEffect(() => nudge(), [state.projects, state.tasks, state.events]);
+
+  // The fallback is a socket in the assistant, and this is the only thing that
+  // ever plugs anything into it. Off unless asked for, so the default build
+  // makes no network call and costs nothing per message.
+  useEffect(() => {
+    if (state.settings?.fallback !== true) {
+      clearResolver();
+      return;
+    }
+    let live = true;
+    import("./lib/nlu/remote").then((m) => {
+      if (live) m.enableRemote();
+    });
+    return () => {
+      live = false;
+      clearResolver();
+    };
+  }, [state.settings?.fallback]);
 
   // The plan is derived, so it is recomputed rather than stored by hand:
   // whenever the work, the meetings, or the working day itself moves, the

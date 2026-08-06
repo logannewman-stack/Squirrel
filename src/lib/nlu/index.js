@@ -23,6 +23,8 @@ import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
   deleteTask, setMemory, setPlan, batch, undo, lastChange,
 } from "../store.js";
+import { record as recordMiss, resolve as pairMiss, REASONS } from "../misses.js";
+import { interpret, hasResolver, contextFor } from "./fallback.js";
 import { findFreeSlots, fmtTime, workOn } from "../agenda.js";
 import { distribute, describePlan, projectLoad, describeLoad, triage } from "../schedule.js";
 import { planOpts, hoursOf, describeHours, sayMins, sayHour, weeklyMins } from "../hours.js";
@@ -42,6 +44,65 @@ const askWhich = (text, choices) => ({ text, actions: [], choices, pending: true
  * touched three turns ago instead of the ops review.
  */
 const needs = (text) => ({ text, actions: [], choices: null, pending: true });
+
+/**
+ * A dead end, marked as one.
+ *
+ * "Here is your Tuesday" and "I couldn't find that" have the same shape — a
+ * sentence with no actions on it — so the handlers that give up say so
+ * explicitly rather than leaving it to be recovered later by matching against
+ * their own wording. What is marked here is what reaches the miss log, and
+ * nothing else does.
+ */
+const dead = (text, reason) => ({ text, actions: [], choices: null, miss: reason });
+
+/**
+ * The id of the miss still waiting to see how the person rephrased it.
+ *
+ * Module-level rather than stored in memory, because it is worth nothing after
+ * a reload and belongs in neither the sync payload nor the undo stack. Only
+ * the very next turn can claim it — see `note`.
+ */
+let openMiss = null;
+
+/**
+ * Keep score, quietly.
+ *
+ * A miss on its own says a phrasing failed. A miss followed by the sentence
+ * that worked says what the person actually wanted, in their own words, next
+ * to the intent that satisfied them — which is the missing rule, already
+ * written. That pair is the reason this bookkeeping exists at all.
+ *
+ * Small talk never reaches here: it returns earlier in `ask`. That is the
+ * right behaviour and worth stating, because it means muttering at her
+ * between a failure and a retry doesn't break the pair.
+ */
+function note(res, p, opts) {
+  // A rewrite is not traffic — it is the fallback's second attempt at traffic
+  // that was already written down. It never opens a new row; at most it
+  // answers the one still standing open, tagged so the two sources of a fix
+  // never get read as one number.
+  if (opts.rewrite) {
+    if (!res.miss && openMiss) {
+      pairMiss(openMiss, { text: p.text, intent: p.intent, by: "model" });
+      openMiss = null;
+    }
+    return;
+  }
+  if (res.miss) {
+    openMiss = recordMiss({ text: p.text, reason: res.miss, intent: p.intent });
+    return;
+  }
+  if (openMiss) {
+    pairMiss(openMiss, { text: p.text, intent: p.intent, by: "user" });
+    openMiss = null;
+  }
+}
+
+/** Test seam: forget the pending pair between scenarios. */
+export const forgetMiss = () => {
+  openMiss = null;
+};
 
 /**
  * Is this message a continuation of the last one rather than a new command?
@@ -275,6 +336,12 @@ export function ask(text, state, opts = {}) {
   const { slots } = p;
   const res = short ?? (amending ? adjust(amending) : run());
 
+  // Write down what she couldn't do, and — more usefully — what the person
+  // said next when it worked. `opts.memory` marks a caller that wants a pure
+  // function (the coverage probe sweeps hundreds of phrasings), and those are
+  // not real traffic, so they stay out of the log.
+  if (!opts.memory) note(res, p, opts);
+
   if (!opts.memory) {
     setMemory({
       ...remember(
@@ -507,7 +574,7 @@ export function ask(text, state, opts = {}) {
         ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
         : resolveEvent(slots.subjectPhrase, state.events, now);
 
-      if (!ranked.length) return reply("I couldn't find that on your calendar.");
+      if (!ranked.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Which one?", {
           kind: "event",
@@ -544,7 +611,7 @@ export function ask(text, state, opts = {}) {
       const ranked = opts.resolvedId
         ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
         : resolveEvent(p.text, state.events, now);
-      if (!ranked.length) return reply("I couldn't find that on your calendar.");
+      if (!ranked.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Cancel which one?", {
           kind: "event",
@@ -638,7 +705,7 @@ export function ask(text, state, opts = {}) {
               { entity: { kind: "event", id: ev.id } });
           });
         }
-        return reply("I couldn't find a task matching that.");
+        return dead("I couldn't find a task matching that.", REASONS.NO_MATCH);
       }
       if (!isConfident(ranked)) {
         return askWhich("Which task?", {
@@ -957,7 +1024,7 @@ export function ask(text, state, opts = {}) {
       const ranked = opts.resolvedId
         ? openTasks.filter((t) => t.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
         : resolveTask(p.text, openTasks);
-      if (!ranked.length) return reply("I couldn't find an open task matching that.");
+      if (!ranked.length) return dead("I couldn't find an open task matching that.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Which task?", {
           kind: "task",
@@ -975,7 +1042,7 @@ export function ask(text, state, opts = {}) {
     case INTENTS.DELEGATE_TASK: {
       if (!slots.person) return needs("Delegate it to whom?");
       const ranked = resolveTask(slots.subjectPhrase, openTasks);
-      if (!ranked.length) return reply("I couldn't find that task.");
+      if (!ranked.length) return dead("I couldn't find that task.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Which task?", {
           kind: "task",
@@ -1024,7 +1091,7 @@ export function ask(text, state, opts = {}) {
     // ------------------------------------------------------- one thing
     case INTENTS.QUERY_EVENT: {
       const ranked = resolveEvent(p.body, state.events, now);
-      if (!ranked.length) return reply("I couldn't find that on your calendar.");
+      if (!ranked.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Which one?", {
           kind: "event", intent: "show",
@@ -1124,7 +1191,7 @@ export function ask(text, state, opts = {}) {
       const ranked = opts.resolvedId
         ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
         : resolveEvent(p.body, state.events, now);
-      if (!ranked.length) return reply("I couldn't find that on your calendar.");
+      if (!ranked.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Which one?", {
           kind: "event", intent: "resize",
@@ -1248,19 +1315,61 @@ export function ask(text, state, opts = {}) {
     case INTENTS.INVITE:
       // Sending needs a server; the deterministic layer stops at the boundary
       // rather than pretending.
-      return reply("Sending invites needs email set up on your account — not wired up yet.");
+      return dead("Sending invites needs email set up on your account — not wired up yet.", REASONS.UNSUPPORTED);
 
     case INTENTS.HELP:
       return reply(`I work with your calendar, tasks, and projects. Things I understand:\n${EXAMPLES.map((e) => `• ${e}`).join("\n")}`);
 
     default:
-      return reply(
+      return dead(
         "I didn't catch that. I handle your calendar, your tasks, and your projects — " +
         "and I'll tell you the time, the date, or what's left to do. Try:\n" +
         EXAMPLES.slice(0, 4).map((e) => `• ${e}`).join("\n"),
+        REASONS.UNPARSED,
       );
   }
   }
+}
+
+/**
+ * `ask`, with one optional second attempt through the fallback.
+ *
+ * This is what the UI calls. With no resolver installed it is `ask` with a
+ * promise around it — same answer, same speed, no network — which is the state
+ * the app ships in.
+ *
+ * With one installed, a sentence the rules missed gets rewritten into
+ * vocabulary the rules do handle and run again. The rerun is an ordinary turn:
+ * same resolver, same ambiguity questions, same confirmation before anything
+ * destructive, same undo entry. Nothing here can act on its own.
+ *
+ * Three guarantees worth stating, because they are the whole safety argument:
+ *
+ * - Exactly one rewrite. A rewrite is never itself rewritten, so no sequence
+ *   of replies from the far end can produce a loop or a second charge.
+ * - A failed rewrite is invisible. If the rerun misses too, the user gets the
+ *   original honest "I didn't catch that" rather than a second confusing one.
+ * - A broken fallback is indistinguishable from no fallback. Offline, timing
+ *   out, rate-limited, returning nonsense — every one of those lands back on
+ *   the deterministic answer.
+ */
+export async function askAsync(text, state, opts = {}) {
+  const first = ask(text, state, opts);
+  // The deterministic answer, handed over the moment it exists. The UI puts
+  // its thinking indicator up on this, so the beat before an answer looks the
+  // same whether or not a second attempt is about to happen behind it.
+  opts.onFirst?.(first);
+  if (!first.miss || !hasResolver()) return first;
+
+  const now = opts.now || new Date();
+  const rewrite = await interpret(text, contextFor(state, now));
+  if (!rewrite) return first;
+
+  // `rewrite: true` keeps the rerun out of the log as traffic of its own.
+  const second = ask(rewrite, state, { ...opts, now, rewrite: true });
+  if (second.miss) return first;
+
+  return { ...second, rewroteFrom: text, rewrote: rewrite };
 }
 
 /** Continue after the user picks from a choice list. */
