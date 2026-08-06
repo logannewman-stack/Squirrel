@@ -11,7 +11,7 @@
  * moving the wrong meeting is far worse than one extra tap.
  */
 
-import { parse, INTENTS } from "./parse.js";
+import { parse, INTENTS, placeIn } from "./parse.js";
 import { classify as smallTalk, answer as smallAnswer } from "./smalltalk.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
 import { describe, toLocalIso, dayKey, atLocal, parseRange, dayRange, fixDateWords } from "./datetime.js";
@@ -21,7 +21,7 @@ import {
 } from "./context.js";
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
-  deleteTask, applyPlan, setMemory, setPlan,
+  deleteTask, setMemory, setPlan, batch, undo, lastChange,
 } from "../store.js";
 import { findFreeSlots, fmtTime, workOn } from "../agenda.js";
 import { distribute, describePlan, projectLoad, describeLoad, triage } from "../schedule.js";
@@ -112,8 +112,31 @@ function applyPatch(slots, patch, now = new Date()) {
 const PEN_INTENTS = new Set([
   INTENTS.CREATE_EVENT, INTENTS.CREATE_TASK, INTENTS.MOVE_EVENT,
   INTENTS.CANCEL_EVENT, INTENTS.CLEAR_RANGE, INTENTS.COMPLETE_TASK,
-  INTENTS.DELEGATE_TASK, INTENTS.RESIZE_EVENT,
+  INTENTS.DELEGATE_TASK, INTENTS.RESIZE_EVENT, INTENTS.EDIT_TASK,
+  INTENTS.REPEAT_EVENT, INTENTS.UNDO,
 ]);
+
+/**
+ * How full a day is, in a sentence.
+ *
+ * Meetings plus planned work against the focus budget — the same arithmetic
+ * the calendar shades a square with, said out loud, because "you have three
+ * meetings" does not answer "how busy am I".
+ */
+function loadLine(day, events, state, work) {
+  const meetings = events.reduce((n, e) => n + (new Date(e.end) - new Date(e.start)) / 60000, 0);
+  const planned = workOn(state.blocks, state.tasks, day).reduce((n, b) => n + b.mins, 0);
+  const budget = work.dailyCapacity;
+  const used = meetings + planned;
+  const left = Math.max(0, budget - planned);
+  const verdict =
+    used >= budget * 1.1 ? "That is a full day"
+    : used >= budget * 0.7 ? "Busy, but not solid"
+    : used > 0 ? "There is room in it"
+    : "Wide open";
+  return `\n\n${verdict} — ${sayMins(meetings)} of meetings and ${sayMins(planned)} of planned work, ` +
+    `against ${sayMins(budget)} of focus time. ${sayMins(left)} of that is still free.`;
+}
 
 /** Events starting inside a half-open range, in the order they happen. */
 const inRange = (events, range) =>
@@ -149,9 +172,10 @@ export const EXAMPLES = [
   "Reschedule my 3pm Monday to Wednesday at 2",
   "Block 2 hours Thursday morning for the board deck",
   "What does Friday look like?",
-  "Add a task to review the term sheet, high priority, due Friday",
-  "When am I free tomorrow?",
-  "Cancel my 4pm",
+  "The board deck will take 8 hours",
+  "Every Monday at 9, standup",
+  "Clear my Friday afternoon",
+  "Undo that",
 ];
 
 /**
@@ -461,13 +485,15 @@ export function ask(text, state, opts = {}) {
         return gate(
           `moving all ${moving.length} from ${fromRange.label} to ${target}, keeping the times`,
           () => {
-            for (const e of moving) {
-              const s = new Date(e.start);
-              const en = new Date(e.end);
-              s.setDate(s.getDate() + shift);
-              en.setDate(en.getDate() + shift);
-              updateEvent(e.id, { start: toLocalIso(s), end: toLocalIso(en) });
-            }
+            batch(`moving ${moving.length} from ${fromRange.label}`, () => {
+              for (const e of moving) {
+                const s = new Date(e.start);
+                const en = new Date(e.end);
+                s.setDate(s.getDate() + shift);
+                en.setDate(en.getDate() + shift);
+                updateEvent(e.id, { start: toLocalIso(s), end: toLocalIso(en) });
+              }
+            });
             return reply(
               `Moved ${moving.length} ${moving.length === 1 ? "meeting" : "meetings"} to ${target}.`,
               [{ summary: `Moved ${moving.length} → ${target}` }],
@@ -539,6 +565,199 @@ export function ask(text, state, opts = {}) {
       );
     }
 
+    // -------------------------------------------------------------- undo
+    /**
+     * Step back.
+     *
+     * An assistant that cancels six meetings on one sentence needs a way back,
+     * and a confirmation is not one — it puts the decision at the moment you
+     * are least able to weigh it. This is the other half of that bargain.
+     */
+    case INTENTS.UNDO: {
+      const what = undo();
+      if (!what) return reply("Nothing to undo — I haven't changed anything yet.");
+      return reply(
+        `Undone — ${what} is back the way it was.`,
+        [{ summary: `Undid ${what}` }],
+        { entity: null, set: null },
+      );
+    }
+
+    // --------------------------------------------------- change a task
+    /**
+     * Setting a property on a task named rather than pointed at.
+     *
+     * The estimate case is the one that mattered. People state how long
+     * something takes — "the lease is about 45 minutes" — rather than
+     * commanding it, and a rule table built from imperatives was blind to
+     * every phrasing of it. Which meant the number the whole planner runs on
+     * could only be entered by hand.
+     */
+    case INTENTS.EDIT_TASK: {
+      const b = p.body.toLowerCase();
+      const place = placeIn(p.body, now);
+
+      // "The Meridian call is on Zoom" is almost always a meeting, so places
+      // look at the calendar first. A task can carry one too — some work has
+      // to happen somewhere — but it is the rarer reading.
+      if (place) {
+        const where = resolveEvent(p.body, state.events, now);
+        if (where.length && isConfident(where)) {
+          const ev = where[0].item;
+          return gate(`“${ev.title}” at ${place}`, () => {
+            updateEvent(ev.id, { location: place });
+            return reply(`“${ev.title}” is at ${place}.`,
+              [{ summary: `${ev.title} · ${place}` }],
+              { entity: { kind: "event", id: ev.id } });
+          });
+        }
+        if (where.length) {
+          return askWhich("Which one?", {
+            kind: "event", intent: "show",
+            options: where.slice(0, 4).map((r) => ({
+              id: r.item.id, label: `${r.item.title} · ${describe(new Date(r.item.start), now)}`,
+            })),
+          });
+        }
+      }
+
+      const ranked = opts.resolvedId
+        ? state.tasks.filter((t) => t.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
+        : resolveTask(slots.subjectPhrase, state.tasks);
+      if (!ranked.length) {
+        // It may be a meeting after all — "the review is 45 minutes" is a
+        // perfectly good way to resize one.
+        const asEvent = resolveEvent(p.body, state.events, now);
+        if (asEvent.length && isConfident(asEvent) && slots.durationMins) {
+          const ev = asEvent[0].item;
+          const end = toLocalIso(new Date(new Date(ev.start).getTime() + slots.durationMins * 60000));
+          return gate(`“${ev.title}” set to ${duration(slots.durationMins * 60000)}`, () => {
+            updateEvent(ev.id, { end });
+            return reply(`“${ev.title}” is now ${duration(slots.durationMins * 60000)}.`,
+              [{ summary: `${ev.title} → ${duration(slots.durationMins * 60000)}` }],
+              { entity: { kind: "event", id: ev.id } });
+          });
+        }
+        return reply("I couldn't find a task matching that.");
+      }
+      if (!isConfident(ranked)) {
+        return askWhich("Which task?", {
+          kind: "task", intent: "edit", text: p.body,
+          options: ranked.slice(0, 4).map((r) => ({ id: r.item.id, label: r.item.title })),
+        });
+      }
+
+      const task = ranked[0].item;
+      const patch = {};
+      const bits = [];
+
+      if (/\b(?:delete|remove|drop|bin|scrap|get rid of)\b/.test(b) && /\btasks?\b/.test(b)) {
+        return gate(`deleting the task “${task.title}”`, () => {
+          deleteTask(task.id);
+          return reply(`Deleted “${task.title}”.`, [{ summary: `Deleted task “${task.title}”` }], { entity: null });
+        });
+      }
+      if (/\b(?:re-?open|un-?complete|un-?tick|un-?check|not done|isn'?t done|didn'?t (?:actually )?finish|still open|undone)\b/.test(b)) {
+        if (!task.done) {
+          return reply(`“${task.title}” is already open.`, [], { entity: { kind: "task", id: task.id } });
+        }
+        return gate(`reopening “${task.title}”`, () => {
+          toggleTask(task.id);
+          return reply(`“${task.title}” is open again.`, [{ summary: `Reopened “${task.title}”` }],
+            { entity: { kind: "task", id: task.id } });
+        });
+      }
+
+      if (slots.rename) {
+        patch.title = slots.rename;
+        bits.push(`renamed “${slots.rename}”`);
+      }
+      if (slots.durationMins) {
+        patch.estimateMins = slots.durationMins;
+        bits.push(`${duration(slots.durationMins * 60000)} of work`);
+      }
+      if (slots.priority) {
+        patch.priority = slots.priority;
+        bits.push(`${slots.priority} priority`);
+      }
+      if (slots.dateOnly) {
+        patch.due = dayKey(slots.dateOnly);
+        bits.push(`due ${describe(atLocal(slots.dateOnly, 9), now).split(" at ")[0]}`);
+      }
+      if (!bits.length) {
+        return {
+          ...needs(`“${task.title}” — what should I change about it?`),
+          entity: { kind: "task", id: task.id },
+        };
+      }
+
+      return gate(`“${task.title}” — ${bits.join(", ")}`, () => {
+        updateTask(task.id, patch);
+        return reply(
+          `“${patch.title || task.title}” — ${bits.join(", ")}.`,
+          [{ summary: `Updated “${patch.title || task.title}”` }],
+          { entity: { kind: "task", id: task.id }, day: patch.due ?? null },
+        );
+      });
+    }
+
+    // ------------------------------------------------------------ a series
+    /**
+     * "Every Monday at 9."
+     *
+     * Written out as real occurrences rather than stored as a rule. The store
+     * has no concept of recurrence and inventing one would touch sync, the
+     * planner, and every view; twelve rows that can each be moved or cancelled
+     * on their own is both simpler and closer to how a standing meeting
+     * actually behaves — the one that gets skipped in August is skipped, not
+     * an exception to a rule.
+     */
+    case INTENTS.REPEAT_EVENT: {
+      if (!slots.when) return needs("Starting when? A day and a time — “every Monday at 9”.");
+      const every = /\b(?:every ?day|daily|each day)\b/.test(p.body.toLowerCase()) ? 1
+        : /\b(?:every other week|fortnightly|biweekly)\b/.test(p.body.toLowerCase()) ? 14
+        : /\b(?:monthly|every month)\b/.test(p.body.toLowerCase()) ? 28
+        : 7;
+      const count = slots.repeatCount ?? (every === 1 ? 20 : 12);
+      const mins = slots.durationMins || DEFAULT_MEETING_MINS;
+      const title = composeTitle(slots);
+      const cadence = every === 1 ? "every weekday" : every === 7 ? "weekly" : every === 14 ? "every other week" : "every four weeks";
+      const last = new Date(slots.when);
+      last.setDate(last.getDate() + every * (count - 1));
+
+      return gate(
+        `“${title}”, ${cadence} from ${describe(slots.when, now)} — ${count} of them, through ` +
+        `${last.toLocaleDateString([], { month: "long", day: "numeric" })}`,
+        () => {
+          let made = null;
+          batch(`booking ${count} × “${title}”`, () => {
+            for (let i = 0; i < count; i++) {
+              const start = new Date(slots.when);
+              start.setDate(start.getDate() + every * i);
+              // A weekday series skips the weekend rather than landing on it.
+              if (every === 1 && !work.workDays.includes(start.getDay())) continue;
+              const ev = addEvent({
+                title,
+                start: toLocalIso(start),
+                end: toLocalIso(new Date(start.getTime() + mins * 60000)),
+                attendees: (slots.people || []).map((name) => ({ name })),
+                notes: slots.subject || "",
+              });
+              made ||= ev;
+            }
+          });
+          const n = state.events.length;
+          return reply(
+            `Booked “${title}” ${cadence} from ${describe(slots.when, now)}, through ` +
+            `${last.toLocaleDateString([], { month: "long", day: "numeric" })}. ` +
+            `Each one can be moved or cancelled on its own.`,
+            [{ summary: `Added ${count} × “${title}”` }],
+            { entity: made ? { kind: "event", id: made.id } : null, day: dayKey(slots.when) },
+          );
+        },
+      );
+    }
+
     // ------------------------------------------------- clear a whole stretch
     /**
      * Emptying a span of calendar.
@@ -563,10 +782,12 @@ export function ask(text, state, opts = {}) {
         return gate(
           `removing ${items.length === 1 ? `“${items[0].title}”` : `all ${items.length} — ${listEvents(items)}`}`,
           () => {
-            for (const it of items) {
-              if (remembered.kind === "task") deleteTask(it.id);
-              else deleteEvent(it.id);
-            }
+            batch(`removing ${items.length} ${items.length === 1 ? "thing" : "things"}`, () => {
+              for (const it of items) {
+                if (remembered.kind === "task") deleteTask(it.id);
+                else deleteEvent(it.id);
+              }
+            });
             return reply(
               `Cleared ${items.length} ${items.length === 1 ? what : `${what}s`}.`,
               [{ summary: `Cleared ${items.length} ${items.length === 1 ? what : `${what}s`}` }],
@@ -642,10 +863,12 @@ export function ask(text, state, opts = {}) {
       return gate(
         `clearing ${range.label}${who} — ${items.length} ${items.length === 1 ? noun : `${noun}s`}: ${listEvents(items)}`,
         () => {
-          for (const it of items) {
-            if (wantsTasks) deleteTask(it.id);
-            else deleteEvent(it.id);
-          }
+          batch(`clearing ${range.label}`, () => {
+            for (const it of items) {
+              if (wantsTasks) deleteTask(it.id);
+              else deleteEvent(it.id);
+            }
+          });
           return reply(
             `${range.label[0].toUpperCase()}${range.label.slice(1)} is clear — ` +
               `removed ${items.length} ${items.length === 1 ? noun : `${noun}s`}.`,
@@ -782,10 +1005,17 @@ export function ask(text, state, opts = {}) {
       const rawLabel = slots.dateOnly ? describe(atLocal(slots.dateOnly, 9), now).split(" at ")[0] : "Today";
       const label = rawLabel[0].toUpperCase() + rawLabel.slice(1);
 
+      // "How busy am I Friday" is a different question from "what is on
+      // Friday". The list answers the second and only implies the first, and
+      // implying it is what makes someone open the calendar to check.
+      const load = /\bhow (?:busy|full|packed|loaded)\b|\bon my plate\b|\bhow'?s (?:my|the) (?:day|week)\b/i.test(p.body)
+        ? loadLine(day, events, state, work)
+        : "";
+
       // The day asked about becomes the topic, so a bare "book a 2pm" next
       // lands here rather than on today — and the meetings just listed become
       // the set, so "cancel them" has something to point at.
-      return reply(describeDay(label, events, due), [], {
+      return reply(describeDay(label, events, due) + load, [], {
         day,
         set: events.length ? { kind: "event", ids: events.map((e) => e.id), label } : null,
       });

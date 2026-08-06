@@ -134,6 +134,200 @@ const titles = () => S().events.map((e) => e.title).sort();
   t("and the booking is named for what it is", ev?.title === "Lunch with Priya", ev?.title);
 }
 
+// ------------------------------------------------------------------- undo
+/**
+ * The other half of acting without asking.
+ *
+ * An assistant that cancels six meetings on one sentence needs a way back, and
+ * a confirmation is not one — it puts the decision at the moment you are least
+ * able to weigh it.
+ */
+{
+  seed();
+  say("cancel my 3pm");
+  t("something was cancelled", count() === 7 && !titles().includes("Meridian partner call"), titles().join(" · "));
+  const r = say("undo that");
+  t("and comes back", count() === 8 && titles().includes("Meridian partner call"), titles().join(" · "));
+  t("named, so it is clear what returned", /Meridian partner call/.test(r.text), r.text);
+}
+{
+  seed();
+  say("clear my calendar friday");
+  t("three went", count() === 5, count());
+  say("undo");
+  t("three come back — a bulk change undoes as one step", count() === 8, titles().join(" · "));
+}
+{
+  seed();
+  say("move everything on friday to monday");
+  say("put it back");
+  t("a bulk move undoes as one step too",
+    S().events.filter((e) => e.start.startsWith("2026-08-07")).length === 3,
+    S().events.map((e) => e.start).join(" "));
+}
+{
+  reset({ confirm: false });
+  const r = say("undo");
+  t("with nothing done, it says so", /nothing to undo/i.test(r.text), r.text);
+}
+{
+  seed();
+  say("book a call with bob thursday at 2");
+  say("cancel my 3pm");
+  say("undo");
+  t("undo walks back one step, not all of them",
+    count() === 9 && titles().includes("Meridian partner call"), titles().join(" · "));
+  say("undo");
+  t("and again", count() === 8 && !titles().some((x) => x.includes("Bob")), titles().join(" · "));
+}
+{
+  seed();
+  say("cancel my 3pm");
+  const r = say("never mind, undo it");
+  t("politeness in front of undo is still undo",
+    count() === 8 && /Meridian/.test(r.text), r.text);
+}
+
+// -------------------------------------------------------- changing a task
+/**
+ * Setting a property on a task named rather than pointed at.
+ *
+ * The estimate case is the one that mattered: people *state* how long
+ * something takes rather than commanding it, and every phrasing of that
+ * failed. The number the entire planner runs on could only be entered by hand.
+ */
+function withTasks() {
+  seed();
+  return {
+    lease: store.addTask({ title: "Sign the Munich lease", estimateMins: 45, due: "2026-08-14" }),
+    deck: store.addTask({ title: "Board deck", estimateMins: 240, due: "2026-08-12", priority: "high" }),
+    sheet: store.addTask({ title: "Revised term sheet", estimateMins: 90, due: "2026-08-10" }),
+  };
+}
+const task = (title) => S().tasks.find((x) => x.title === title);
+
+{
+  withTasks();
+  say("the munich lease is about 2 hours");
+  t("an estimate stated is an estimate set", task("Sign the Munich lease")?.estimateMins === 120,
+    task("Sign the Munich lease")?.estimateMins);
+}
+{
+  withTasks();
+  say("the board deck will take 8 hours");
+  t("“will take” works too", task("Board deck")?.estimateMins === 480, task("Board deck")?.estimateMins);
+}
+{
+  withTasks();
+  say("make the term sheet critical");
+  t("priority by name", task("Revised term sheet")?.priority === "critical", task("Revised term sheet")?.priority);
+}
+{
+  withTasks();
+  say("bump the term sheet to critical");
+  t("“bump” is a priority here, not a reschedule",
+    task("Revised term sheet")?.priority === "critical", task("Revised term sheet")?.priority);
+}
+{
+  withTasks();
+  say("mark the board deck as low priority");
+  t("and downwards", task("Board deck")?.priority === "low", task("Board deck")?.priority);
+}
+{
+  withTasks();
+  say("the board deck is due friday");
+  t("a deadline stated is a deadline set", task("Board deck")?.due === "2026-08-07", task("Board deck")?.due);
+}
+{
+  withTasks();
+  say("rename the board deck to Q3 board deck");
+  t("rename takes the second half, not the whole phrase",
+    !!task("Q3 board deck") && !task("Board deck"), S().tasks.map((x) => x.title).join(" · "));
+}
+{
+  withTasks();
+  say("delete the term sheet task");
+  t("“delete the X task” is not a cancellation",
+    !task("Revised term sheet") && count() === 8, `${S().tasks.length} tasks, ${count()} events`);
+}
+{
+  const { deck } = withTasks();
+  store.toggleTask(deck.id);
+  t("it starts done", task("Board deck")?.done === true);
+  say("reopen the board deck");
+  t("and reopens", task("Board deck")?.done === false, task("Board deck")?.done);
+}
+{
+  const { deck } = withTasks();
+  store.toggleTask(deck.id);
+  say("i didn't actually finish the board deck");
+  t("said the way people say it", task("Board deck")?.done === false, task("Board deck")?.done);
+}
+{
+  withTasks();
+  const r = say("the exec staff is 30 minutes");
+  t("a length on a meeting still resizes the meeting",
+    (new Date(S().events.find((e) => e.title === "Exec staff").end) -
+     new Date(S().events.find((e) => e.title === "Exec staff").start)) / 60000 === 30, r.text);
+}
+
+// ------------------------------------------------------------- a series
+{
+  seed();
+  const before = count();
+  say("every monday at 9 standup");
+  const made = S().events.filter(
+    (e) => e.title === "Standup" && e.start.slice(11, 16) === "09:00" && new Date(e.start).getDay() === 1);
+  t("a series is written out, not stored as a rule", made.length === 12, made.length);
+  t("named for the thing, not the cadence", made.every((e) => e.title === "Standup"));
+  t("all on the same weekday",
+    new Set(made.map((e) => new Date(e.start).getDay())).size === 1,
+    [...new Set(made.map((e) => new Date(e.start).getDay()))].join());
+  say("undo");
+  t("and the whole series undoes as one step", count() === before, `${count()} vs ${before}`);
+}
+{
+  seed();
+  say("book a 1:1 with sarah every tuesday at 3");
+  const made = S().events.filter((e) => e.title === "1:1 with Sarah");
+  t("attendees survive a series", made.length > 0 && made[0].attendees?.[0]?.name === "Sarah",
+    JSON.stringify(made[0]?.attendees));
+}
+{
+  seed();
+  say("a daily standup at 9");
+  const made = S().events.filter((e) => e.title === "Standup");
+  t("a daily series skips the weekend",
+    made.every((e) => ![0, 6].includes(new Date(e.start).getDay())),
+    [...new Set(made.map((e) => new Date(e.start).getDay()))].join());
+}
+
+// -------------------------------------------------------- place and load
+{
+  seed();
+  say("the meridian partner call is on zoom");
+  t("a place, stated", S().events.find((e) => e.title.includes("Meridian"))?.location === "zoom",
+    S().events.find((e) => e.title.includes("Meridian"))?.location);
+}
+{
+  seed();
+  say("the exec staff is on friday");
+  t("but a date is not a place — that is still a date",
+    !S().events.find((e) => e.title === "Exec staff")?.location,
+    S().events.find((e) => e.title === "Exec staff")?.location);
+}
+{
+  seed();
+  const r = say("how busy am i friday");
+  t("“how busy” gets the arithmetic, not just a list",
+    /focus time/.test(r.text) && /meetings/.test(r.text), r.text);
+}
+{
+  seed();
+  const r = say("give me something to do");
+  t("asking for work is not delegating it", !/to whom/i.test(r.text), r.text);
+}
+
 // --------------------------------------------------------------- every phrasing
 /**
  * The clearing vocabulary, executed.

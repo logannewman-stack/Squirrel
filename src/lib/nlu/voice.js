@@ -47,6 +47,11 @@ export function acknowledge(identity, kind, now = new Date()) {
     query_event: "looking that up",
     query_progress: "adding up the hours",
     resize_event: "adjusting that",
+    edit_task: "updating that",
+    repeat_event: "putting the series in",
+    clear_range: "clearing that stretch",
+    undo: "putting it back",
+    query_hours: "checking your working day",
   }[kind];
   // Small talk gets no "checking your calendar" line — she is not looking
   // anything up, and pretending to is the kind of theatre that gets noticed.

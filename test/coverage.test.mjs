@@ -63,6 +63,11 @@ const CORPUS = {
   "removing": ["cancel my 4pm","delete the board prep","remove the standup","drop the friday lunch","call off the review","get rid of my 3pm","take the standup off my calendar","scrap the monday sync","kill the 2pm","bin the review","cancel tomorrow's lunch","i don't need the 3pm anymore","the exec staff is cancelled","cancel the meeting with bob","remove bob's meeting","delete everything friday","cancel all my meetings tomorrow","clear my calendar friday","wipe out thursday afternoon","cancel the rest of today","no longer need the board prep","drop everything monday morning","take friday off my calendar","cancel my meetings this week","free up my whole afternoon","empty out tuesday","that meeting is off","we cancelled the review","cancel and don't rebook","remove the term sheet call"],
   "compound": ["cancel my meeting for friday at 1 and reschedule it for saturday at 2","cancel the 3pm and rebook it for tuesday","delete friday's call and move it to monday at 10","drop the standup and put it at 11","scrap the review and rearrange it for next week"],
   "adding": ["put a meeting with ronnie at 11","add a meeting with bob friday at 2","put a call with priya on friday","new meeting thursday at 10","create an event monday at 9","book bob for 2pm friday","set up a call with dana","schedule time with anders tuesday","i need a meeting with sarah friday","let's do 3pm thursday with bob","get me 30 minutes with priya","stick lunch in friday at noon","add a 1:1 with sarah mondays at 3","put down a review for wednesday","slot in a call with bob","throw a meeting on friday at 4","i want to meet bob friday at 2","need to see anders tuesday","meeting friday 2pm bob","book the boardroom thursday 9 to 11","reserve two hours friday morning","pop in a coffee with priya","arrange a call with the client friday","organise a review for thursday","line up a call with dana monday","have bob at 3 on friday","put bob in for friday at 2","give me an hour thursday","open a slot for the deck friday"],
+  "undo": ["undo","undo that","undo the last thing","put it back","revert that","take that back","i didn't mean that","that was a mistake","change it back","restore that","never mind, undo it","actually undo"],
+  "change a task": ["the lease is about 45 minutes","the board deck will take 8 hours","the term sheet takes 2 hours","estimate 3 hours for the letter","make the board deck high priority","mark the deck as low priority","bump the term sheet to critical","set the lease to urgent","the deck is critical","the term sheet is due friday","the board deck is not due until next week","the lease is needed by tuesday","rename the board deck to Q3 deck","retitle the letter to investor letter","delete the diligence index task","get rid of the lease task","reopen the board deck","mark the board deck not done","i didn't actually finish the deck","the deck is still open","un-tick the lease"],
+  "a series": ["every monday at 9 standup","weekly exec staff monday 9am","a daily standup at 9","repeat the board prep every friday","book a 1:1 with sarah every tuesday at 3","every other week on thursday at 2","a monthly review on the first","each friday at 4 retro","recurring call with bob wednesdays at 11"],
+  "place and load": ["the meridian call is on zoom","the exec staff is at the office","the review is in the boardroom","how busy am i friday","how full is my week","what's on my plate","how packed is thursday","how's my day looking"],
+  "asking for work": ["give me something to do","what can i work on","something to work on","what's first","what should i work on right now"],
   "out of scope": ["what's the capital of france","what's the weather","tell me a joke","write me a poem","who won the game","translate this","define serendipity"],
 };
 
@@ -132,6 +137,25 @@ const ROUTES = {
   "cancel my meeting for friday at 1 and reschedule it for saturday at 2": "move_event",
   "what are my working hours": "query_hours",
   "put a meeting with ronnie at 11": "create_event",
+  "undo that": "undo",
+  "put it back": "undo",
+  "the lease is about 45 minutes": "edit_task",
+  "make the board deck high priority": "edit_task",
+  "the term sheet is due friday": "edit_task",
+  "rename the board deck to Q3 deck": "edit_task",
+  "delete the diligence index task": "edit_task",
+  "reopen the board deck": "edit_task",
+  "bump the term sheet to critical": "edit_task",
+  "the meridian call is on zoom": "edit_task",
+  "every monday at 9 standup": "repeat_event",
+  "a daily standup at 9": "repeat_event",
+  "how busy am i friday": "query_day",
+  // Creating carries the same words as changing. The leading verb governs.
+  "add a task to sign the lease, high priority, due friday": "create_task",
+  "bump my 3pm to 4pm": "move_event",
+  "delete the board prep": "cancel_event",
+  "give me something to do": "plan_day",
+  "delegate the lease to anders": "delegate_task",
 };
 let misrouted = 0;
 for (const [q, want] of Object.entries(ROUTES)) {

@@ -19,15 +19,26 @@ const STOP = new Set([
   "call", "appointment", "please", "can", "you", "i", "me", "it", "that", "this",
 ]);
 
+/**
+ * Tokens worth matching on.
+ *
+ * Single characters are dropped, because stripping punctuation turns every
+ * contraction into one: "didn't" becomes "didn" and "t", and that stray "t"
+ * prefix-matched "term sheet" well enough to make "I didn't finish the board
+ * deck" ambiguous between two unrelated tasks.
+ */
 const words = (s) =>
-  s.toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
+  s.toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w));
 
 /** Token overlap, normalised by the shorter side so short titles aren't punished. */
 function titleScore(phrase, title) {
   const a = words(phrase);
   const b = words(title);
   if (!a.length || !b.length) return 0;
-  const hits = a.filter((w) => b.some((t) => t === w || t.startsWith(w) || w.startsWith(t)));
+  // A prefix match needs three characters behind it. Two lets "on" match
+  // "onboarding" and every other word that happens to start the same way.
+  const hits = a.filter((w) =>
+    b.some((t) => t === w || (w.length >= 3 && t.startsWith(w)) || (t.length >= 3 && w.startsWith(t))));
   return hits.length / Math.min(a.length, b.length);
 }
 

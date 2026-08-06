@@ -85,7 +85,7 @@ const COURTESY = new Set([
  * and mentions nothing schedulable; that is the actual distinction.
  */
 const HAS_REQUEST =
-  /\d|\b(?:schedule|book|block|move|cancel|delete|reschedul\w*|push|remind|plan|add|create|task|tasks|meeting|meetings|call|project|projects|deadline|due|calendar|free|busy|today|tomorrow|tonight|yesterday|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|am|pm|hour|hours|minute|minutes)\b/i;
+  /\d|\b(?:schedule|book|block|move|cancel|delete|reschedul\w*|push|remind|plan|add|create|task|tasks|meeting|meetings|call|project|projects|deadline|due|calendar|free|busy|today|tomorrow|tonight|yesterday|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|am|pm|hour|hours|minute|minutes|undo|revert|restore|back)\b/i;
 
 export function classify(text) {
   const bare = trim(text);

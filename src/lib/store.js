@@ -40,6 +40,26 @@ const EMPTY = {
 let cache = null;
 const listeners = new Set();
 
+/**
+ * Undo.
+ *
+ * An assistant that cancels six meetings on one sentence needs a way back, and
+ * "are you sure?" is not one — it moves the risk to the moment you are least
+ * able to judge it. A snapshot before every change is cheap here because the
+ * whole dataset is small enough to hold in memory several times over.
+ *
+ * Only the collections a person would want back are kept. Chat, memory, the
+ * derived plan and the running timer are excluded: they churn on every turn,
+ * and restoring a stale plan over a fresh one would be a bug rather than a
+ * favour. The plan is derived, so it recomputes itself the moment the data
+ * beneath it moves.
+ */
+const UNDOABLE = ["projects", "tasks", "events", "sessions", "tombstones"];
+const UNDO_LIMIT = 40;
+let past = [];
+
+const snapshot = (s) => Object.fromEntries(UNDOABLE.map((k) => [k, s[k]]));
+
 function read() {
   if (cache) return cache;
   try {
@@ -62,7 +82,64 @@ function commit(next) {
 
 export const subscribe = (fn) => (listeners.add(fn), () => listeners.delete(fn));
 export const getState = () => read();
+
+/** An ephemeral write — chat, memory, the derived plan. Not undoable. */
 const update = (patch) => commit({ ...read(), ...patch });
+
+/**
+ * A write worth being able to take back.
+ *
+ * The label is what the user will be told they undid, so it is written from
+ * their side of the change: "cancelling 3 meetings", not "deleteEvent×3".
+ */
+let depth = 0;
+
+function push(label) {
+  past = [...past, { label, at: Date.now(), data: snapshot(read()) }].slice(-UNDO_LIMIT);
+}
+
+function mutate(label, patch) {
+  if (depth === 0) push(label);
+  commit({ ...read(), ...patch });
+}
+
+/**
+ * One undo step around many writes.
+ *
+ * Clearing a week calls `deleteEvent` six times. Without this, undo puts back
+ * one meeting and leaves five gone — which is worse than no undo, because it
+ * looks like it worked.
+ */
+export function batch(label, fn) {
+  if (depth > 0) return fn();
+  push(label);
+  depth++;
+  try {
+    return fn();
+  } finally {
+    depth--;
+  }
+}
+
+/** What the last undoable change was, or null. */
+export const lastChange = () => past[past.length - 1]?.label ?? null;
+
+/**
+ * Step back one change.
+ * @returns {string|null} what was undone, for reading back.
+ */
+export function undo() {
+  const step = past[past.length - 1];
+  if (!step) return null;
+  past = past.slice(0, -1);
+  // Deliberately not re-pushed: undo is a step backwards through history, not
+  // itself a change to be undone. A stack where undo is undoable produces a
+  // loop nobody can reason about mid-panic.
+  commit({ ...read(), ...step.data });
+  return step.label;
+}
+
+export const canUndo = () => past.length > 0;
 
 /**
  * Back to nothing.
@@ -71,7 +148,10 @@ const update = (patch) => commit({ ...read(), ...patch });
  * and every subsequent read returns it, which is why erasing used to need a
  * full page reload to take effect.
  */
-export const resetAll = () => commit({ ...EMPTY, settings: {} });
+export const resetAll = () => {
+  past = [];
+  commit({ ...EMPTY, settings: {} });
+};
 
 /**
  * UUIDs, because Postgres holds these as `uuid` and a device that invents its
@@ -147,17 +227,18 @@ export function addProject({ name, client = "", value = null, status = "active",
   // whole thing is judged on, and it is what makes pacing arithmetic possible
   // at all — see projectLoad in lib/schedule.js.
   const p = stamp({ id: uid(), name: name.trim() || "Untitled", client, value, status, due, createdAt: Date.now() });
-  update({ projects: [...read().projects, p] });
+  mutate(`creating the project “${p.name}”`, { projects: [...read().projects, p] });
   return p;
 }
 
 export const updateProject = (id, patch) =>
-  update({ projects: read().projects.map((p) => (p.id === id ? stamp({ ...p, ...patch }) : p)) });
+  mutate(`changing “${read().projects.find((p) => p.id === id)?.name || "a project"}”`,
+    { projects: read().projects.map((p) => (p.id === id ? stamp({ ...p, ...patch }) : p)) });
 
 export function deleteProject(id) {
   const s = read();
   const orphaned = s.tasks.filter((t) => t.projectId === id);
-  update({
+  mutate(`deleting “${s.projects.find((p) => p.id === id)?.name || "a project"}”`, {
     projects: s.projects.filter((p) => p.id !== id),
     tasks: s.tasks.filter((t) => t.projectId !== id),
     events: s.events.map((e) => (e.projectId === id ? stamp({ ...e, projectId: null }) : e)),
@@ -181,15 +262,17 @@ export function addTask({
     delegatedTo, notes, done: false, doneAt: null,
     createdAt: Date.now(), scheduledFor: null, order: null,
   });
-  update({ tasks: [...read().tasks, t] });
+  mutate(`adding “${t.title}”`, { tasks: [...read().tasks, t] });
   return t;
 }
 
 export const updateTask = (id, patch) =>
-  update({ tasks: read().tasks.map((t) => (t.id === id ? stamp({ ...t, ...patch }) : t)) });
+  mutate(`changing “${read().tasks.find((t) => t.id === id)?.title || "a task"}”`,
+    { tasks: read().tasks.map((t) => (t.id === id ? stamp({ ...t, ...patch }) : t)) });
 
 export function toggleTask(id) {
-  update({
+  const was = read().tasks.find((t) => t.id === id);
+  mutate(`marking “${was?.title || "a task"}” ${was?.done ? "not done" : "done"}`, {
     tasks: read().tasks.map((t) =>
       t.id === id ? stamp({ ...t, done: !t.done, doneAt: t.done ? null : Date.now() }) : t,
     ),
@@ -197,7 +280,8 @@ export function toggleTask(id) {
 }
 
 export const deleteTask = (id) =>
-  update({ tasks: read().tasks.filter((t) => t.id !== id), tombstones: bury("tasks", id) });
+  mutate(`deleting “${read().tasks.find((t) => t.id === id)?.title || "a task"}”`,
+    { tasks: read().tasks.filter((t) => t.id !== id), tombstones: bury("tasks", id) });
 
 /** Replace today's plan with an ordered list of task ids. */
 export function applyPlan(taskIds, day = dayKey()) {
@@ -216,15 +300,17 @@ export function applyPlan(taskIds, day = dayKey()) {
 // ------------------------------------------------------------------ events
 export function addEvent({ title, start, end, location = "", attendees = [], projectId = null, notes = "" }) {
   const e = stamp({ id: uid(), title: title.trim(), start, end, location, attendees, projectId, notes, createdAt: Date.now() });
-  update({ events: [...read().events, e] });
+  mutate(`booking “${e.title}”`, { events: [...read().events, e] });
   return e;
 }
 
 export const updateEvent = (id, patch) =>
-  update({ events: read().events.map((e) => (e.id === id ? stamp({ ...e, ...patch }) : e)) });
+  mutate(`changing “${read().events.find((e) => e.id === id)?.title || "a meeting"}”`,
+    { events: read().events.map((e) => (e.id === id ? stamp({ ...e, ...patch }) : e)) });
 
 export const deleteEvent = (id) =>
-  update({ events: read().events.filter((e) => e.id !== id), tombstones: bury("events", id) });
+  mutate(`cancelling “${read().events.find((e) => e.id === id)?.title || "a meeting"}”`,
+    { events: read().events.filter((e) => e.id !== id), tombstones: bury("events", id) });
 
 export const eventsOn = (day, events = read().events) =>
   events

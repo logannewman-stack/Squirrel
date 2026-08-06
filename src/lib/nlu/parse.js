@@ -22,6 +22,9 @@ export const INTENTS = {
   QUERY_EVENT: "query_event",
   QUERY_PROGRESS: "query_progress",
   QUERY_HOURS: "query_hours",
+  EDIT_TASK: "edit_task",
+  UNDO: "undo",
+  REPEAT_EVENT: "repeat_event",
   RESIZE_EVENT: "resize_event",
   QUERY_FREE: "query_free",
   PLAN_DAY: "plan_day",
@@ -131,6 +134,56 @@ export function isClearRange(body) {
 }
 
 /**
+ * Is this setting a property on a task?
+ *
+ * Three shapes, and the first is the one that mattered. People state estimates
+ * rather than command them — "the lease is about 45 minutes", "the deck will
+ * take 8 hours" — and a rule table built out of imperatives is blind to every
+ * one of them.
+ */
+const SAYS_LENGTH = /\b(?:is|will take|takes|needs|should take|is about|is roughly|is around)\b[^.]*\b(?:\d+(?:\.\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)|an? hour|half an hour|(?:one|two|three|four|five|six|seven|eight|nine|ten|couple|few)\s+(?:and a half\s+)?(?:hours?|minutes?|mins?))/i;
+const SAYS_PRIORITY = /\b(?:make|mark|set|bump|flag|treat)\b[^.]*\b(?:critical|urgent|high|low|normal)\b|\bis (?:critical|urgent|high|low)(?: priority)?\b|\b(?:critical|high|low|normal) priority\b/i;
+const SAYS_DUE = /\b(?:is |isn'?t |is not )?(?:due|not due until|needed by|wanted by|has to be (?:done|in|ready) by)\b/i;
+const SAYS_REOPEN = /\b(?:re-?open|un-?complete|un-?tick|un-?check|not done|isn'?t done|didn'?t (?:actually )?finish|still open|mark .* (?:as )?(?:not done|undone|open))\b/i;
+const SAYS_TASK_DELETE = /\b(?:delete|remove|drop|bin|scrap|get rid of)\b[^.]*\btasks?\b|\btasks?\b[^.]*\b(?:delete|removed?)\b/i;
+const SAYS_RENAME = /\b(?:rename|re-?title|call it|title it|name it)\b/i;
+
+/**
+ * "The Meridian call is on Zoom."
+ *
+ * A place, stated. The trap is that "the review is on Friday" has the same
+ * shape, so the tail has to fail to parse as a date before this can be a
+ * location — which is why it is a function rather than another alternation.
+ */
+const SAYS_PLACE = /\b(?:is|will be|happens|takes place|meets)\s+(?:at|on|in|over)\s+(.{2,40})$/i;
+
+export function placeIn(body, now) {
+  const m = body.match(SAYS_PLACE);
+  if (!m) return null;
+  const tail = m[1].replace(/[.,!?]+$/, "").trim();
+  if (!tail || parseDate(tail, now) || parseTime(tail)) return null;
+  if (/^(?:my|the)?\s*(?:calendar|schedule|diary|track|hold|time)$/i.test(tail)) return null;
+  return tail;
+}
+
+/** Making something new carries the same words as changing something old. */
+const IS_CREATION = /^\s*(?:add|create|new|make an?|remind me to|todo|i need to|i want to|put|book|schedule|set up)\b/i;
+
+export function isTaskEdit(body) {
+  const s = body.toLowerCase();
+  // A clock time means a meeting is being talked about, not a task's length.
+  if (hasClock(s)) return false;
+  // "Add a task to sign the lease, high priority, due Friday" names a priority
+  // and a deadline and is nonetheless a creation. The leading verb governs.
+  if (IS_CREATION.test(s)) return false;
+  return (
+    SAYS_LENGTH.test(s) || SAYS_PRIORITY.test(s) || SAYS_REOPEN.test(s) ||
+    SAYS_TASK_DELETE.test(s) || SAYS_RENAME.test(s) || Boolean(placeIn(body)) ||
+    (SAYS_DUE.test(s) && /\b(?:the|my)\b/.test(s))
+  );
+}
+
+/**
  * A time made of digits, as opposed to a part of the day.
  *
  * "Cancel my 4pm" names one meeting; "clear my afternoon" names a stretch.
@@ -152,6 +205,10 @@ const CANCEL_THEN_REBOOK =
   /\b(?:cancel\w*|delete|remove|drop|scrap|move|push)\b(.+?)(?:,\s*)?\b(?:and|then|&)\s+(?:can you\s+|please\s+)?(?:re-?schedul\w*|re-?book\w*|re-?arrange|rearrange|move|put|book|set|slot|pop|stick|do)\b\s*(?:it|that|this|them|the\s+\w+)?\s*(?:back\s+)?(?:for|to|on|at|in)\b(.+)$/i;
 
 const RULES = [
+  // First, and unmissable. Undo is the thing people reach for while something
+  // is going wrong, and it must never be shadowed by a verb inside the same
+  // sentence — "undo that meeting move" is an undo, not a move.
+  [INTENTS.UNDO, /\bundo\b|\bredo that\b|\bput (?:it|that|them) back\b|\brevert\b|\btake (?:that|it) back\b|\bnever ?mind that,? undo\b|\bi didn'?t mean (?:that|to)\b|\bthat was a mistake\b|\bchange (?:that|it) back\b|\brestore\b/],
   [INTENTS.HELP, /\b(help|what can you do|commands?)\b/],
   [INTENTS.INVITE, /\b(invite|send (?:an? )?invit|email .* about|send .* (?:the )?(?:invite|calendar))\b/],
   // Very early, and deliberately narrow. "Finish" belongs to completing a task
@@ -160,6 +217,12 @@ const RULES = [
   [INTENTS.QUERY_HOURS, /\b(?:my |the )?working (?:hours|day|days|week)\b|\bwhat (?:are|is) my hours\b|\bwhat hours do i (?:work|do)\b|\bwhen do i (?:start|finish|stop|knock off)(?:\s+work(?:ing)?)?\s*[?.!]*$|\bhow (?:many|much) (?:hours|time) (?:do|can|should) i (?:work|focus)\b|\bmy (?:daily )?capacity\b|\bwhat days do i work\b|\bdo i work (?:weekends?|saturdays?|sundays?)\b/],
   // `mov(?:e|ing|ed)` rather than `move\w*`: English drops the e, so "moving my
   // 3pm" — which is how half of these arrive — contains no "move" at all.
+  // Setting a property on a task that is named rather than pointed at.
+  //
+  // Ahead of move and cancel on purpose. "Bump the term sheet to critical" is
+  // not a reschedule and "delete the diligence index task" is not a
+  // cancellation, and both verbs belong to those rules. The object decides.
+  [INTENTS.EDIT_TASK, isTaskEdit],
   [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|slid(?:e|ing))\b/],
   // Before cancel, after move: "move everything on Friday to Monday" is a bulk
   // move and stays a move; "cancel everything on Friday" is a bulk clear.
@@ -171,7 +234,9 @@ const RULES = [
   [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b|\b(?:don'?t|do not|dont|didn'?t) (?:need|want)\b.*\b(?:any ?more|any longer)?\b|\bnot happening\b|\bfell through\b|\bwe'?re not doing\b/],
   // "mark ... as done" allows words in between — that is how people write it.
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b/],
-  [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|assign|give .* to)\b/],
+  // `give (?!me)`: "give me something to do" is someone asking for work, not
+  // handing it over, and it was being answered with "delegate it to whom?".
+  [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|hand over|assign|give\s+(?!me\b|us\b)[^.]{2,30}?\s+to)\b/],
   // Before MOVE, because "shorten"/"extend" are edits to length rather than
   // to when — and "push the review out by an hour" is genuinely ambiguous, so
   // the explicit length verbs win.
@@ -180,9 +245,12 @@ const RULES = [
   // rather than a day's worth of listing.
   [INTENTS.QUERY_EVENT, /\b(?:where(?:'s| is)|how long is|who am i (?:meeting|seeing)|is .* still on|when(?:'s| is) (?:my|the)|what time is (?:my|the))\b/],
   [INTENTS.QUERY_PROGRESS, /\bhow much (?:time|have i|did i)\b|\bhow am i doing\b|\bwhat did i (?:do|finish|get done)\b|\bhow many hours\b|\bhow'?s my (?:focus|week)\b/],
-  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage)\b/],
+  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up))\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|any (?:time|gaps?)|when can i)\b/],
-  [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on)\b/],
+  [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week))\b/],
+  // A series, not a booking. Checked before create, or only the first one of
+  // twelve ever reaches the calendar.
+  [INTENTS.REPEAT_EVENT, /\bevery (?:day|weekday|week|other week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:daily|weekly|fortnightly|biweekly|monthly)\b|\brepeat(?:s|ing)?\b|\brecurring\b|\beach (?:day|week|monday|tuesday|wednesday|thursday|friday)\b/],
   // Booking verbs, which is most of them. Every one of these was a real
   // sentence that fell through to "I didn't catch that" — people reach for a
   // startling number of words for "put this on the calendar".
@@ -396,6 +464,10 @@ function stripVerbs(text) {
 /** Remove time/date/duration phrases so they don't end up inside a title. */
 function stripTemporal(text) {
   return text
+    // Recurrence wording. "Every Monday at 9 standup" was booking a series of
+    // meetings all called "Every standup".
+    .replace(/\b(?:every|each)\s+(?:other\s+)?(?:day|weekday|week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b/gi, " ")
+    .replace(/\b(?:daily|weekly|fortnightly|bi-?weekly|monthly|recurring|repeat(?:s|ing|ed)?)\b/gi, " ")
     .replace(/\b(?:on|at|for|by|due)?\s*\b(?:next|this|coming)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?\b/gi, " ")
     .replace(/\b(?:today|tomorrow|tonight|yesterday|tmrw)\b/gi, " ")
     // "2 to 4", "9 until 11:30" — a span written as two clock times. Left in,
@@ -447,11 +519,21 @@ function withPhrase(people) {
  * the meeting, which is not a mistake anyone would think to check for.
  */
 function extractRename(text) {
-  const m = text.match(/\b(?:call it|rename(?:\s+it)?(?:\s+to)?|title it|name it)\s+(.+)$/i);
+  // "Rename the board deck to Q3 board deck" names both the thing and the new
+  // name. Matching only the tail turned the whole phrase into the new title.
+  const both = text.match(/\b(?:rename|re-?title)\s+(?:the\s+|my\s+)?(.+?)\s+(?:to|as)\s+(.+)$/i);
+  const m = both ? [both[0], both[2]]
+    : text.match(/\b(?:call it|rename(?:\s+it)?(?:\s+to)?|title it|name it)\s+(.+)$/i);
   if (!m) return null;
   const cleaned = m[1].replace(/^[\s"“'’]+|[\s"”'’.,]+$/g, "").trim();
   if (!cleaned) return null;
   return cleaned[0].toUpperCase() + cleaned.slice(1);
+}
+
+/** The half of "rename X to Y" that says which thing. */
+function renameSubject(text) {
+  const m = text.match(/\b(?:rename|re-?title)\s+(?:the\s+|my\s+)?(.+?)\s+(?:to|as)\s+.+$/i);
+  return m ? m[1].trim() : null;
 }
 
 /**
@@ -608,7 +690,8 @@ export function parse(text, now = new Date()) {
     durationMins,
     priority,
     person: toPerson ? toPerson[1] : null,
-    subjectPhrase,
+    // "Rename X to Y" carries its own subject, and it is not the whole line.
+    subjectPhrase: renameSubject(body) || subjectPhrase,
     targetPhrase,
     // Title with verbs, temporal phrases, and priority wording removed.
     title: cleanTitle(body, people, subject),
