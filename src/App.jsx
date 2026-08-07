@@ -289,7 +289,13 @@ export default function App() {
 
   return (
     <div className="flex h-dvh flex-col">
-      <div className={`flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}>
+      <div
+        className={`flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
+        // Room at the bottom of a scrolling view so the last row clears the
+        // floating button rather than hiding behind it. The full-height views
+        // manage their own scroll and put nothing in that corner.
+        style={fullHeight ? undefined : { paddingBottom: "5.5rem" }}
+      >
         {body}
       </div>
 
