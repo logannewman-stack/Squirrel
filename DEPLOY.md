@@ -200,9 +200,57 @@ Deploying the site needs no environment variables at all. Set the ones in
 then is that `VITE_*` variables are **inlined into the browser bundle**, so
 `SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_SECRET_KEY` must never carry that prefix.
 
-The three functions in `api/` are for that future backend and are not called by
-the client yet. They build fine without their variables set; they simply return
-errors if requested.
+The functions in `api/` build fine without their variables set; they simply
+return errors if requested.
+
+### The model fallback (optional, and the only thing that costs per message)
+
+Squirrel answers from rules. They cost nothing, work offline, and handle the
+overwhelming majority of what anyone types at a calendar. When one of them
+misses, `/api/interpret` can hand that one message to a language model, which
+rewrites it in vocabulary the rules do understand — and the rewrite then runs
+down the ordinary path, with the same confirmation and the same undo.
+
+It is off unless two things are true:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...        # server-side only. Never VITE_.
+ANTHROPIC_MODEL=claude-haiku-4-5    # optional; this is the default
+```
+
+...and the user turns on **Settings → Fallback**. Without the key the endpoint
+answers 501 and the browser stops asking; without the toggle nothing is ever
+sent. Messages the rules already handle never leave the device, which is the
+whole cost argument.
+
+**Which model.** The job is short-sentence-to-short-sentence translation over a
+fixed vocabulary — the cheapest task there is. Prices per million tokens:
+
+| Model | ID | In | Out | Per fallback\* |
+|---|---|---|---|---|
+| Haiku 4.5 | `claude-haiku-4-5` | $1 | $5 | ~$0.005 |
+| Sonnet 5 | `claude-sonnet-5` | $3 | $15 | ~$0.015 |
+| Opus 4.8 | `claude-opus-4-8` | $5 | $25 | ~$0.025 |
+
+\* ~4,500-token prompt, ~150-token reply, uncached.
+
+Haiku is the default because nothing in this task rewards a larger model:
+there is one correct output and it is a short imperative sentence. Switch to
+`claude-opus-4-8` by setting `ANTHROPIC_MODEL` if you want to measure the
+difference — the miss log in **Settings → What she missed** records which
+rewrites came from the model, so the two are comparable rather than guessed at.
+
+**Caching.** The system prompt is identical on every request and is marked for
+caching, but Haiku 4.5 will not cache a prefix under 4,096 tokens. Check
+`usage.cache_read_input_tokens` on a response before believing any saving: if it
+is zero, the prompt is too short to cache and every request pays full input
+price.
+
+**Metering.** Every call claims one unit from `usage_counters` under the plan's
+limit, row-locked, before the request goes out. That is deliberate: a failed
+request still spends one, which is the wrong way round for the user and the
+right way round for the bill — claiming afterwards leaves a window where
+concurrent requests all pass the check and the spend has no ceiling.
 
 ### Stripe
 

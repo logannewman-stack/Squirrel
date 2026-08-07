@@ -706,6 +706,10 @@ const VOCAB = [
   "tomorrow", "tonight", "today", "monday", "tuesday", "wednesday",
   "thursday", "friday", "saturday", "sunday", "morning", "afternoon",
   "evening", "minutes", "minute", "hours", "clock", "oclock", "priority",
+  // Correction markers. A typo here is expensive out of proportion to its
+  // size: "actaully no, move that" reads as a brand new command about a
+  // meeting called "Actaully no".
+  "actually", "sorry", "nevermind", "instead", "meant",
 ];
 
 /** Levenshtein, abandoned as soon as it cannot come in under `max`. */
@@ -1080,8 +1084,29 @@ export function parse(text, now = new Date()) {
 
   // Classify what is left after "no," / "actually," — the correction marker is
   // discourse, not content, and leaving it in poisons both intent and title.
-  const repair = REPAIR.test(raw);
-  let body = repair ? raw.replace(REPAIR, "").trim() : raw;
+  /**
+   * Correction markers, spell-checked before they are looked for.
+   *
+   * "Actaully no reschedule that for 3" arrived misspelled, so the marker was
+   * never stripped — and "Actaully no reschedule" became the meeting's name
+   * and defeated the follow-up test behind it. Only the opening words are
+   * corrected here, which is where discourse markers live and where a typo
+   * costs the whole sentence.
+   */
+  const opener = raw.split(/\s+/).slice(0, 2).join(" ");
+  const fixedOpener = despell(opener);
+  const marked = fixedOpener === opener ? raw : raw.replace(opener, fixedOpener);
+
+  const repair = REPAIR.test(marked);
+  let body = raw;
+  if (repair) {
+    // "Actually no, reschedule that" stacks two markers. Peeling one left the
+    // other in front, and "No reschedule" became the name of a meeting.
+    body = marked;
+    let prev;
+    do { prev = body; body = body.replace(REPAIR, "").trim(); } while (body !== prev && body);
+    if (!body) body = marked;
+  }
   // "And move it to Friday at 2." A conjunction joining this turn to the last
   // one is discourse, and leaving it in put the word "And" at the front of
   // every title and defeated the follow-up test behind it.
@@ -1120,7 +1145,7 @@ export function parse(text, now = new Date()) {
     targetPhrase = compound[2].trim();
   } else if (intent === INTENTS.MOVE_EVENT) {
     // "move X to Y" — the target time is what follows the first "to"/"until".
-    const split = body.match(/^(.*?)\s+\b(?:to|until|till|->)\b\s+(.*)$/i);
+    const split = body.match(/^(.*?)\s+\b(?:to|until|till|for|->)\b\s+(.*)$/i);
     if (split) {
       subjectPhrase = split[1];
       targetPhrase = split[2];

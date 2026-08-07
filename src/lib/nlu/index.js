@@ -123,8 +123,33 @@ const isFollowUp = (p) =>
  * of the proposal, not a rejection of it, and treating it as a rejection would
  * throw away everything the user had already said.
  */
-const YES = /^\s*(?:y|ya|yes+|yep|yeah|yup|sure|ok|okay|k|confirm(?:ed)?|correct|right|perfect|do it|go ahead|book it|sounds good|please do|that'?s right)\b[\s.!,]*$/i;
-const NO = /^\s*(?:n|no+|nope|nah|cancel(?: (?:it|that))?|forget it|never ?mind|dont|don'?t|stop|leave it|scratch that)\b[\s.!,]*$/i;
+/**
+ * Yes and no, and nothing else.
+ *
+ * Both are anchored end to end on purpose. "No, make it Monday" is a revision
+ * of the proposal, not a rejection of it, and treating it as a rejection would
+ * throw away everything the user had already said.
+ *
+ * But anchoring a *single* word was wrong, and wrong in the most-used
+ * interaction in the app: "Yes, go ahead" is two affirmatives in a row, and it
+ * fell straight through the gate to "I didn't catch that" — after Squirrel had
+ * just asked a yes-or-no question. So a run of them counts as one.
+ */
+const YES_WORD =
+  "y|ya|yes+|yep+|yeah+|yup+|yah|sure|ok(?:ay)?|k|kk|correct|right|perfect|great|good|fine|lovely|" +
+  "confirm(?:ed)?|do it|go ahead|go for it|book it|send it|make it so|sounds good|" +
+  "please(?: do)?|that'?s right|that works|works for me|absolutely|definitely|indeed|" +
+  "affirmative|of course|by all means|carry on|crack on|go on|yes please|do";
+const NO_WORD =
+  "n|no+|nope+|nah+|negative|cancel(?: (?:it|that))?|forget it|never ?mind|dont|don'?t|do not|" +
+  "stop|leave it|leave that|scratch that|scrap that|drop it|not now|not yet|hold off|" +
+  "on second thought(?:s)?|actually no|no thanks|no thank you|nevermind";
+
+const runOf = (words) =>
+  new RegExp(`^\\s*(?:${words})(?:[\\s,.!;-]+(?:${words}))*[\\s.!,]*$`, "i");
+
+const YES = runOf(YES_WORD);
+const NO = runOf(NO_WORD);
 
 /** Slots a proposal can be revised on, all JSON-safe so they survive a reload. */
 function revisePatch(patch, slots, base, now) {
@@ -382,6 +407,13 @@ export function ask(text, state, opts = {}) {
           // the question rather than continuing with the old subject.
           entity:
             res.entity !== undefined ? res.entity
+            // A proposal is about something specific that was just resolved.
+            // Nulling the thread here meant confirming a reschedule went
+            // looking for the meeting again with only "that" to go on, and
+            // answered "I couldn't find that on your calendar" to its own
+            // question. Only a bare *question* drops the thread, because the
+            // next message is answering it rather than continuing.
+            : res.proposal ? (prior?.entity ?? null)
             : res.pending ? null
             : (prior?.entity ?? null),
           // A set is written only by the turn that produced one. Older sets
@@ -597,6 +629,33 @@ export function ask(text, state, opts = {}) {
     return reply(lead ? `${lead} Nothing changed.` : "Nothing on your calendar by that name.");
   }
 
+  /**
+   * Resolve one event, and fall back to whatever is under discussion.
+   *
+   * "Reschedule that for 3" names nothing the resolver can match — "that" is
+   * the whole subject — so a lookup by phrase was always going to fail, and
+   * failing meant "I couldn't find that on your calendar" two turns after
+   * booking the very thing being pointed at.
+   *
+   * The follow-up machinery upstream catches most of these, but it needs a
+   * clean parse to recognise one: a typo, an odd word order, or a leftover
+   * verb in the title is enough to hide it. This is the floor underneath that
+   * — if the sentence points backwards at all and nothing else matched, the
+   * thread is the answer.
+   */
+  function findEvent(phrase) {
+    if (opts.resolvedId) {
+      return state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }));
+    }
+    const ranked = resolveEvent(phrase, state.events, now);
+    if (ranked.length) return ranked;
+    if ((p.pronoun || p.repair) && focus?.kind === "event") {
+      const it = state.events.find((e) => e.id === focus.item.id);
+      if (it) return [{ item: it, score: 9 }];
+    }
+    return [];
+  }
+
   function run() {
   switch (p.intent) {
     // ------------------------------------------------------------- move
@@ -689,9 +748,7 @@ export function ask(text, state, opts = {}) {
           });
         }
 
-        const found = opts.resolvedId
-          ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
-          : resolveEvent(slots.subjectPhrase, state.events, now);
+        const found = findEvent(slots.subjectPhrase);
 
         if (!found.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
         if (!isConfident(found)) {
@@ -768,9 +825,7 @@ export function ask(text, state, opts = {}) {
         );
       }
 
-      const ranked = opts.resolvedId
-        ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
-        : resolveEvent(slots.subjectPhrase, state.events, now);
+      const ranked = findEvent(slots.subjectPhrase);
 
       if (!ranked.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
@@ -808,7 +863,7 @@ export function ask(text, state, opts = {}) {
     case INTENTS.CANCEL_EVENT: {
       const ranked = opts.resolvedId
         ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
-        : resolveEvent(p.text, state.events, now);
+        : findEvent(p.text);
       if (!ranked.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Cancel which one?", {

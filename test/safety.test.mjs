@@ -218,4 +218,70 @@ for (const [q, verify] of DATES) {
     !understood ? `${r.miss}` : `wrong date — ${store.getState().events.map(e=>e.start).slice(-1)}`);
 }
 
+// ------------------------------------------------ 7. THE CONFIRMATION GATE
+// The most-used interaction in the app, and it only accepted a single word.
+// "Yes, go ahead" — two affirmatives in a row — fell through to "I didn't
+// catch that", immediately after Squirrel had asked a yes-or-no question.
+// Nine hundred assertions did not see it, because every one of them said
+// "yes".
+{
+  const YES = ["yes", "Yes, go ahead", "yeah do it", "yes please", "ok go ahead",
+               "sure, book it", "yep", "go ahead", "perfect, do it", "yes that works",
+               "absolutely", "ok", "yeah, book it", "go for it", "please do"];
+  for (const q of YES) {
+    seed();
+    // The gate only exists with confirmations on, which is the default the
+    // app ships with — `seed` turns them off so the other blocks can act.
+    store.setSetting("confirm", true);
+    ask("book lunch thursday at 12", store.getState(), { now: NOW });
+    const before = store.getState().events.length;
+    ask(q, store.getState(), { now: NOW });
+    check("yes means yes", q, store.getState().events.length === before + 1,
+      `${before} → ${store.getState().events.length}`);
+  }
+
+  const NO = ["no", "nope", "never mind", "no thanks", "actually no", "no, forget it", "stop"];
+  for (const q of NO) {
+    seed();
+    store.setSetting("confirm", true);
+    ask("book lunch thursday at 12", store.getState(), { now: NOW });
+    const before = store.getState().events.length;
+    ask(q, store.getState(), { now: NOW });
+    check("no means no", q, store.getState().events.length === before,
+      `${before} → ${store.getState().events.length}`);
+  }
+
+  // A revision is neither. Everything already agreed has to survive it.
+  seed();
+  store.setSetting("confirm", true);
+  ask("book lunch thursday at 12", store.getState(), { now: NOW });
+  const before = store.getState().events.length;
+  ask("no, make it monday", store.getState(), { now: NOW });
+  check("a revision is neither", "no, make it monday",
+    store.getState().events.length === before, "acted on a revision");
+}
+
+// ------------------------------------------------ 8. THE REPORTED TRANSCRIPT
+// Verbatim from a user, and it failed on three separate faults at once: the
+// confirmation was not recognised, the correction marker was misspelled so it
+// was never stripped, and "for 3:00" was not a place a meeting could move to.
+{
+  reset({ confirm: true });
+  const said = (q) => ask(q, store.getState(), { now: NOW });
+  said("set a meeting with mike for tomorrow at 2");
+  said("Yes, go ahead");
+  check("reported transcript", "the meeting is booked",
+    store.getState().events.length === 1, `${store.getState().events.length} events`);
+
+  const r = said("actaully no reschedule that for 3:00");
+  check("reported transcript", "a misspelled correction still lands",
+    !/couldn't find/i.test(r.text), r.text);
+  said("yes");
+  const ev = store.getState().events[0];
+  check("reported transcript", "and moves it to 3",
+    ev && ev.start.endsWith("T15:00:00"), ev && ev.start);
+  check("reported transcript", "without duplicating the meeting",
+    store.getState().events.length === 1, `${store.getState().events.length} events`);
+}
+
 report("Safety, threads, dictation, and edges");
