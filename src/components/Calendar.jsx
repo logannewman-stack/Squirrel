@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fmtTime } from "../lib/agenda";
-import { dayKey, deleteEvent, setSetting } from "../lib/store";
+import { dayKey, setSetting } from "../lib/store";
 import { hoursOf, breaksOn, sayMins } from "../lib/hours";
 import {
   SCALES, isScale, rangeOf, shiftBy, titleOf, subtitleOf,
@@ -17,7 +17,7 @@ const HOUR_PX = 52;
  * and a dropdown costs two clicks and a menu every time. Five labels sitting
  * in the header cost one, and the keyboard shortcuts underneath cost none.
  */
-export default function Calendar({ state, onNewEvent }) {
+export default function Calendar({ state, onNewEvent, onOpenEvent }) {
   const stored = state.settings?.calendarScale;
   const [scale, setScale] = useState(isScale(stored) ? stored : "week");
   const [anchor, setAnchor] = useState(() => new Date());
@@ -117,6 +117,7 @@ export default function Calendar({ state, onNewEvent }) {
             hours={hours}
             now={now}
             single={scale === "day"}
+            onOpenEvent={onOpenEvent}
           />
         ) : scale === "month" ? (
           <MonthGrid
@@ -216,7 +217,7 @@ const LoadKey = () => (
  * flight or an 8pm dinner simply was not on the calendar — a meeting hidden by
  * the view is worse than no view.
  */
-function TimeGrid({ days, state, hours, now, single }) {
+function TimeGrid({ days, state, hours, now, single, onOpenEvent }) {
   const keys = days.map(dayKey);
   const events = state.events.filter((e) => keys.includes(dayKey(new Date(e.start))));
   const blocks = (state.blocks || []).filter((b) => keys.includes(b.day) && b.start);
@@ -332,10 +333,8 @@ function TimeGrid({ days, state, hours, now, single }) {
                 return (
                   <button
                     key={e.id}
-                    onClick={() => {
-                      if (confirm(`Cancel "${e.title}"?`)) deleteEvent(e.id);
-                    }}
-                    title={`${e.title} · ${fmtTime(e.start)}–${fmtTime(e.end)}`}
+                    onClick={() => onOpenEvent(e)}
+                    title={`${e.title} · ${fmtTime(e.start)}–${fmtTime(e.end)} — tap to edit`}
                     style={{ top: y(s), height: Math.max(20, y(en) - y(s) - 2) }}
                     className="absolute inset-x-1 overflow-hidden rounded border border-[var(--ink)]
                                bg-[var(--ink)] px-1.5 py-1 text-left text-[11px] leading-tight

@@ -56,6 +56,8 @@ export default function App() {
   const [pending, setPending] = useState(null);
   const [done, setDone] = useState(null);
   const [newEvent, setNewEvent] = useState(false);
+  // The event being edited, if any. One dialog does both jobs.
+  const [editingEvent, setEditingEvent] = useState(null);
   const [palette, setPalette] = useState(false);
   const [, force] = useState(0);
 
@@ -249,9 +251,18 @@ export default function App() {
   // ---------------------------------------------------------------- views
   const body =
     view.name === "today" ? (
-      <Today state={state} onFocus={setPending} onNewEvent={() => setNewEvent(true)} />
+      <Today
+        state={state}
+        onFocus={setPending}
+        onNewEvent={() => setNewEvent(true)}
+        onOpenEvent={setEditingEvent}
+      />
     ) : view.name === "calendar" ? (
-      <Calendar state={state} onNewEvent={() => setNewEvent(true)} />
+      <Calendar
+        state={state}
+        onNewEvent={() => setNewEvent(true)}
+        onOpenEvent={setEditingEvent}
+      />
     ) : view.name === "projects" ? (
       <Projects state={state} onOpen={(id) => setView({ name: "project", id })} />
     ) : view.name === "project" ? (
@@ -318,7 +329,12 @@ export default function App() {
         </button>
       </nav>
 
-      {newEvent && <EventDialog onClose={() => setNewEvent(false)} />}
+      {(newEvent || editingEvent) && (
+        <EventDialog
+          event={editingEvent}
+          onClose={() => { setNewEvent(false); setEditingEvent(null); }}
+        />
+      )}
       {palette && (
         <CommandPalette
           state={state}

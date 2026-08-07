@@ -20,7 +20,7 @@ import TaskRow from "./TaskRow";
  * thing on the page now, because it is the only thing here that costs money
  * to find out late.
  */
-export default function Today({ state, onFocus, onNewEvent }) {
+export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
   const day = dayKey();
   const now = new Date();
   const events = eventsOn(day, state.events);
@@ -48,7 +48,7 @@ export default function Today({ state, onFocus, onNewEvent }) {
   // collision between the two kinds of commitment.
   const timeline = [
     ...events.map((e) => ({
-      kind: "meeting", at: new Date(e.start), end: new Date(e.end), title: e.title,
+      kind: "meeting", at: new Date(e.start), end: new Date(e.end), title: e.title, event: e,
       note: e.location || "", id: e.id,
     })),
     ...blocks.filter((b) => b.start).map((b) => ({
@@ -154,6 +154,19 @@ export default function Today({ state, onFocus, onNewEvent }) {
                         {item.note && ` · ${item.note}`}
                       </p>
                     </div>
+                    {/* Meetings open where they can be changed. The timeline
+                        is where anyone looks when a meeting moves, so it is
+                        where the edit belongs. */}
+                    {item.kind === "meeting" && onOpenEvent && (
+                      <button
+                        onClick={() => onOpenEvent(item.event)}
+                        className="shrink-0 self-center rounded-full border border-[var(--line)] px-3 py-1
+                                   text-[11px] text-[var(--muted)] transition-colors
+                                   hover:border-[var(--ink)] hover:text-[var(--ink)]"
+                      >
+                        Edit
+                      </button>
+                    )}
                     {item.kind === "work" && !past && (
                       <button
                         onClick={() => onFocus(item.task)}

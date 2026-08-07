@@ -1,5 +1,7 @@
 import { useState } from "react";
 import TaskRow from "./TaskRow";
+import PersonPicker from "./PersonPicker";
+import { roster, workOf, keyOf } from "../lib/people";
 import {
   addTask, deleteProject, toggleTask, deleteTask, updateProject, dayKey,
 } from "../lib/store";
@@ -103,34 +105,70 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
           placeholder="Add work…"
           className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
         />
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-[var(--hairline)] pt-3">
-          {ESTIMATES.map((m) => (
-            <Chip key={m} on={estimate === m} onClick={() => setEstimate(m)}>
-              {m >= 60 ? `${m / 60}h` : `${m}m`}
-            </Chip>
-          ))}
-          <span className="mx-1 h-4 w-px bg-[var(--line)]" />
-          {PRIORITIES.map((p) => (
-            <Chip key={p} on={priority === p} onClick={() => setPriority(p)}>
-              {p}
-            </Chip>
-          ))}
-          <input
-            type="date"
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-            className="rounded border border-[var(--line)] bg-transparent px-2 py-1 text-[11px] outline-none"
-          />
-          <input
-            value={delegate}
-            onChange={(e) => setDelegate(e.target.value)}
-            placeholder="Delegate to…"
-            className="w-28 rounded border border-[var(--line)] bg-transparent px-2 py-1 text-[11px]
-                       outline-none placeholder:text-[var(--faint)]"
-          />
-          <button className="ml-auto rounded-md bg-[var(--ink)] px-4 py-1.5 text-xs font-medium text-[var(--paper)]">
-            Add
-          </button>
+        {/* Four decisions, each labelled and each on its own line at narrow
+            widths. They were a single unlabelled row of fifteen controls, which
+            reads as a toolbar rather than as a question anyone is being asked —
+            and put a 112-pixel text box in charge of who does the work. */}
+        <div className="mt-3 space-y-3 border-t border-[var(--hairline)] pt-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Field label="Takes">
+              {ESTIMATES.map((m) => (
+                <Chip key={m} on={estimate === m} onClick={() => setEstimate(m)}>
+                  {m >= 60 ? `${m / 60}h` : `${m}m`}
+                </Chip>
+              ))}
+            </Field>
+
+            <Field label="Priority">
+              {PRIORITIES.map((p) => (
+                <Chip key={p} on={priority === p} onClick={() => setPriority(p)}>
+                  {p}
+                </Chip>
+              ))}
+            </Field>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <Field label="Due">
+              {/* Quick days first: a deadline is "Friday" far more often than
+                  it is a date somebody wants to pick out of a grid. */}
+              {[["Today", 0], ["Tomorrow", 1], ["Friday", null], ["Next week", 7]].map(([label, days]) => (
+                <Chip key={label} on={due === dayFor(days, label)} onClick={() => setDue(dayFor(days, label))}>
+                  {label}
+                </Chip>
+              ))}
+              <input
+                type="date"
+                value={due}
+                onChange={(e) => setDue(e.target.value)}
+                aria-label="Due date"
+                className="rounded border border-[var(--line)] bg-transparent px-2 py-1 text-[11px] outline-none
+                           transition-colors focus:border-[var(--ink)]"
+              />
+              {due && (
+                <button type="button" onClick={() => setDue("")}
+                        className="px-1 text-[11px] text-[var(--muted)] underline-offset-4 hover:underline">
+                  clear
+                </button>
+              )}
+            </Field>
+          </div>
+
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <Field label="Delegate" className="min-w-[15rem] flex-1">
+              <PersonPicker
+                value={delegate}
+                onChange={setDelegate}
+                state={state}
+                className="w-full max-w-xs"
+              />
+            </Field>
+            <button className="rounded-md bg-[var(--ink)] px-5 py-2 text-xs font-medium text-[var(--paper)]
+                               transition-opacity hover:opacity-90 disabled:opacity-40"
+                    disabled={!title.trim()}>
+              Add
+            </button>
+          </div>
         </div>
       </form>
 
@@ -153,7 +191,45 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
       </div>
 
       {shown.length === 0 ? (
-        <p className="py-6 text-sm text-[var(--muted)]">Nothing here.</p>
+        <p className="py-6 text-sm text-[var(--muted)]">
+          {tab === "waiting"
+            ? "Nothing with anyone else. Delegate something above and it will show up here, grouped by who has it."
+            : tab === "done"
+              ? "Nothing finished yet."
+              : "No open work. Add some above."}
+        </p>
+      ) : tab === "waiting" ? (
+        /* Grouped by person, because the question this tab answers is "who has
+           what" — and a flat list of twelve tasks with a name on each makes
+           that a counting exercise. */
+        <div className="space-y-5">
+          {byPerson(shown).map(([name, items]) => (
+            <div key={name}>
+              <div className="mb-1 flex items-baseline justify-between gap-3">
+                <span className="text-sm font-medium">{name}</span>
+                <span className="text-xs text-[var(--muted)]">
+                  {items.length} waiting
+                  {items.some((t) => t.due && t.due < dayKey()) && (
+                    <span className="text-[var(--alert)]">
+                      {" · "}{items.filter((t) => t.due && t.due < dayKey()).length} overdue
+                    </span>
+                  )}
+                </span>
+              </div>
+              <ul className="divide-y divide-[var(--hairline)] border-t border-[var(--hairline)]">
+                {items.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    onToggle={() => toggleTask(t.id)}
+                    onFocus={() => onFocus(t)}
+                    onDelete={() => deleteTask(t.id)}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       ) : (
         <ul className="divide-y divide-[var(--hairline)]">
           {shown.map((t) => (
@@ -169,6 +245,55 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
       )}
     </div>
   );
+}
+
+/**
+ * Delegated work, gathered under whoever has it.
+ *
+ * Most overdue first inside each person, and the person with the most overdue
+ * first overall — the list is read to find out who to chase, so it opens with
+ * whoever needs chasing.
+ */
+function byPerson(tasks) {
+  const today = dayKey();
+  const groups = new Map();
+  for (const t of tasks) {
+    const key = keyOf(t.delegatedTo) || "unassigned";
+    const g = groups.get(key) ?? { name: t.delegatedTo || "Unassigned", items: [] };
+    g.items.push(t);
+    groups.set(key, g);
+  }
+  const late = (items) => items.filter((t) => t.due && t.due < today).length;
+  return [...groups.values()]
+    .map((g) => {
+      g.items.sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999"));
+      return g;
+    })
+    .sort((a, b) => late(b.items) - late(a.items) || b.items.length - a.items.length)
+    .map((g) => [g.name, g.items]);
+}
+
+/** A labelled cluster of controls. Without the label they read as a toolbar. */
+function Field({ label, children, className = "" }) {
+  return (
+    <div className={className}>
+      <span className="label mb-1.5 block">{label}</span>
+      <div className="flex flex-wrap items-center gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+/** "Friday" means the next one, which is what anyone saying it means. */
+function dayFor(days, label) {
+  const d = new Date();
+  if (days === null) {
+    // Next Friday, and today only if today is Friday and the week is young.
+    const ahead = (5 - d.getDay() + 7) % 7 || 7;
+    d.setDate(d.getDate() + ahead);
+  } else {
+    d.setDate(d.getDate() + days);
+  }
+  return dayKey(d);
 }
 
 function Chip({ on, children, ...rest }) {
