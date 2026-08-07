@@ -93,19 +93,19 @@ function fresh() {
 // as one sends whoever reads the log looking for a rule that was never needed.
 {
   misses.clear();
-  const id = misses.record({ text: "order me a coffee" });
+  const id = misses.record({ text: "play some music" });
   t("an unrelated next turn does not pair",
     misses.resolve(id, { text: "move the board call", intent: "move_event" }) === false);
   t("and nothing was written", misses.all()[0].fix === null);
 
   t("a genuine rephrasing still pairs",
-    misses.resolve(id, { text: "add a task to order coffee for the offsite", intent: "create_task" }));
+    misses.resolve(id, { text: "add a task to sort out the music", intent: "create_task" }));
   misses.clear();
 }
 
 {
   const state = fresh();
-  ask("order me a coffee", state(), { now: NOW });
+  ask("play some music", state(), { now: NOW });
   ask("book lunch with priya thursday at noon", state(), { now: NOW });
   t("an unrelated command is not recorded as the fix", misses.all()[0].fix === null,
     misses.all()[0].fix);
@@ -187,7 +187,9 @@ function fresh() {
 
 {
   const state = fresh();
-  const res = ask("invite priya to the standup", state(), { now: NOW });
+  // Putting someone on an invitation is a real capability now; *sending* it is
+  // the part that needs mail Squirrel does not have.
+  const res = ask("send an invite for the board call", state(), { now: NOW });
   t("an unbuilt capability is marked unsupported",
     res.miss === misses.REASONS.UNSUPPORTED, res.miss);
 }
@@ -210,16 +212,16 @@ function fresh() {
 // a task all along, and the log says so in the user's own words.
 {
   const state = fresh();
-  ask("email the deck to legal", state(), { now: NOW });
+  ask("turn on the lights", state(), { now: NOW });
   t("miss recorded", misses.count() === 1, misses.count());
 
-  ask("add a task to email the deck to legal", state(), { now: NOW });
+  ask("add a task to turn on the lights", state(), { now: NOW });
   const row = misses.all()[0];
   t("the retry was paired to it",
-    row.fix === "add a task to email the deck to legal", row.fix);
+    row.fix === "add a task to turn on the lights", row.fix);
   t("the pair carries the intent that worked", row.fixIntent === "create_task", row.fixIntent);
   t("summary surfaces the fix",
-    misses.summary()[0].resolvedAs[0].text === "add a task to email the deck to legal");
+    misses.summary()[0].resolvedAs[0].text === "add a task to turn on the lights");
   t("export shows the fix", misses.exportText().includes("worked as:"));
 }
 
@@ -227,11 +229,11 @@ function fresh() {
 // thank her mid-thread, and a thank-you is not the answer.
 {
   const state = fresh();
-  ask("email the deck to legal", state(), { now: NOW });
+  ask("turn on the lights", state(), { now: NOW });
   ask("thanks", state(), { now: NOW });
-  ask("add a task to email the deck to legal", state(), { now: NOW });
+  ask("add a task to turn on the lights", state(), { now: NOW });
   t("small talk did not break the pair",
-    misses.all()[0].fix === "add a task to email the deck to legal",
+    misses.all()[0].fix === "add a task to turn on the lights",
     misses.all()[0].fix);
   t("small talk was not itself logged", misses.count() === 1, misses.count());
 }
@@ -241,9 +243,9 @@ function fresh() {
 // reaching further back is how a log fills with pairs that mean nothing.
 {
   const state = fresh();
-  ask("email the deck to legal", state(), { now: NOW });
-  ask("order me a coffee", state(), { now: NOW });
-  ask("add a task to email the deck to legal", state(), { now: NOW });
+  ask("turn on the lights", state(), { now: NOW });
+  ask("play some music", state(), { now: NOW });
+  ask("add a task to turn on the lights", state(), { now: NOW });
   const rows = misses.all();
   t("both failures logged", rows.length === 2, rows.length);
   // Neither pairs: the first is out of reach, and the second is about coffee.
@@ -255,13 +257,13 @@ function fresh() {
 // Two failures at the same thing, though, do pair — this is the common shape.
 {
   const state = fresh();
-  ask("email the deck to legal", state(), { now: NOW });
-  ask("email deck legal now", state(), { now: NOW });
-  ask("add a task to email the deck to legal", state(), { now: NOW });
+  ask("turn on the lights", state(), { now: NOW });
+  ask("turn the lights on now", state(), { now: NOW });
+  ask("add a task to turn on the lights", state(), { now: NOW });
   const rows = misses.all();
   t("both attempts logged", rows.length === 2, rows.length);
   t("the most recent attempt got the pair",
-    rows[1].fix === "add a task to email the deck to legal", rows[1].fix);
+    rows[1].fix === "add a task to turn on the lights", rows[1].fix);
 }
 
 // A caller asking for a pure function is not real traffic.

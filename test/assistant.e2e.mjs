@@ -503,7 +503,7 @@ ui.push(["derived end time stays in local time", span === 60, `${span} mins`]);
 // read it back off the settings screen.
 await p.evaluate(() => localStorage.removeItem("squirrel.misses"));
 
-await p.getByRole("textbox").fill("order me a coffee");
+await p.getByRole("textbox").fill("turn on the lights");
 await p.getByRole("button", { name: "Send" }).click();
 await p.waitForTimeout(1400);
 
@@ -512,13 +512,13 @@ const missed = await p.evaluate(async () => {
   return { count: m.count(), text: m.all()[0]?.text ?? null };
 });
 ui.push(["a miss typed into the UI reaches the log", missed.count === 1, JSON.stringify(missed)]);
-ui.push(["and the log holds what was typed", missed.text === "order me a coffee", missed.text]);
+ui.push(["and the log holds what was typed", missed.text === "turn on the lights", missed.text]);
 
 await p.getByRole("button", { name: "Settings" }).click();
 const panel = p.locator("section").filter({ hasText: "What she missed" }).first();
 await panel.waitFor({ state: "visible", timeout: 4000 });
 const panelText = await panel.textContent();
-ui.push(["the panel renders the pattern", /order me a coffee/.test(panelText), panelText?.slice(0, 140)]);
+ui.push(["the panel renders the pattern", /turn on the lights/.test(panelText), panelText?.slice(0, 140)]);
 ui.push(["the panel counts it", /1 message/.test(panelText), panelText?.slice(0, 140)]);
 
 await panel.getByRole("button", { name: "Clear" }).click();

@@ -28,8 +28,14 @@ function fresh() {
   return store.getState;
 }
 
-/** A sentence the rules genuinely have no rule for. */
-const MISSED = "email the deck to legal";
+/**
+ * A sentence the rules genuinely have no rule for.
+ *
+ * It used to be "email the deck to legal", which the bare-imperative rule now
+ * correctly reads as a task. Fixtures for a fallback have to keep moving as
+ * the thing they are a fallback for gets better, which is the point.
+ */
+const MISSED = "turn on the lights";
 
 // --------------------------------------------------------------- the socket
 {
@@ -132,15 +138,15 @@ const MISSED = "email the deck to legal";
     calls++;
     sawText = text;
     sawContext = context;
-    return "add a task to email the deck to legal";
+    return "add a task to turn on the lights";
   });
 
   const res = await askAsync(MISSED, state(), { now: NOW });
   t("the rewrite acted", res.intent === "create_task", res.intent);
   t("the task was really created",
-    store.getState().tasks.some((x) => /email the deck/i.test(x.title)));
+    store.getState().tasks.some((x) => /lights/i.test(x.title)));
   t("the answer carries no miss", !res.miss);
-  t("the answer says what it rewrote", res.rewrote === "add a task to email the deck to legal");
+  t("the answer says what it rewrote", res.rewrote === "add a task to turn on the lights");
   t("the answer keeps the original", res.rewroteFrom === MISSED);
   t("the resolver saw the original sentence", sawText === MISSED);
   t("the resolver was given context", Boolean(sawContext?.now));
@@ -212,12 +218,12 @@ const MISSED = "email the deck to legal";
 // ------------------------------------------------------------- the paper trail
 {
   const state = fresh();
-  fb.setResolver(() => "add a task to email the deck to legal");
+  fb.setResolver(() => "add a task to turn on the lights");
   await askAsync(MISSED, state(), { now: NOW });
 
   const row = misses.all()[0];
   t("the miss is still the user's sentence", row.text === MISSED);
-  t("the fix is recorded", row.fix === "add a task to email the deck to legal", row.fix);
+  t("the fix is recorded", row.fix === "add a task to turn on the lights", row.fix);
   t("the fix is attributed to the model", row.fixSource === "model", row.fixSource);
   t("only one row", misses.count() === 1, misses.count());
 }
@@ -225,7 +231,7 @@ const MISSED = "email the deck to legal";
 {
   const state = fresh();
   ask(MISSED, state(), { now: NOW });
-  ask("add a task to email the deck to legal", state(), { now: NOW });
+  ask("add a task to turn on the lights", state(), { now: NOW });
   t("a human fix is attributed to the human", misses.all()[0].fixSource === "user");
 }
 

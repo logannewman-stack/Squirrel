@@ -29,6 +29,7 @@ export const INTENTS = {
   QUERY_FREE: "query_free",
   QUERY_NEXT: "query_next",
   SWAP_EVENTS: "swap_events",
+  EDIT_ATTENDEES: "edit_attendees",
   SPREAD_TASK: "spread_task",
   PLAN_DAY: "plan_day",
   HELP: "help",
@@ -150,6 +151,16 @@ const SAYS_DUE = /\b(?:is |isn'?t |is not )?(?:due|not due until|needed by|wante
 const SAYS_REOPEN = /\b(?:re-?open|un-?complete|un-?tick|un-?check|not done|isn'?t done|didn'?t (?:actually )?finish|still open|mark .* (?:as )?(?:not done|undone|open))\b/i;
 const SAYS_TASK_DELETE = /\b(?:delete|remove|drop|bin|scrap|get rid of)\b[^.]*\btasks?\b|\btasks?\b[^.]*\b(?:delete|removed?)\b/i;
 const SAYS_RENAME = /\b(?:rename|re-?title|call it|title it|name it)\b/i;
+/**
+ * "The board call is about the term sheet."
+ *
+ * An agenda, stated. Kept separate from the location rule because "is on Zoom"
+ * and "is about the raise" want different fields, and separate from creation
+ * because the thing being described already exists.
+ */
+const SAYS_SUBJECT = /^(?:the|my|our)\s+.{2,40}?\s+(?:is|are|'s|will be)\s+(?:about|regarding|re:?|to (?:discuss|cover|go over))\s+.+$/i;
+/** "Make the board call a video call." "The standup is in person now." */
+const SAYS_FORMAT = /\b(?:make|makes?)\b[^.]*\ba (?:video call|phone call|zoom|call|voice call)\b|\b(?:is|are) (?:now )?(?:in person|remote|virtual|a video call|a phone call|on the phone|face to face)\b/i;
 
 /**
  * "The Meridian call is on Zoom."
@@ -182,6 +193,7 @@ export function isTaskEdit(body) {
   return (
     SAYS_LENGTH.test(s) || SAYS_PRIORITY.test(s) || SAYS_REOPEN.test(s) ||
     SAYS_TASK_DELETE.test(s) || SAYS_RENAME.test(s) || Boolean(placeIn(body)) ||
+    SAYS_SUBJECT.test(s) || SAYS_FORMAT.test(s) ||
     (SAYS_DUE.test(s) && /\b(?:the|my)\b/.test(s))
   );
 }
@@ -359,6 +371,115 @@ function parseProtect(text) {
   return { side, h, m };
 }
 
+
+/**
+ * Who is in a meeting, as opposed to whether the meeting exists.
+ *
+ * This was the most expensive gap in the whole parser. "Drop Bob from the
+ * standup" and "remove Priya from the board call" both reached the cancel
+ * rule — `drop` and `remove` are cancel verbs — and cancelled the meeting.
+ * The user asked to take one person off an invitation and lost the entire
+ * appointment, silently, with a cheerful confirmation.
+ *
+ * So this sits ahead of cancel, and ahead of create for the same reason on the
+ * other side: "add Tom to the board call" is not a new booking.
+ *
+ * The shape that distinguishes it is a person, a preposition, and a thing —
+ * `<verb> <someone> to|from <something>`. Without all three it is an ordinary
+ * add or an ordinary cancel, and stays one.
+ */
+const ATTENDEE_ADD =
+  /\b(?:add|invite|include|bring|loop|cc|copy|put|get)\s+(?:in\s+)?([\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:in\s?to|into|onto|to|on|in)\s+(.+)$/i;
+const ATTENDEE_DROP =
+  /\b(?:drop|remove|take|cut|kick|pull|uninvite|un-invite)\s+([\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:from|off(?:\s+of)?|out\s+of)\s+(.+)$/i;
+/** "Priya is joining the exec staff." "Bob can't make the board call." */
+const ATTENDEE_SAYS_IN =
+  /^([\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:is|are|'s|will be)\s+(?:joining|coming to|sitting in on|jumping on|dialling in to|dialing in to|in on)\s+(.+)$/i;
+const ATTENDEE_SAYS_OUT =
+  /^([\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:can'?t make|cannot make|can'?t do|is out of|isn'?t coming to|is not coming to|has dropped out of|dropped out of|is skipping|won'?t be at)\s+(.+)$/i;
+/** "Who's coming to the board call?" */
+const ATTENDEE_QUERY =
+  /\bwho(?:'s| is| are| else is)?\s+(?:coming|going|in|on|at|attending|joining|invited|dialling in|dialing in)\b|\bwho am i (?:meeting|seeing|talking to|speaking to|with)\b|\bwho'?s? on (?:my|the)\b/i;
+/** "It's just me on the standup now." */
+const ATTENDEE_CLEAR = /\bit'?s just me\b|\bjust me now\b|\bnobody else\b|\bno one else\b/i;
+
+/** Things that follow "from"/"to" but are not meetings. */
+const NOT_AN_EVENT = /^(?:my |the |our )?(?:calendar|schedule|diary|agenda|list|inbox|team|company|office)\b/i;
+
+export function parseAttendees(text) {
+  if (ATTENDEE_QUERY.test(text)) return { op: "list", who: null, phrase: text };
+  if (ATTENDEE_CLEAR.test(text)) return { op: "clear", who: null, phrase: text };
+
+  for (const [re, op] of [
+    [ATTENDEE_ADD, "add"], [ATTENDEE_DROP, "remove"],
+    [ATTENDEE_SAYS_IN, "add"], [ATTENDEE_SAYS_OUT, "remove"],
+  ]) {
+    const m = text.match(re);
+    if (!m) continue;
+    const who = m[1].trim();
+    const phrase = m[2].trim();
+    // "Take the standup off my calendar" has this exact shape and means delete
+    // the standup. The tell is what sits on either side: a meeting where the
+    // person should be, and a calendar where the meeting should be.
+    if (NOT_AN_EVENT.test(phrase)) continue;
+    if (!who || who.split(/\s+/).some((w) => NOT_A_NAME.has(w.toLowerCase()))) continue;
+    return { op, who: who.replace(/^\w/, (c) => c.toUpperCase()), phrase };
+  }
+  return null;
+}
+
+
+/**
+ * A booking stated rather than commanded.
+ *
+ * "I've got the dentist Friday at 9." "I'm seeing the lawyers Thursday at 11."
+ * "Bob asked for time Thursday afternoon." None of these contain a verb any
+ * booking rule was looking for, and all three are somebody telling their
+ * calendar what is going to happen.
+ *
+ * The guard is that something has to be *when*: without a day or a clock in
+ * the sentence, "I've got a lot on" and "there's a problem" match the same
+ * words and mean nothing schedulable.
+ */
+const REPORTED =
+  /\bi(?:'ve|ve| have) got\b|\bi'?m (?:seeing|meeting|visiting|taking|off to|due at|due in|flying|driving)\b|\bthere'?s an? [\w'’-]+\b|\bwe'?re (?:meeting|having|seeing)\b|\basked (?:me )?for (?:time|\d+\s*(?:mins?|minutes?|hours?)|an hour|half an hour)\b/i;
+
+function isReportedBooking(body) {
+  if (!REPORTED.test(body)) return false;
+  return hasClock(body) || Boolean(parseDate(body, new Date())) || DAYPART.test(body);
+}
+
+/** Morning, afternoon, evening — a when, without a clock. */
+const DAYPART = /\b(?:morning|afternoon|evening|tonight|midday|noon|lunchtime|all day)\b/i;
+
+
+/**
+ * Verbs that name an action rather than a calendar operation.
+ *
+ * Deliberately excludes book/schedule/move/cancel and friends: those mean
+ * something specific here and have their own rules. What is left is work —
+ * things a person does, which is exactly what a task is.
+ */
+const ACTION_VERB =
+  /^(?:go\s+)?(?:review|read|check|chase|follow up(?: on| with)?|draft|write|prepare|prep|send|sign|file|submit|pay|order|buy|print|update|fix|finish|finalis|finaliz|look (?:at|into|over)|go (?:over|through)|sort out|deal with|handle|reply to|respond to|confirm|ask|tell|speak to|talk to|catch up (?:on|with)|research|analys|analyz|build|ship|test|deploy|renew|refactor|email|call|ring|phone|text|message|ping|nudge|circle back|touch base|put together|pull together|work on|start|kick off|wrap up)\b/i;
+
+
+/** "Sometime Thursday", "whenever suits", "at some point" — a when with no when in it. */
+const VAGUE_WHEN =
+  /\b(?:some ?time|some ?point|at some point|whenever|when ?ever suits|any ?time|at your convenience|when you can|when i can|if i can|somewhere in there|at some stage)\b/i;
+
+
+/**
+ * Asked of her, not of the day.
+ *
+ * "Write me a poem" shares its verb with "write the board memo", and only one
+ * of them is a job to add to a list. The tell is the object: a poem is
+ * something she is being asked to produce, and producing it is exactly what
+ * she declines to pretend she can do.
+ */
+const ASKED_OF_HER =
+  /\b(?:poem|story|joke|song|essay|haiku|limerick|rap|script|screenplay|novel|lyrics|recipe|summary of|translation)\b/i;
+
 const RULES = [
   // First, and unmissable. Undo is the thing people reach for while something
   // is going wrong, and it must never be shadowed by a verb inside the same
@@ -371,6 +492,12 @@ const RULES = [
   // your calendar" — a question about the whole week, answered as a failed
   // lookup of a meeting called "I".
   [INTENTS.PLAN_DAY, /\bwhat should i (?:drop|cut|skip|postpone|shelve|lose|let go)\b|\bwhat (?:can|could) i (?:drop|cut|skip)\b|\bwhat (?:has to|needs to|should) (?:go|give)\b/],
+  // Ahead of cancel, because "drop Bob from the standup" used to delete the
+  // standup; ahead of create, because "add Tom to the board call" is not a new
+  // booking; and ahead of invite, because "invite Bob to the standup" is a
+  // request to put Bob on the invitation. Sending it is a separate thing, and
+  // the one Squirrel cannot do.
+  [INTENTS.EDIT_ATTENDEES, (body) => Boolean(parseAttendees(body))],
   [INTENTS.INVITE, /\b(invite|send (?:an? )?invit|email .* about|send .* (?:the )?(?:invite|calendar))\b/],
   // Very early, and deliberately narrow. "Finish" belongs to completing a task
   // and "how many hours" to progress, so both are only surrendered when the
@@ -397,7 +524,7 @@ const RULES = [
   // deletion, and either of those would have read it as one.
   [INTENTS.CREATE_EVENT, (body) => Boolean(parseProtect(body))],
   [INTENTS.SWAP_EVENTS, /\b(?:swap|switch|exchange|trade|flip)\b[^.]*\b(?:and|with|for|round|around)\b/],
-  [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|slid(?:e|ing)|bring\w*\s+(?:it|that|them|the|my|forward)|pull\w*\s+(?:it|that|them|the|my)\b)\b/],
+  [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|slid(?:e|ing)|switch\w*|put off|putting off|defer\w*|bring\w*\s+(?:it|that|them|the|my|forward)|pull\w*\s+(?:it|that|them|the|my)\b)\b/],
   // Before cancel, after move: "move everything on Friday to Monday" is a bulk
   // move and stays a move; "cancel everything on Friday" is a bulk clear.
   [INTENTS.CLEAR_RANGE, isClearRange],
@@ -405,16 +532,16 @@ const RULES = [
   // after "cancel", so the strict form missed every past-tense report — and
   // people report as often as they command. "The exec staff is cancelled" is
   // not a request but it means exactly one thing.
-  [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b|\b(?:don'?t|do not|dont|didn'?t) (?:need|want)\b.*\b(?:any ?more|any longer)?\b|\bnot happening\b|\bfell through\b|\bwe'?re not doing\b/],
+  [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch|skip|get rid of)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b|\b(?:don'?t|do not|dont|didn'?t) (?:need|want)\b.*\b(?:any ?more|any longer)?\b|\b(?:not|isn'?t|is not|aren'?t|are not) happening\b|\bfell through\b|\bwe'?re not doing\b|\b(?:can'?t|cannot|won'?t|will not|unable to) (?:make|do|attend|be at|get to)\b|\bbail(?:ing)? on\b|\b(?:back|backing|pull|pulling) out of\b|\bhave to (?:miss|skip)\b|\bgoing to (?:miss|skip)\b|\bgonna (?:miss|skip)\b/],
   // "mark ... as done" allows words in between — that is how people write it.
-  [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b/],
+  [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b|\b(?:is|are|'s) (?:done|finished|complete|sorted|handled|out of the way)\b|\bi'?ve (?:done|finished|completed|sorted)\b|\ball done\b|\bwrapped up\b/],
   // `give (?!me)`: "give me something to do" is someone asking for work, not
   // handing it over, and it was being answered with "delegate it to whom?".
-  [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|hand over|assign|give\s+(?!me\b|us\b)[^.]{2,30}?\s+to)\b/],
+  [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|hand over|assign|pass (?:it |that |the |this )?(?:on |over )?to|(?:hand|give|pass)\s+(?!me\b|us\b)[^.]{2,30}?\s+to)\b/],
   // Before MOVE, because "shorten"/"extend" are edits to length rather than
   // to when — and "push the review out by an hour" is genuinely ambiguous, so
   // the explicit length verbs win.
-  [INTENTS.RESIZE_EVENT, /\b(shorten|lengthen|extend|trim|cut)\b.*\b(?:to|by|in half)\b|\bmake\b.*\b(?:\d+|one|two|three|four|five|half)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)/],
+  [INTENTS.RESIZE_EVENT, /\bknock\b[^.]*\boff\b|\badd\s+[^.]{0,16}?\b(?:\d+|an?|half an?)\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b[^.]*\bto\b|\bgive (?:it|them|that|the [\w'’-]+(?:\s+[\w'’-]+)?)\s+another\b|\b(?:it|that|this|the\s+[\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:only\s+)?needs?\s+(?:only\s+)?\d+\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b|\b(shorten|lengthen|extend|trim|cut)\b.*\b(?:to|by|in half)\b|\bmake\b.*\b(?:\d+|one|two|three|four|five|half)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)/],
   // Questions about one specific thing on the calendar, which want a fact
   // rather than a day's worth of listing.
   // "When is my next meeting" is a question about the calendar, not about a
@@ -423,18 +550,23 @@ const RULES = [
   // ordinary question anyone asks a diary. Placed ahead of it for that reason;
   // MOVE and CANCEL still win, so "move my next meeting" is a move.
   [INTENTS.QUERY_NEXT, /\b(?:what|when|which)(?:'s| is)?\s+(?:my |the )?next\b|\bwhat'?s (?:up )?next\b|\bnext (?:meeting|thing|one|up|appointment|call)\b|\bwhat'?s after (?:this|that)\b|\bhow long (?:until|till|til|to) (?:my |the )?next\b/],
-  [INTENTS.QUERY_EVENT, /\b(?:where(?:'s| is)|how long is|who am i (?:meeting|seeing)|is .* still on|when(?:'s| is) (?:my|the)|what time is (?:my|the))\b/],
+  [INTENTS.QUERY_EVENT, /\b(?:where(?:'s| is)|how long is|is .* still on|when(?:'s| is) (?:my|the)|what time is (?:my|the))\b/],
   [INTENTS.QUERY_PROGRESS, /\bhow much (?:time|have i|did i)\b|\bhow am i doing\b|\bwhat did i (?:do|finish|get done)\b|\bhow many hours\b|\bhow'?s my (?:focus|week)\b/],
   [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|gaps?|any time|when can i|spare (?:time|hour|minutes?))\b/],
-  [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left)|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
+  [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double ?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
   // A series, not a booking. Checked before create, or only the first one of
   // twelve ever reaches the calendar.
-  [INTENTS.REPEAT_EVENT, /\bevery (?:day|weekday|week|other week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:daily|weekly|fortnightly|biweekly|monthly)\b|\brepeat(?:s|ing)?\b|\brecurring\b|\beach (?:day|week|monday|tuesday|wednesday|thursday|friday)\b/],
+  [INTENTS.REPEAT_EVENT, /\bevery other (?:day|week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\bevery (?:day|weekday|week|other week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:daily|weekly|fortnightly|biweekly|monthly)\b|\brepeat(?:s|ing)?\b|\brecurring\b|\beach (?:day|week|monday|tuesday|wednesday|thursday|friday)\b/],
   // Booking verbs, which is most of them. Every one of these was a real
   // sentence that fell through to "I didn't catch that" — people reach for a
   // startling number of words for "put this on the calendar".
-  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hour|minutes?|time|slot)|add .* (?:meeting|call|event))\b/],
+  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hour|minutes?|time|slot)|add (?!.*\b(?:task|todo|to-do|reminder)\b).* (?:meeting|call|event))\b/],
+  // The reporting voice. "I've got the dentist Friday at 9" is a booking with
+  // no booking verb in it — people say what is happening as often as they ask
+  // for it to be arranged. Guarded on there being a day or a clock, so "I've
+  // got a lot on" stays the remark it is.
+  [INTENTS.CREATE_EVENT, isReportedBooking],
   [INTENTS.CREATE_TASK, /\b(add|create|new|remind me to|need to|todo)\b/],
 ];
 
@@ -490,6 +622,9 @@ const NOT_A_NAME = new Set([
   "us", "me", "you", "it", "client", "clients", "group", "staff", "room",
   "zoom", "google", "meet", "teams", "no", "yes", "regard", "regards",
   "respect", "time", "someone", "anyone", "each", "both", "all",
+  // First and third person. Without these, "I can't make the board call" was
+  // read as removing an attendee named "I" instead of as a cancellation.
+  "i", "we", "he", "she", "they", "nobody", "everybody",
 ]);
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -642,7 +777,7 @@ function stripVerbs(text) {
     // phrase loses its anchor, leaving the word "calendar" behind as a title.
     .replace(/\s*(?:it|this|that|them)?\s*\b(?:on|in)(?:to)?\s+(?:my|the)\s+(?:calendar|schedule|diary)\b/i, " ")
     .replace(
-      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|i need(?: to)?|i want(?: to)?|i'?d like|we need(?: to)?|i have to|i've got to|i gotta|mov(?:e|ing)|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
+      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|i need(?: to)?|i'?ve got|ive got|i have got|i'?m (?:seeing|meeting|visiting|taking|off to|flying to|driving to)|im (?:seeing|meeting|visiting)|there'?s an?|theres an?|there is an?|we'?re (?:meeting|having|seeing)|i want(?: to)?|i'?d like|we need(?: to)?|i have to|i've got to|i gotta|mov(?:e|ing)|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
       "",
     )
     .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder|appointment|sync|standup|stand-up|catch ?up|chat|block|slot|interview|review|1:1|one on one)\s+(?:to|for|called|named)?\s*/i, "")
@@ -686,8 +821,24 @@ function stripTemporal(text) {
 
 /** "with bob and Sarah" → ["Bob", "Sarah"]. Case-insensitive by design. */
 function extractPeople(text) {
+  // "Bob asked for time Thursday afternoon." The person is the subject of the
+  // sentence rather than the object of a "with", which is the only shape the
+  // pattern below can see.
+  const asked = text.match(/^([A-Z][\w'’-]+|[a-z][\w'’-]+)\s+asked\s+(?:me\s+)?for\b/);
+  if (asked && !NOT_A_NAME.has(asked[1].toLowerCase())) {
+    return [asked[1][0].toUpperCase() + asked[1].slice(1)];
+  }
+
   const m = text.match(/\bwith\s+([\w'-]+(?:\s*(?:,|and)\s*[\w'-]+)*)/i);
-  if (!m) return [];
+  if (!m) {
+    // "I need to see Tom at some point." Not every meeting is phrased with a
+    // "with" in it, and these verbs take a person as their direct object.
+    const direct = text.match(/\b(?:see|meet|catch up with|sit down with|speak to|talk to|call|ring|grab (?:coffee|lunch|a coffee) with)\s+([\w'’-]+)\b/i);
+    if (direct && !NOT_A_NAME.has(direct[1].toLowerCase()) && !KIND_NOUN.test(direct[1])) {
+      return [direct[1][0].toUpperCase() + direct[1].slice(1)];
+    }
+    return [];
+  }
   const out = [];
   for (const part of m[1].split(/\s*,\s*|\s+and\s+/)) {
     const w = part.trim();
@@ -735,10 +886,32 @@ function renameSubject(text) {
  * it is also how they say "on Friday" and "on my calendar". Both are stripped
  * before the result is judged empty, so those produce no subject at all.
  */
+/**
+ * Verbs that take "on" as part of the verb, not as a preposition.
+ *
+ * "A call on the term sheet" has a subject; "turn on the lights" does not, and
+ * reading one as the other left a task called "Turn" with its object filed as
+ * an agenda.
+ */
+const PHRASAL_ON = new Set([
+  "turn", "focus", "focusing", "focussed", "work", "working", "check", "checking",
+  "get", "getting", "move", "moving", "count", "counting", "rely", "relying",
+  "hold", "holding", "carry", "carrying", "go", "going", "put", "putting",
+  "press", "pressing", "switch", "switching", "log", "logged", "sign", "signing",
+  "based", "up", "in", "back", "keep", "keeping", "catch", "catching", "follow",
+  "following", "read", "reading", "sleep", "pass", "passing", "take", "taking",
+]);
+
 function extractSubject(text, people = []) {
-  const m = text.match(/\b(?:about|regarding|re:?|to discuss|to go over|covering|on)\s+(.+)$/i);
+  const m = text.match(/\b(about|regarding|re:?|to discuss|to go over|covering|on)\s+(.+)$/i);
   if (!m) return null;
-  const cleaned = stripTemporal(m[1])
+  // Bare "on" only marks a subject when the word in front of it isn't the rest
+  // of a phrasal verb.
+  if (/^on$/i.test(m[1])) {
+    const before = text.slice(0, m.index).trim().split(/\s+/).pop() || "";
+    if (PHRASAL_ON.has(before.toLowerCase().replace(/[^\w]/g, ""))) return null;
+  }
+  const cleaned = stripTemporal(m[2])
     .replace(withPhrase(people), " ")
     .replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "")
     .replace(/\s{2,}/g, " ")
@@ -783,6 +956,12 @@ function cleanTitle(text, people = [], subject = null) {
   // "a quick 15 with Priya" is fifteen minutes long, not a meeting called
   // "Quick 15" — the length is read elsewhere and has no business in the name.
   t = t.replace(/\b(?:quick|fast|short|brief|little)\s+\d{1,3}\b/gi, " ");
+  // "All day" is the shape of the booking, not its name — "the offsite is
+  // Friday all day" was producing a meeting called "Offsite is all day".
+  t = t.replace(/\b(?:is|are|runs?|goes)\s+(?:on\s+)?(?:all[- ]?day|the whole day|the entire day|the full day)\b/gi, " ");
+  t = t.replace(/\ball[- ]?day\b|\bwhole day\b|\bentire day\b|\bfull day\b/gi, " ");
+  // "Bob asked for time" says who and roughly how long. None of it is a name.
+  t = t.replace(/^\s*[\w'’-]+\s+asked\s+(?:me\s+)?for\s+(?:time|\d+\s*\w+|an? \w+|half an hour)?/i, " ");
   t = t.replace(/\s{2,}/g, " ").trim();
   // Peel connectors, articles, and stranded pronouns off both ends until
   // nothing changes: "for the board deck" is a phrase from the command,
@@ -891,6 +1070,7 @@ export function parse(text, now = new Date()) {
     }
   }
   const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;
+  const allDay = /\ball[- ]?day\b|\bwhole day\b|\bentire day\b|\bfull day\b/i.test(body);
 
   // "lunch with priya friday at 12" — nobody writes a verb in front of that.
   // A meeting noun with a time attached is a booking, and the only reason it
@@ -910,6 +1090,38 @@ export function parse(text, now = new Date()) {
   // Only reached when every rule above declined, so the verbs that mean
   // something else have already had their turn.
   if (intent === INTENTS.UNKNOWN && durationMins && (people.length || kindNoun || dateOnly || timeOnly)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  // "Meet Priya Thursday at 3." A person and a time, with no booking verb
+  // anywhere — which is a complete request and was falling through because
+  // every rule wanted to be told what to do with it first.
+  if (intent === INTENTS.UNKNOWN && people.length && (dateOnly || timeOnly)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  // A bare imperative with no clock in it is a job to do. "Review the term
+  // sheet." "Chase legal about the lease." This is also what is left after the
+  // polite wrapper takes "I need to" off the front, which is most of how
+  // anyone actually adds work — and every one of those was falling through.
+  if (intent === INTENTS.UNKNOWN && !timeOnly && !ASKED_OF_HER.test(s) &&
+      ACTION_VERB.test(unwrap(body).trim())) {
+    intent = INTENTS.CREATE_TASK;
+  }
+
+  // "Sometime Thursday." "I need to see Tom at some point."
+  //
+  // A booking whose whole content is that the time is not decided yet. There
+  // is nothing to schedule from, which is why these fell through — but the
+  // right answer is a question about what and when, not "I didn't catch that".
+  if (intent === INTENTS.UNKNOWN && VAGUE_WHEN.test(s) && (dateOnly || people.length || kindNoun)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  // "The offsite is Friday, all day." A day with no clock in it is still a
+  // booking, and the reason it never looked like one is that every rule wanted
+  // a time it was never going to find.
+  if (intent === INTENTS.UNKNOWN && allDay && dateOnly) {
     intent = INTENTS.CREATE_EVENT;
   }
 
@@ -964,6 +1176,11 @@ export function parse(text, now = new Date()) {
     nudge: when?.hadTime ? null : parseNudge(body),
     // Which side of the named time has to stay empty, if either.
     protect: parseProtect(body),
+    // "The offsite is Friday all day" — a span rather than a start time, and
+    // measured against the working day rather than midnight to midnight.
+    allDay,
+    // Who goes on or comes off an invitation, and which one.
+    attendees: parseAttendees(body),
   };
 
   // A fragment carries information but no verb: "for friday", "make it 30 min",

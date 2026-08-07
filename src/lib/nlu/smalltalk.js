@@ -111,7 +111,10 @@ const RULES = [
   // General knowledge, which she genuinely does not have. Detected on purpose
   // so she can say so instead of falling through to "I didn't catch that",
   // which reads as a failure rather than a boundary.
-  [SMALL.OUTSIDE, /\b(?:capital of|weather|who (?:is|was|invented|won)|what is the (?:capital|population|meaning)|how tall|how far|translate|define|recipe|news|score|stock price|joke|poem|story|write me)\b/i],
+  // "Who is …" is general knowledge unless it is about who is in the room.
+  // Without the exception, "who is on the board call" was answered "that's
+  // outside what I know" — about the user's own calendar.
+  [SMALL.OUTSIDE, /\b(?:capital of|weather|who (?:is|was)(?!\s+(?:coming|going|in|on|at|attending|joining|invited|dial|else|with|my|i))|who (?:invented|won)|what is the (?:capital|population|meaning)|how tall|how far|translate|define|recipe|news|score|stock price|joke|poem|story|write me)\b/i],
 ];
 
 const COURTESY = new Set([

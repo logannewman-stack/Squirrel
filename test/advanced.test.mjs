@@ -315,4 +315,101 @@ const at = (e) => `${e.start}→${e.end}`;
   t("a bare ok is answered, not queried", !r.miss, `${r.intent} | ${r.text}`);
 }
 
+// ------------------------------------------------------------- attendees
+// The worst bug the vocabulary sweep found, and it did not look like a bug
+// from the outside: "drop Bob from the standup" reached the cancel rule —
+// `drop` is a cancel verb — and deleted the standup. Someone asking to take
+// one person off an invitation lost the appointment and got a confirmation
+// for it. Every case here checks the meeting is still there afterwards.
+function withPeople() {
+  reset({ confirm: false });
+  store.addEvent({
+    title: "Board call", start: iso(2026, 3, 11, 14, 0), end: iso(2026, 3, 11, 15, 0),
+    attendees: [{ name: "Priya" }, { name: "Bob" }],
+  });
+  store.addEvent({ title: "Standup", start: iso(2026, 3, 12, 9, 0), end: iso(2026, 3, 12, 9, 15) });
+  return store.getState;
+}
+const who = (title) => (ev(title)?.attendees || []).map((a) => a.name);
+
+{
+  const s = withPeople();
+  say("drop Bob from the board call", s);
+  t("dropping a person leaves the meeting standing", Boolean(ev("Board call")), evs().map((e) => e.title).join(" · "));
+  t("and takes only that person off", JSON.stringify(who("Board call")) === '["Priya"]', JSON.stringify(who("Board call")));
+  t("and does not touch the times",
+    ev("Board call").start === iso(2026, 3, 11, 14, 0), at(ev("Board call")));
+}
+{
+  const s = withPeople();
+  say("remove Priya from the board call", s);
+  t("so does remove", Boolean(ev("Board call")) && JSON.stringify(who("Board call")) === '["Bob"]',
+    JSON.stringify(who("Board call")));
+}
+{
+  const s = withPeople();
+  say("add Tom to the standup", s);
+  t("adding a person keeps the ones already there",
+    JSON.stringify(who("Standup")) === '["Tom"]', JSON.stringify(who("Standup")));
+  say("add Priya to the standup", s);
+  t("and appends rather than replacing",
+    JSON.stringify(who("Standup")) === '["Tom","Priya"]', JSON.stringify(who("Standup")));
+}
+{
+  const s = withPeople();
+  // Squirrel cannot send mail, but it can keep the list right, which is what
+  // the sentence is actually asking for.
+  say("invite Tom to the board call", s);
+  t("invite adds locally instead of refusing", who("Board call").includes("Tom"), JSON.stringify(who("Board call")));
+}
+{
+  const s = withPeople();
+  const r = say("send an invite for the board call", s);
+  t("but sending one is still declined honestly", /email/i.test(r.text), r.text);
+}
+{
+  const s = withPeople();
+  const r = say("add Tom to the board call", s);
+  const again = say("add Tom to the board call", s);
+  t("adding the same person twice says so", /already on/i.test(again.text), again.text);
+  t("and does not duplicate", who("Board call").filter((n) => n === "Tom").length === 1,
+    JSON.stringify(who("Board call")));
+}
+{
+  const s = withPeople();
+  const r = say("drop Tom from the board call", s);
+  t("removing someone who isn't there names who is",
+    /isn't on/i.test(r.text) && /Priya/.test(r.text), r.text);
+  t("and changes nothing", who("Board call").length === 2, JSON.stringify(who("Board call")));
+}
+{
+  const s = withPeople();
+  say("it's just me on the board call now", s);
+  t("clearing empties the list", who("Board call").length === 0, JSON.stringify(who("Board call")));
+  t("and still leaves the meeting", Boolean(ev("Board call")));
+}
+{
+  const s = withPeople();
+  const r = say("who's coming to the board call", s);
+  t("asking who lists them", /Priya/.test(r.text) && /Bob/.test(r.text), r.text);
+  t("and is not answered as general knowledge", !/outside what I know/i.test(r.text), r.text);
+}
+{
+  const s = withPeople();
+  const r = say("who's coming to the standup", s);
+  t("an empty list says just you", /just you/i.test(r.text), r.text);
+}
+// The shape that must NOT be read as an attendee edit.
+{
+  const s = withPeople();
+  say("take the standup off my calendar", s);
+  t("taking a meeting off the calendar still cancels it", !ev("Standup"), evs().map((e) => e.title).join(" · "));
+}
+{
+  const s = withPeople();
+  say("I can't make the board call", s);
+  t("a first-person excuse cancels rather than removing a person called I",
+    !ev("Board call"), evs().map((e) => e.title).join(" · "));
+}
+
 report("Advanced scheduling and conversation");

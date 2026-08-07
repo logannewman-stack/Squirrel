@@ -1192,6 +1192,37 @@ export function ask(text, state, opts = {}) {
         slots.anchorTitle = at.title;
       }
 
+      /**
+       * "The offsite is Friday, all day."
+       *
+       * No start time, because there isn't one — the answer is the working day
+       * itself. Measured against the user's own hours rather than midnight to
+       * midnight, since a block starting at 00:00 is true and useless.
+       */
+      if (slots.allDay && slots.dateOnly) {
+        const h = hoursOf(state.settings);
+        const from = atLocal(slots.dateOnly, Math.floor(h.start), Math.round((h.start % 1) * 60));
+        const to = atLocal(slots.dateOnly, Math.floor(h.end), Math.round((h.end % 1) * 60));
+        const dayName = describe(from, now).split(" at ")[0];
+        // A day blocked out with nothing named is "Busy", not "Meeting" —
+        // there is nobody to meet and the point is that the day is gone.
+        const title = slots.title || slots.subject || slots.people?.length ? composeTitle(slots) : "Busy";
+        return gate(`“${title}” all day ${dayName}`, () => {
+          const made = addEvent({
+            title,
+            start: toLocalIso(from),
+            end: toLocalIso(to),
+            attendees: (slots.people || []).map((name) => ({ name })),
+            notes: slots.subject || "",
+          });
+          return reply(
+            `“${title}” blocked out all day ${dayName}, ${fmtTime(from)} to ${fmtTime(to)}.`,
+            [{ summary: `Added “${title}”, all day` }],
+            { entity: { kind: "event", id: made.id }, day: dayKey(from) },
+          );
+        });
+      }
+
       if (!slots.when) return needs("When should I put it? A day and time works — “Thursday at 10”.");
       const people = slots.people || [];
       // A bare time belongs to the day being discussed. Asked "what does Friday
@@ -1343,6 +1374,115 @@ export function ask(text, state, opts = {}) {
      * Planned work counts as much as meetings. A day laid out by the scheduler
      * and then described as empty is a schedule nobody trusts twice.
      */
+    /**
+     * Who is in a meeting.
+     *
+     * The most expensive gap the sweep found, and not because it was missing —
+     * because of where the sentences landed instead. "Drop Bob from the
+     * standup" reached the cancel rule, since `drop` is a cancel verb, and
+     * deleted the standup. Someone asking to take one person off an invitation
+     * lost the appointment, and got a cheerful confirmation for it.
+     *
+     * Adding a name here does not send anything. Squirrel has no mail, and
+     * says so when asked to send; what it can do is keep the list right, which
+     * is what "invite Bob to the standup" is actually asking for.
+     */
+    case INTENTS.EDIT_ATTENDEES: {
+      const spec = slots.attendees;
+      // The phrase after the preposition names the meeting. For a bare
+      // question — "who's coming?" — there is no phrase, so the thread decides.
+      const ranked = opts.resolvedId
+        ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
+        : resolveEvent(spec.op === "list" || spec.op === "clear" ? p.body : spec.phrase, state.events, now);
+
+      if (!ranked.length) {
+        const day = spec.op === "list" ? topicDay(memory, now) : null;
+        if (day) {
+          const on = inRange(state.events, dayRange(day, now));
+          const people = [...new Set(on.flatMap((e) => (e.attendees || []).map((a) => a.name)))];
+          return reply(
+            people.length
+              ? `${joinNames(people)} — across ${on.length} ${on.length === 1 ? "meeting" : "meetings"}.`
+              : "Nobody named on anything that day.",
+            [], { day: dayKey(day) },
+          );
+        }
+        return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
+      }
+      if (!isConfident(ranked)) {
+        return askWhich("Which one?", {
+          kind: "event", intent: "attendees", text: p.text,
+          options: ranked.slice(0, 4).map(({ item }) => ({
+            id: item.id, label: `${item.title} \u00b7 ${describe(new Date(item.start), now)}`,
+          })),
+        });
+      }
+
+      const ev = ranked[0].item;
+      const list = ev.attendees || [];
+      const names = list.map((a) => a.name);
+
+      if (spec.op === "list") {
+        return reply(
+          names.length
+            ? `${joinNames(names)}${names.length === 1 ? " is" : " are"} on \u201c${ev.title}\u201d.`
+            : `Nobody else is on \u201c${ev.title}\u201d \u2014 just you.`,
+          [], { entity: { kind: "event", id: ev.id }, day: dayKey(new Date(ev.start)) },
+        );
+      }
+
+      if (spec.op === "clear") {
+        if (!names.length) return reply(`\u201c${ev.title}\u201d already has nobody else on it.`);
+        return gate(`taking ${joinNames(names)} off \u201c${ev.title}\u201d`, () => {
+          updateEvent(ev.id, { attendees: [] });
+          return reply(
+            `\u201c${ev.title}\u201d is just you now.`,
+            [{ summary: `Cleared ${names.length} from \u201c${ev.title}\u201d` }],
+            { entity: { kind: "event", id: ev.id }, day: dayKey(new Date(ev.start)) },
+          );
+        });
+      }
+
+      if (spec.op === "add") {
+        if (names.some((n) => n.toLowerCase() === spec.who.toLowerCase())) {
+          return reply(`${spec.who} is already on \u201c${ev.title}\u201d.`, [],
+            { entity: { kind: "event", id: ev.id } });
+        }
+        return gate(`adding ${spec.who} to \u201c${ev.title}\u201d`, () => {
+          updateEvent(ev.id, { attendees: [...list, { name: spec.who }] });
+          return reply(
+            `${spec.who} is on \u201c${ev.title}\u201d, ${describe(new Date(ev.start), now)}.` +
+            (names.length ? ` With ${joinNames(names)}.` : ""),
+            [{ summary: `Added ${spec.who} to \u201c${ev.title}\u201d` }],
+            { entity: { kind: "event", id: ev.id }, day: dayKey(new Date(ev.start)) },
+          );
+        });
+      }
+
+      // remove
+      const hit = names.find((n) => n.toLowerCase() === spec.who.toLowerCase());
+      if (!hit) {
+        return reply(
+          names.length
+            ? `${spec.who} isn't on \u201c${ev.title}\u201d \u2014 ${joinNames(names)} ${names.length === 1 ? "is" : "are"}.`
+            : `Nobody is on \u201c${ev.title}\u201d to remove.`,
+          [], { entity: { kind: "event", id: ev.id } },
+        );
+      }
+      const left = list.filter((a) => a.name.toLowerCase() !== spec.who.toLowerCase());
+      return gate(`taking ${hit} off \u201c${ev.title}\u201d`, () => {
+        updateEvent(ev.id, { attendees: left });
+        return reply(
+          `${hit} is off \u201c${ev.title}\u201d.` +
+          (left.length
+            ? ` ${joinNames(left.map((a) => a.name))} still on.`
+            : " The meeting is still there \u2014 say \u201ccancel it\u201d if it should go too."),
+          [{ summary: `Removed ${hit} from \u201c${ev.title}\u201d` }],
+          { entity: { kind: "event", id: ev.id }, day: dayKey(new Date(ev.start)) },
+        );
+      });
+    }
+
     /**
      * "Swap the standup and the board call."
      *
