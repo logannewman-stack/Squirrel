@@ -258,3 +258,51 @@ input[type="date"], input[type="time"] { color-scheme: light; }
   0%, 100% { transform: rotate(0deg); }
   50% { transform: rotate(-4deg) translateY(-0.5px); }
 }
+
+/* ------------------------------------------------------- the floating button
+   She is one tap from anywhere. The button that reaches her floats over every
+   screen rather than living in a tab, because the assistant is not a place you
+   go — it is a thing you ask, and asking should not cost a navigation.
+
+   In the tab bar she took the tab's colour; here she is filled onto her own
+   disc, so she reads as a single object with weight rather than an icon
+   dropped on a circle. */
+.sq-fab .sq-fill { fill: var(--paper); }
+
+/* Rising in: a short lift and settle, so the button arrives rather than
+   blinks. Paired with the scrim and sheet so the whole gesture is one motion. */
+.sq-fab-in { animation: sq-fab-in 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes sq-fab-in {
+  from { transform: translateY(10px) scale(0.9); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* Press: she yields a little, the way a physical button would. */
+.sq-fab:active { transform: scale(0.94); }
+.sq-fab { transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 200ms ease; }
+
+/* The attention ring. Reserved, like the colour it borrows: it appears only
+   when something is overdue or will not fit, and a single slow pulse draws the
+   eye once without becoming a thing that flickers in your peripheral vision
+   all day. */
+.sq-fab-ring {
+  animation: sq-fab-ring 2.6s ease-out infinite;
+}
+@keyframes sq-fab-ring {
+  0%        { transform: scale(1); opacity: 0.55; }
+  55%, 100% { transform: scale(1.5); opacity: 0; }
+}
+
+/* The scrim and sheet, entering together. */
+.sq-scrim { animation: sq-fade 200ms ease-out; }
+@keyframes sq-fade { from { opacity: 0; } to { opacity: 1; } }
+.sq-sheet { animation: sq-rise 300ms cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes sq-rise {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sq-fab-in, .sq-fab-ring, .sq-scrim, .sq-sheet { animation: none !important; }
+  .sq-fab { transition: none; }
+}

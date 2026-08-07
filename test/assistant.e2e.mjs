@@ -451,7 +451,8 @@ await p.getByPlaceholder(/^With/).fill("Bob, John");
 await p.getByPlaceholder(/^About/).fill("the Q3 pipeline");
 await p.getByRole("button", { name: "Add" }).click();
 
-await p.getByRole("button", { name: "Assistant" }).click();
+// The assistant is reached from the floating button now, not a tab.
+await p.getByRole("button", { name: "Ask Squirrel" }).click();
 // Selected by role: the placeholder changes with whether the browser can hear.
 await p.getByRole("textbox").fill("what do i have today");
 await p.getByRole("button", { name: "Send" }).click();
@@ -513,6 +514,12 @@ const missed = await p.evaluate(async () => {
 });
 ui.push(["a miss typed into the UI reaches the log", missed.count === 1, JSON.stringify(missed)]);
 ui.push(["and the log holds what was typed", missed.text === "turn on the lights", missed.text]);
+
+// The assistant is a sheet now, and its scrim covers the nav — close it before
+// navigating anywhere. Escape is the documented way out.
+await p.keyboard.press("Escape");
+await p.waitForTimeout(300);
+ui.push(["the sheet closes on Escape", (await p.getByRole("dialog").count()) === 0]);
 
 await p.getByRole("button", { name: "Settings" }).click();
 const panel = p.locator("section").filter({ hasText: "What she missed" }).first();

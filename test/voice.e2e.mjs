@@ -64,7 +64,8 @@ await p.evaluate(async () => {
   s.setSetting("voice", { speak: true, handsFree: true, rate: 1 });
 });
 await p.reload({ waitUntil: "networkidle" });
-await p.getByRole("button", { name: "Assistant" }).click();
+// The assistant is reached from the floating button now, not a tab.
+await p.getByRole("button", { name: "Ask Squirrel" }).click();
 await p.waitForTimeout(400);
 
 // 1. The microphone opens.

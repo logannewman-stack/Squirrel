@@ -4,7 +4,8 @@ import Calendar from "./components/Calendar";
 import Projects from "./components/Projects";
 import ProjectDetail from "./components/ProjectDetail";
 import Insights from "./components/Insights";
-import Assistant from "./components/Assistant";
+import AssistantFab from "./components/AssistantFab";
+import AssistantSheet from "./components/AssistantSheet";
 import Settings from "./components/Settings";
 import FocusScreen from "./components/FocusScreen";
 import EventDialog from "./components/EventDialog";
@@ -13,7 +14,7 @@ import CommandPalette from "./components/CommandPalette";
 import Squirrel from "./components/Squirrel";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
-  remainingOf, toggleTask, setSetting, setPlan,
+  remainingOf, toggleTask, setSetting, setPlan, dayKey,
 } from "./lib/store";
 import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
@@ -45,9 +46,6 @@ const TABS = [
   ["calendar", "Calendar", "M4 8h16M4 8a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V8zM9 4v4M15 4v4"],
   ["projects", "Projects", "M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"],
   ["insights", "Insights", "M5 19V11M10 19V5M15 19v-6M20 19v-9"],
-  // No path: her tab is the squirrel herself, so the brand mark is on screen
-  // at all times without a logo bolted anywhere.
-  ["assistant", "Assistant", null],
 ];
 
 export default function App() {
@@ -58,6 +56,7 @@ export default function App() {
   const [newEvent, setNewEvent] = useState(false);
   // The event being edited, if any. One dialog does both jobs.
   const [editingEvent, setEditingEvent] = useState(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [palette, setPalette] = useState(false);
   const [, force] = useState(0);
 
@@ -274,14 +273,19 @@ export default function App() {
       />
     ) : view.name === "insights" ? (
       <Insights state={state} />
-    ) : view.name === "assistant" ? (
-      <Assistant state={state} />
     ) : (
       <Settings state={state} onBack={() => setView({ name: "today" })} />
     );
 
+  // The alert ring on her button means one thing, the same way the colour
+  // does: something is overdue or will not fit. Nothing else lights it.
+  const todayKey = dayKey();
+  const overdue = state.tasks.filter((t) => !t.done && t.due && t.due < todayKey).length;
+  const attention = overdue > 0 || (state.shortfalls?.length ?? 0) > 0;
+  const anyModal = assistantOpen || newEvent || Boolean(editingEvent) || palette;
+
   const isActive = (n) => view.name === n || (n === "projects" && view.name === "project");
-  const fullHeight = view.name === "calendar" || view.name === "assistant";
+  const fullHeight = view.name === "calendar";
 
   return (
     <div className="flex h-dvh flex-col">
@@ -328,6 +332,17 @@ export default function App() {
           <span className="w-full truncate text-center text-[10px] font-medium">Settings</span>
         </button>
       </nav>
+
+      <AssistantFab
+        onClick={() => setAssistantOpen(true)}
+        hidden={anyModal}
+        attention={attention}
+      />
+      <AssistantSheet
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        state={state}
+      />
 
       {(newEvent || editingEvent) && (
         <EventDialog

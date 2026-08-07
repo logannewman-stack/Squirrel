@@ -17,7 +17,7 @@ import Squirrel from "./Squirrel";
  */
 const THINK_MS = { calendar: 900, pen: 650 };
 
-export default function Assistant({ state }) {
+export default function Assistant({ state, onClose }) {
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(null);
   const [pendingChoice, setPendingChoice] = useState(null);
@@ -35,7 +35,13 @@ export default function Assistant({ state }) {
   const hasVoice = canSpeak();
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    if (!scroller.current) return;
+    // An empty conversation opens at the top — the intro and suggestions are
+    // the point of it. A conversation with anything in it follows the newest
+    // line down. Without the first case, opening the sheet auto-scrolled past
+    // the intro to the last suggestion.
+    const top = chat.length === 0 ? 0 : scroller.current.scrollHeight;
+    scroller.current.scrollTo({ top, behavior: chat.length === 0 ? "auto" : "smooth" });
   }, [chat.length, thinking, pendingChoice, heard]);
 
   // A pending timeout that fires after unmount would append to a dead view —
@@ -169,7 +175,7 @@ export default function Assistant({ state }) {
             <Squirrel size={34} pose={thinking || talking ? "thinking" : "idle"} title="Squirrel" />
           </span>
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold tracking-tight">Assistant</h1>
+            <h1 className="truncate text-lg font-semibold tracking-tight">Squirrel</h1>
             <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
               {listening
                 ? "Listening…"
@@ -204,28 +210,45 @@ export default function Assistant({ state }) {
               Clear
             </button>
           )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="grid h-9 w-9 place-items-center rounded-md text-[var(--muted)]
+                         transition-colors hover:bg-[var(--hover)] hover:text-[var(--ink)]"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current stroke-[1.6]">
+                <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
         </div>
       </header>
 
       <div ref={scroller} className="flex-1 overflow-y-auto px-6 py-6">
         {chat.length === 0 && !thinking && (
-          <div className="mx-auto max-w-lg">
-            <div className="mb-6 flex flex-col items-center text-center">
-              <Squirrel size={72} />
+          <div className="mx-auto flex h-full max-w-lg flex-col justify-center">
+            <div className="mb-7 flex flex-col items-center text-center">
+              <Squirrel size={64} />
               <p className="mt-3 max-w-xs text-sm text-[var(--muted)]">
-                Ask for anything on your calendar, your tasks, or your projects.
+                Ask for anything on your calendar, tasks, or projects — or just say what changed.
               </p>
             </div>
-            <p className="label mb-3">Try</p>
+            {/* A handful, not the whole catalogue. The empty state is an
+                invitation, and an invitation with thirteen options is a menu. */}
+            <p className="label mb-2.5">Try one</p>
             <div className="space-y-2">
-              {EXAMPLES.map((e) => (
+              {EXAMPLES.slice(0, 5).map((e) => (
                 <button
                   key={e}
                   onClick={() => run(e)}
-                  className="block w-full rounded-md border border-[var(--line)] px-4 py-3
-                             text-left text-sm transition-colors hover:border-[var(--ink)]"
+                  className="flex w-full items-center gap-2.5 rounded-lg border border-[var(--line)] px-4 py-3
+                             text-left text-sm transition-colors hover:border-[var(--ink)] hover:bg-[var(--hover)]"
                 >
-                  {e}
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 fill-none stroke-[var(--faint)] stroke-[1.8]">
+                    <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>{e}</span>
                 </button>
               ))}
             </div>
