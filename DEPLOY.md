@@ -252,14 +252,50 @@ request still spends one, which is the wrong way round for the user and the
 right way round for the bill — claiming afterwards leaves a window where
 concurrent requests all pass the check and the spend has no ceiling.
 
-### Stripe
+### Stripe — monthly subscriptions
 
-Create two recurring prices ($20/mo, $50/mo) and point `STRIPE_PRICE_PLUS` and
-`STRIPE_PRICE_PRO` at them. Add a webhook to `/api/stripe-webhook` subscribed to
-`customer.subscription.*`, and put its signing secret in `STRIPE_WEBHOOK_SECRET`.
+Create two **recurring monthly** prices ($20 and $50) and point
+`STRIPE_PRICE_PLUS` and `STRIPE_PRICE_PRO` at their price ids. Turn on the
+**customer portal** in Stripe's billing settings — `/api/portal` opens it, and
+without it customers cannot change a card, download an invoice, or cancel.
 
-Billing state is written only by the webhook under the service role. The client
-cannot promote itself, and `profiles`' update policy does not cover those columns.
+Add a webhook to `/api/stripe-webhook` subscribed to:
+
+| Event | What it does |
+|---|---|
+| `customer.subscription.*` | Grants, changes, and ends entitlement |
+| `checkout.session.completed` | Binds the Stripe customer to the account on a first purchase |
+| `invoice.payment_failed` | Raises the alert the customer sees in Settings → Plan |
+| `invoice.payment_succeeded` | Clears it once the card works again |
+
+Put the signing secret in `STRIPE_WEBHOOK_SECRET`.
+
+**Which plan someone is on is read from the price id on the subscription**, not
+from checkout metadata. Metadata is written once and never changes, so a
+customer who upgrades in the portal would otherwise pay for Pro and hold Plus.
+
+**`current_period_end` is read from the subscription items.** It was removed
+from the subscription object in a 2025 API version and this project pins one
+well past that — the old field returns `undefined`, and the date arithmetic on
+it throws, which made the webhook answer 500 to every subscription event.
+Stripe then retries for days and nothing ever activates. `test/billing.test.mjs`
+pins the shape.
+
+**A failed payment does not immediately cut access.** Stripe retries a declined
+card for days; `past_due` keeps the plan and shows a warning, and only `unpaid`
+or `canceled` drops to free. Locking someone out on the first decline loses a
+customer over an expired card.
+
+**Events are applied in order.** Stripe does not guarantee delivery order and
+retries aggressively, so each event's `created` time is compared against
+`profiles.billing_event_at` and anything older is dropped. Without it, a late
+webhook downgrades someone who has just upgraded.
+
+Billing state is written only by the webhook under the service role — and now
+enforced. Migration `0004_billing.sql` adds a trigger that reverts the plan and
+Stripe columns on any update not made by the service role. Before it, the RLS
+policy on `profiles` permitted `update({ plan: 'pro' })` from any signed-in
+client, which made paying optional. Apply that migration before taking money.
 
 ---
 

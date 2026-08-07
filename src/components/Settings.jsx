@@ -5,6 +5,7 @@ import Reminders from "./Reminders";
 import WorkingHours from "./WorkingHours";
 import VoiceSettings from "./VoiceSettings";
 import Misses from "./Misses";
+import Billing from "./Billing";
 import { configured as canSync } from "../lib/supabase";
 import { duration } from "../lib/format";
 
@@ -30,6 +31,16 @@ export default function Settings({ state, onBack }) {
         <h2 className="mb-2 font-medium">Account</h2>
         <Account email={state.settings?.email || null} />
       </section>
+
+      {canSync && (
+        <section className="mb-10">
+          <h2 className="mb-2 font-medium">Plan</h2>
+          <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
+            Billed monthly, cancel any time. The free tier is not a trial — it keeps working.
+          </p>
+          <Billing email={state.settings?.email || null} />
+        </section>
+      )}
 
       <section className="mb-10">
         <h2 className="mb-2 font-medium">How I address you</h2>
