@@ -147,6 +147,28 @@ export function parseDate(text, now = new Date()) {
   const s = text.toLowerCase();
   const base = atLocal(now, 0);
 
+  /**
+   * "The day after tomorrow." "A week today."
+   *
+   * Both have to be read before the plain words inside them, or the scan finds
+   * "tomorrow" and stops — which put a meeting a day early, and "a week today"
+   * squarely on today.
+   */
+  const shifted = s.match(
+    /\bthe day after tomorrow\b|\bday after tomorrow\b|\bthe day before yesterday\b|\b(?:a|one|1)\s+week\s+(today|tomorrow|from today|from now)\b|\b(?:a|one|1)\s+fortnight\s+(?:today|from today|from now)\b|\bthis time next week\b/,
+  );
+  if (shifted) {
+    const d = new Date(base);
+    const by =
+      /day after tomorrow/.test(shifted[0]) ? 2
+      : /day before yesterday/.test(shifted[0]) ? -2
+      : /fortnight/.test(shifted[0]) ? 14
+      : /week/.test(shifted[0]) && /tomorrow/.test(shifted[0]) ? 8
+      : 7;
+    d.setDate(d.getDate() + by);
+    return { date: d, source: shifted[0] };
+  }
+
   if (/\btoday\b|\btonight\b/.test(s)) return { date: base, source: "today" };
   if (/\btomorrow\b|\btmrw\b/.test(s)) {
     const d = new Date(base);

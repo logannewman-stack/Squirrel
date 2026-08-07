@@ -399,7 +399,7 @@ const ATTENDEE_SAYS_OUT =
   /^([\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:can'?t make|cannot make|can'?t do|is out of|isn'?t coming to|is not coming to|has dropped out of|dropped out of|is skipping|won'?t be at)\s+(.+)$/i;
 /** "Who's coming to the board call?" */
 const ATTENDEE_QUERY =
-  /\bwho(?:'s| is| are| else is)?\s+(?:coming|going|in|on|at|attending|joining|invited|dialling in|dialing in)\b|\bwho am i (?:meeting|seeing|talking to|speaking to|with)\b|\bwho'?s? on (?:my|the)\b/i;
+  /\bwho(?:'?s| is| are| else is)?\s+(?:coming|going|in|on|at|attending|joining|invited|dialling in|dialing in)\b|\bwho am i (?:meeting|seeing|talking to|speaking to|with)\b|\bwho'?s? on (?:my|the)\b/i;
 /** "It's just me on the standup now." */
 const ATTENDEE_CLEAR = /\bit'?s just me\b|\bjust me now\b|\bnobody else\b|\bno one else\b/i;
 
@@ -480,6 +480,71 @@ const VAGUE_WHEN =
 const ASKED_OF_HER =
   /\b(?:poem|story|joke|song|essay|haiku|limerick|rap|script|screenplay|novel|lyrics|recipe|summary of|translation)\b/i;
 
+
+/**
+ * A destructive verb that is not an instruction to be destructive.
+ *
+ * Two shapes, and both of them used to delete things. "Don't cancel the
+ * standup" cancelled the standup. So did "why did you cancel the standup",
+ * "did I cancel the board call", and "I don't want to cancel it" — the rules
+ * saw a cancel verb and an object and never looked at the word in front.
+ *
+ * This is a guard rather than another rule on purpose. Patching each verb
+ * would leave the next one exposed; one check in front of every destructive
+ * intent cannot be forgotten when a verb is added.
+ */
+const DESTRUCTIVE_VERB =
+  "cancel|delete|remove|drop|clear|wipe|scrap|bin|kill|axe|ditch|nix|mov(?:e|ed|ing)|reschedul|book|schedul|add|chang|shift|push|swap|undo|skip";
+
+/** "Don't cancel it." "I didn't mean to move it." "No need to delete that." */
+const NEGATED_COMMAND = new RegExp(
+  "\\b(?:do\\s?n'?t|do not|dont|never|no need to|didn'?t|did not|won'?t|will not|" +
+  "wouldn'?t|shouldn'?t|can'?t|cannot|stop)\\b" +
+  "(?:\\s+(?:you|me|i|we|to|want|wanna|need|mean|meant|going|gonna|have|had|it|that))*" +
+  "\\s+(?:" + DESTRUCTIVE_VERB + ")", "i");
+
+/**
+ * "Why did you cancel the standup?" A question about an action, not a request
+ * for one. Tested after the polite wrapper is stripped, so "could you cancel
+ * the standup" — which really is an instruction — has already lost its
+ * question-shaped opener by the time it gets here.
+ */
+const ASKED_ABOUT_ACTION = new RegExp(
+  "^\\s*(?:why|when|who|whom|what|did|do|does|have|has|had|was|were|should|shall|must|am|are|is)\\b" +
+  "[^?]*\\b(?:" + DESTRUCTIVE_VERB + ")", "i");
+
+/**
+ * Why a destructive sentence must not be carried out, or null.
+ *
+ * "I don't need the exec staff any more" is a real cancellation and stays one:
+ * the negation lands on the *thing*, not on the verb, and there is no
+ * destructive verb after it to negate.
+ */
+function refusalIn(body, bare) {
+  if (NEGATED_COMMAND.test(body)) return "negated";
+  if (ASKED_ABOUT_ACTION.test(bare)) return "asked";
+  return null;
+}
+
+
+/**
+ * Words that survive title-cleaning without ever being part of a name.
+ *
+ * A title made entirely of these is not a title — it is what is left when a
+ * sentence was all verb and pronoun, which is exactly what a follow-up is.
+ */
+const RESIDUE = new Set([
+  "move", "moves", "moved", "moving", "make", "makes", "made", "making",
+  "take", "takes", "taking", "took", "will", "would", "should", "could",
+  "spread", "split", "add", "adds", "set", "sets", "change", "changes",
+  "put", "puts", "give", "gives", "do", "does", "did", "go", "goes",
+  "shift", "push", "pull", "bump", "book", "schedule", "cancel", "clear",
+  "it", "that", "this", "them", "those", "these", "he", "she", "they",
+  "over", "under", "up", "down", "out", "in", "on", "at", "to", "for",
+  "and", "then", "also", "plus", "back", "now", "please", "just", "the",
+  "a", "an", "my", "our", "its", "is", "are", "was", "were", "be", "been",
+]);
+
 const RULES = [
   // First, and unmissable. Undo is the thing people reach for while something
   // is going wrong, and it must never be shadowed by a verb inside the same
@@ -550,11 +615,11 @@ const RULES = [
   // ordinary question anyone asks a diary. Placed ahead of it for that reason;
   // MOVE and CANCEL still win, so "move my next meeting" is a move.
   [INTENTS.QUERY_NEXT, /\b(?:what|when|which)(?:'s| is)?\s+(?:my |the )?next\b|\bwhat'?s (?:up )?next\b|\bnext (?:meeting|thing|one|up|appointment|call)\b|\bwhat'?s after (?:this|that)\b|\bhow long (?:until|till|til|to) (?:my |the )?next\b/],
-  [INTENTS.QUERY_EVENT, /\b(?:where(?:'s| is)|how long is|is .* still on|when(?:'s| is) (?:my|the)|what time is (?:my|the))\b/],
+  [INTENTS.QUERY_EVENT, /\b(?:where(?:'?s| is)|how long is|is .* still on|when(?:'?s| is) (?:my|the)|what time is (?:my|the))\b/],
   [INTENTS.QUERY_PROGRESS, /\bhow much (?:time|have i|did i)\b|\bhow am i doing\b|\bwhat did i (?:do|finish|get done)\b|\bhow many hours\b|\bhow'?s my (?:focus|week)\b/],
   [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|gaps?|any time|when can i|spare (?:time|hour|minutes?))\b/],
-  [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double ?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
+  [INTENTS.QUERY_DAY, /\b(what(?:'?s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double ?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
   // A series, not a booking. Checked before create, or only the first one of
   // twelve ever reaches the calendar.
   [INTENTS.REPEAT_EVENT, /\bevery other (?:day|week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\bevery (?:day|weekday|week|other week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:daily|weekly|fortnightly|biweekly|monthly)\b|\brepeat(?:s|ing)?\b|\brecurring\b|\beach (?:day|week|monday|tuesday|wednesday|thursday|friday)\b/],
@@ -673,7 +738,24 @@ function distance(a, b, max) {
  * by the confirmation before it reaches the calendar, where doing nothing at
  * all — which is what "scheduke" used to get — is not.
  */
+/**
+ * Homophones dictation gets wrong, corrected only where they cannot be right.
+ *
+ * "Remind me too sign the lease" is three characters from working and reads as
+ * nonsense to every rule. Kept to positions where the wrong word is impossible
+ * — "too" directly before a bare verb is always "to" — rather than a general
+ * swap, which would break "two" and "too" everywhere they are correct.
+ */
+function fixHomophones(text) {
+  return text
+    .replace(/\b(remind(?:er)? (?:me |us )?)too\b/gi, "$1to")
+    .replace(/\b(need|want|have|got|going|like|able|forget|remember|meant|try|trying)\s+too\s+(?=[a-z])/gi, "$1 to ")
+    .replace(/\bi'?d like too\b/gi, "i'd like to")
+    .replace(/\bhow long til\b/gi, "how long until");
+}
+
 function despell(text) {
+  text = fixHomophones(text);
   const parts = text.split(/(\s+)/);
   let namePosition = false;
   return parts
@@ -777,7 +859,7 @@ function stripVerbs(text) {
     // phrase loses its anchor, leaving the word "calendar" behind as a title.
     .replace(/\s*(?:it|this|that|them)?\s*\b(?:on|in)(?:to)?\s+(?:my|the)\s+(?:calendar|schedule|diary)\b/i, " ")
     .replace(
-      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|i need(?: to)?|i'?ve got|ive got|i have got|i'?m (?:seeing|meeting|visiting|taking|off to|flying to|driving to)|im (?:seeing|meeting|visiting)|there'?s an?|theres an?|there is an?|we'?re (?:meeting|having|seeing)|i want(?: to)?|i'?d like|we need(?: to)?|i have to|i've got to|i gotta|mov(?:e|ing)|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
+      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|i need(?: to)?|i'?ve got|ive got|i have got|i'?m (?:seeing|meeting|visiting|taking|off to|flying to|driving to)|im (?:seeing|meeting|visiting)|there'?s an?|theres an?|there is an?|we'?re (?:meeting|having|seeing)|i want(?: to)?|i'?d like|we need(?: to)?|i have to|i've got to|i gotta|mov(?:e|ing)|spread(?:ing)?|split(?:ting)?|divid(?:e|ing)|lay(?:ing)?|stagger(?:ing)?|stretch(?:ing)?|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
       "",
     )
     .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder|appointment|sync|standup|stand-up|catch ?up|chat|block|slot|interview|review|1:1|one on one)\s+(?:to|for|called|named)?\s*/i, "")
@@ -977,6 +1059,16 @@ function cleanTitle(text, people = [], subject = null) {
   // A bare "meeting" is not a title. Returning null lets the caller compose one
   // from who it is with, which is what the user would have written anyway.
   if (!t || BARE_NOUN.test(t)) return null;
+  /**
+   * Nor is a pile of leftover verbs.
+   *
+   * "It will take 4 hours" left "Will take", "and move it to Friday" left
+   * "Move", and both look like names to everything downstream. That mattered
+   * more than it sounds: the follow-up test is "a pronoun and no title", so a
+   * junk title stopped these being read as continuations at all, and "it"
+   * pointed at nothing.
+   */
+  if (t.toLowerCase().split(/\s+/).every((w) => RESIDUE.has(w))) return null;
   return t[0].toUpperCase() + t.slice(1);
 }
 
@@ -990,6 +1082,15 @@ export function parse(text, now = new Date()) {
   // discourse, not content, and leaving it in poisons both intent and title.
   const repair = REPAIR.test(raw);
   let body = repair ? raw.replace(REPAIR, "").trim() : raw;
+  // "And move it to Friday at 2." A conjunction joining this turn to the last
+  // one is discourse, and leaving it in put the word "And" at the front of
+  // every title and defeated the follow-up test behind it.
+  body = body.replace(/^\s*(?:and|then|also|plus|oh(?:,| and)?|next|after that|as well)\b[\s,]*/i, "").trim() || body;
+  // Applied to every sentence rather than only on the spelling retry: the
+  // corrections below are position-bound and cannot be wrong, and leaving them
+  // to the retry meant "I need too call the bank" never reached the rule that
+  // would have caught the fixed version.
+  body = fixHomophones(body);
 
   // Classified without the courtesy in front of it. "When you get a chance,
   // book lunch Friday" is a booking; left wrapped, the "when" made it a
@@ -1070,6 +1171,9 @@ export function parse(text, now = new Date()) {
     }
   }
   const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;
+  // Whether this sentence merely *mentions* a destructive verb rather than
+  // asking for one. Acted on in `ask`, before anything is allowed to run.
+  const refuses = refusalIn(s, unwrap(body).toLowerCase().trim());
   const allDay = /\ball[- ]?day\b|\bwhole day\b|\bentire day\b|\bfull day\b/i.test(body);
 
   // "lunch with priya friday at 12" — nobody writes a verb in front of that.
@@ -1194,6 +1298,8 @@ export function parse(text, now = new Date()) {
     text: raw,
     body,
     intent,
+    // "negated" | "asked" | null — a destructive verb that is not a command.
+    refuses,
     repair,
     amend: AMEND.test(body),
     pronoun: PRONOUN.test(s),

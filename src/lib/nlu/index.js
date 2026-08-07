@@ -343,7 +343,24 @@ export function ask(text, state, opts = {}) {
   }
 
   const { slots } = p;
-  const res = short ?? (amending ? adjust(amending) : run());
+
+  /**
+   * "And add Tom." — after booking something.
+   *
+   * Too bare to classify on its own: no preposition, no object, nothing that
+   * says it is about a meeting rather than a new task. Against the turn before
+   * it, it is unambiguous, so it is resolved here where the thread is in hand
+   * rather than by loosening a rule that would then fire on "add Tom" cold.
+   */
+  const bareAdd = focus?.kind === "event" && !slots.attendees
+    ? p.body.match(/^\s*(?:add|invite|include|bring|cc)\s+([A-Za-z][\w'’-]*(?:\s+[A-Z][\w'’-]*)?)\s*(?:too|as well|also)?\s*$/)
+    : null;
+  if (bareAdd) {
+    slots.attendees = { op: "add", who: bareAdd[1].replace(/^\w/, (c) => c.toUpperCase()), phrase: null };
+    p.intent = INTENTS.EDIT_ATTENDEES;
+  }
+
+  const res = short ?? (p.refuses && PEN_INTENTS.has(p.intent) ? stand() : amending ? adjust(amending) : run());
 
   // Write down what she couldn't do, and — more usefully — what the person
   // said next when it worked. `opts.memory` marks a caller that wants a pure
@@ -536,6 +553,50 @@ export function ask(text, state, opts = {}) {
     });
   }
 
+  /**
+   * A destructive verb, mentioned rather than asked for.
+   *
+   * "Don't cancel the standup" cancelled the standup. So did "why did you
+   * cancel the standup", "did I cancel the board call", and "I don't want to
+   * cancel it" — every rule saw a cancel verb and an object, and none of them
+   * looked at the word in front of it.
+   *
+   * The fix is one branch in front of every intent that writes, rather than a
+   * patch on each verb: a new destructive verb added later is covered by
+   * construction instead of by remembering. What it does is answer the
+   * question that was actually asked — where the thing is now — and touch
+   * nothing.
+   */
+  function stand() {
+    const named = slots.subjectPhrase || p.body;
+    const ranked = resolveEvent(named, state.events, now);
+    const lead = p.refuses === "negated" ? "Leaving it alone." : "";
+
+    if (ranked.length && isConfident(ranked)) {
+      const ev = ranked[0].item;
+      return reply(
+        `${lead ? `${lead} ` : ""}\u201c${ev.title}\u201d is still ${describe(new Date(ev.start), now)}.`,
+        [], { entity: { kind: "event", id: ev.id }, day: dayKey(new Date(ev.start)) },
+      );
+    }
+
+    const task = resolveTask(named, openTasks);
+    if (task.length && isConfident(task)) {
+      return reply(
+        `${lead ? `${lead} ` : ""}\u201c${task[0].item.title}\u201d is still open.`,
+        [], { entity: { kind: "task", id: task[0].item.id } },
+      );
+    }
+
+    // Nothing by that name. If something was changed recently, saying what is
+    // the most useful answer to "why did you cancel it" there is.
+    const last = lastChange();
+    if (p.refuses === "asked" && last) {
+      return reply(`Nothing on your calendar by that name. The last change I made was ${last} — say \u201cundo\u201d to put it back.`);
+    }
+    return reply(lead ? `${lead} Nothing changed.` : "Nothing on your calendar by that name.");
+  }
+
   function run() {
   switch (p.intent) {
     // ------------------------------------------------------------- move
@@ -577,7 +638,7 @@ export function ask(text, state, opts = {}) {
           const remembered = setOf(memory, state, now);
           const moving = span
             ? inRange(state.events, span)
-            : remembered?.kind === "event"
+            : remembered?.kind === "event" && Array.isArray(remembered.ids)
               ? state.events.filter((e) => remembered.ids.includes(e.id))
               : (() => {
                   const day = topicDay(memory, now);
@@ -1393,7 +1454,11 @@ export function ask(text, state, opts = {}) {
       // question — "who's coming?" — there is no phrase, so the thread decides.
       const ranked = opts.resolvedId
         ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
-        : resolveEvent(spec.op === "list" || spec.op === "clear" ? p.body : spec.phrase, state.events, now);
+        : spec.phrase === null && focus?.kind === "event"
+          // A bare "add Tom" carries no name for the meeting, because the
+          // meeting is the one already under discussion.
+          ? state.events.filter((e) => e.id === focus.item.id).map((item) => ({ item, score: 9 }))
+          : resolveEvent(spec.op === "list" || spec.op === "clear" ? p.body : spec.phrase, state.events, now);
 
       if (!ranked.length) {
         const day = spec.op === "list" ? topicDay(memory, now) : null;
@@ -1750,7 +1815,13 @@ export function ask(text, state, opts = {}) {
      * from the first one the day either of them changed.
      */
     case INTENTS.SPREAD_TASK: {
-      const ranked = resolveTask(slots.subjectPhrase, openTasks);
+      let ranked = resolveTask(slots.subjectPhrase, openTasks);
+      // "Spread it over this week" names nothing the resolver can match, and
+      // the thing it means is whatever was just being discussed.
+      if (!ranked.length && p.pronoun && focus?.kind === "task") {
+        const it = openTasks.find((x) => x.id === focus.item.id);
+        if (it) ranked = [{ item: it, score: 9 }];
+      }
       if (!ranked.length) return dead("I couldn't find an open task matching that.", REASONS.NO_MATCH);
       if (!isConfident(ranked)) {
         return askWhich("Which task?", {
