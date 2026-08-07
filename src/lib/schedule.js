@@ -71,7 +71,7 @@ const addDays = (d, n) => {
  * The older `workWeekend` boolean is still honoured so settings written before
  * the list existed keep meaning what they meant.
  */
-function isWorkday(d, opts = {}) {
+export function isWorkday(d, opts = {}) {
   const days = opts.workDays;
   if (Array.isArray(days) && days.length) return days.includes(d.getDay());
   return opts.workWeekend || (d.getDay() !== 0 && d.getDay() !== 6);
@@ -136,6 +136,20 @@ function capacityOf(day, events, committed, opts) {
  */
 function eligibleDays(task, from, opts) {
   const out = [];
+  /**
+   * "Don't start this until Thursday."
+   *
+   * The mirror of a deadline, and the thing that made "split it across
+   * tomorrow and Thursday" impossible to honour: the planner front-loads
+   * towards the earliest day with room, so naming the days it should use had
+   * no way of being heard.
+   */
+  if (task.notBeforeDay) {
+    const [ny, nm, nd] = task.notBeforeDay.split("-").map(Number);
+    const earliest = new Date(ny, nm - 1, nd);
+    earliest.setHours(0, 0, 0, 0);
+    if (earliest > from) from = earliest;
+  }
   if (!task.due) {
     // No deadline: plan the next working week and no further. Anything without
     // a date is not urgent by definition, and filling a month with it would
@@ -284,9 +298,24 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     // The share is rounded up to a quarter of an hour. Sixty-nine-minute
     // shares are arithmetically neat and produce nine-minute leftovers the
     // moment a meeting cuts the day, and nine minutes is not a sitting.
-    const usable = keys.slice(0, Math.max(1, Math.floor(need / o.minBlock)));
+    /**
+     * A rate the person asked for: "give the term sheet two hours a day".
+     *
+     * Without it the even share is decided purely by the runway, so a request
+     * to go at two hours a day came back at two and a half — the arithmetic
+     * was right and the answer was not what was asked for. With a cap set, the
+     * spread widens instead of the daily amount growing.
+     */
+    const cap = task.maxPerDayMins > 0 ? task.maxPerDayMins : Infinity;
+
+    const spreadOver = Math.max(
+      1,
+      Math.floor(need / o.minBlock),
+      Number.isFinite(cap) ? Math.ceil(need / cap) : 0,
+    );
+    const usable = keys.slice(0, spreadOver);
     const even = Math.ceil(need / usable.length);
-    let share = Math.max(o.minBlock, Math.ceil(even / QUARTER) * QUARTER);
+    let share = Math.min(cap, Math.max(o.minBlock, Math.ceil(even / QUARTER) * QUARTER));
     // Rounding up can strand the last day with a stub — 200 minutes at a
     // 60-minute share is 60, 60, 60, and then 20. Spreading the same work over
     // one fewer sitting fixes it without leaving a fragment anywhere.
@@ -316,8 +345,12 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
         if (!hasRoomFor(day, task.id)) continue;
         const room = capacity(day);
         if (room <= 0) continue;
-        const take = Math.min(left, room);
         const at = blocks.find((b) => b.taskId === task.id && b.day === day);
+        // The cap is a rate, not a preference, so it holds even here — the
+        // point of asking for two hours a day is not to be given five on
+        // Thursday because Thursday happened to be free.
+        const take = Math.min(left, room, cap - (at?.mins || 0));
+        if (take < Math.min(o.minBlock, left)) continue;
         if (at) at.mins += take;
         else blocks.push({ taskId: task.id, day, mins: take });
         claim(day, task.id, take);

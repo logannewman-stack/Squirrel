@@ -75,6 +75,47 @@ const CORPUS = {
     "how many hours of work do i have left", "how much is on my plate this week",
     "how busy am i friday", "am i free friday afternoon",
   ],
+  // The harder half. Every group below was under 70% the first time it was
+  // measured, and several were at 25% — the reach number only means something
+  // if the corpus keeps reaching past what already works.
+  "off an anchor": [
+    "put a debrief right after the board prep", "schedule prep an hour before the exec staff",
+    "i need 45 minutes with priya before the board prep", "book 30 minutes after the exec staff",
+    "give me a break after the exec staff",
+  ],
+  "constraint booking": [
+    "find me 90 minutes before thursday", "book two hours for the board deck sometime this week",
+    "put an hour in wherever it fits tomorrow", "block out friday afternoon",
+    "hold 2 to 4 on wednesday", "reserve tomorrow morning for deep work",
+  ],
+  "shifting": [
+    "bring the board prep forward", "shift the exec staff later",
+    "push the board prep out a week", "swap the exec staff and the board prep",
+    "move everything on thursday an hour later",
+  ],
+  "spreading work": [
+    "spread the board deck over the rest of the week",
+    "split the board deck across thursday and friday",
+    "give the board deck two hours a day", "lay the board deck out over this week",
+  ],
+  "holding time": [
+    "no meetings before 10 tomorrow", "nothing after 4 on friday",
+    "keep friday morning free", "no calls after 3 today",
+  ],
+  "conflicts and gaps": [
+    "do i have any conflicts wednesday", "where are my gaps tomorrow",
+    "am i overbooked this week", "what's my longest free stretch thursday",
+  ],
+  "feasibility": [
+    "can i finish the board deck by thursday", "what should i drop",
+    "am i going to make the deadline", "what's at risk this week",
+  ],
+  "conversation": [
+    "say that again", "huh", "are you there", "did you get that",
+    "i'm swamped", "this week is a mess", "hold on", "wait", "ok",
+    "you still there", "what can you do", "who are you", "good night",
+    "how's it going", "never mind", "thanks",
+  ],
 };
 
 const failed = [];
@@ -90,7 +131,11 @@ for (const [group, list] of Object.entries(CORPUS)) {
     const after = JSON.stringify([S().events, S().tasks, S().projects]);
     const dud = /didn't catch|couldn't find|not wired|THREW/i.test(r.text);
     const changed = before !== after;
-    const answered = !dud && (changed || r.text.length > 30 || r.choices);
+    // Length stands in for substance, which works for everything except
+    // courtesy: "Still here." is exactly the right answer and eight words
+    // shorter than the bar. Small talk is judged on being handled at all.
+    const courtesy = String(r.intent || "").startsWith("small:");
+    const answered = !dud && (changed || courtesy || r.text.length > 30 || r.choices);
     if (answered) { ok++; g++; } else failed.push([group, q, r.text.slice(0, 78)]);
   }
   console.log(`${String(Math.round(g / list.length * 100)).padStart(3)}%  ${group}  (${g}/${list.length})`);

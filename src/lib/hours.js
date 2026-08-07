@@ -80,6 +80,22 @@ export function sayMins(m) {
   return r ? `${h}h ${r}m` : `${h}h`;
 }
 
+/**
+ * A distance in time, said the way it was asked for.
+ *
+ * `sayMins` is for amounts of work, where hours stay the natural unit all the
+ * way up. This is for the gap between two points, where they do not: "push it
+ * out a week", answered with "moved 168h later", is arithmetically perfect and
+ * reads like a machine showing its working.
+ */
+export function saySpan(m) {
+  const n = Math.max(0, Math.round(m || 0));
+  const plural = (v, word) => `${v} ${word}${v === 1 ? "" : "s"}`;
+  if (n && n % 10080 === 0) return plural(n / 10080, "week");
+  if (n && n % 1440 === 0) return plural(n / 1440, "day");
+  return sayMins(n);
+}
+
 function normalizeDays(days) {
   if (!Array.isArray(days)) return DEFAULT_HOURS.days;
   const clean = [...new Set(days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))]

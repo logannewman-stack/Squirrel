@@ -29,6 +29,10 @@ export const SMALL = {
   SORRY: "sorry",
   AFFIRM: "affirm",
   OUTSIDE: "outside",
+  REPEAT: "repeat",
+  PRESENCE: "presence",
+  OVERWHELM: "overwhelm",
+  HOLD: "hold",
 };
 
 /**
@@ -51,11 +55,33 @@ const RULES = [
   // strict — anything with an actual request in it still falls through to the
   // real parser — without being brittle about the words people pad them with.
   [SMALL.GREET, /^(?:hi+|hey+|hello+|yo+|howdy|hiya+|heya+|sup|greetings|gm|gday|g'day|good (?:morning|afternoon|evening|day)|morning|afternoon|evening)\b/],
-  [SMALL.HOWAREYOU, /^(?:how'?s\b|how (?:is|are|do you|goes|have you)\b|you(?: ok| okay| good| alright| doing| around| about)?\b|what'?s (?:up|new|good)\b)/],
+  // The suffix after "you" is required, not optional. Left optional, a bare
+  // "you" matched — and since courtesies are checked first, "you still there?"
+  // was answered "Ready when you are" instead of "Still here".
+  [SMALL.HOWAREYOU, /^(?:how'?s\b|how (?:is|are|do you|goes|have you)\b|you(?: ok| okay| good| alright| doing| about)\b|what'?s (?:up|new|good)\b)/],
   [SMALL.THANKS, /^(?:thanks?|thank you|thx|ty|cheers|nice|great|perfect|awesome|amazing|excellent|lovely|brilliant|superb|fantastic|appreciate|much appreciated|good (?:job|work|stuff)|well done|nicely done|you'?re the best)\b/],
   [SMALL.BYE, /^(?:bye+|goodbye|see ya|see you|catch you|goodnight|good night|night|later|i'?m off|signing off|that'?s (?:all|it)|that'?ll be all|that will be all|talk (?:soon|to you)|done for (?:today|now))\b/],
   [SMALL.SORRY, /^(?:sorry|my bad|oops|whoops|my mistake|apologies|nevermind|never mind)\b/],
+  // "ok" on its own reaches here only when no proposal is open — the
+  // confirmation branch in `ask` runs first and claims it. Without this it fell
+  // through to "I didn't catch that", which is a strange thing to be told after
+  // agreeing with someone.
+  [SMALL.AFFIRM, /^(?:ok(?:ay)?|k|kk|sure|right|fine|good|great|nice|yep|yeah|mhm|mm ?hm)\s*$/],
   [SMALL.AFFIRM, /^(?:ok(?:ay)? )?(?:cool|got it|gotcha|understood|makes sense|sounds good|fair enough|alright|indeed|of course|sure thing|no worries|right on)\b/],
+
+  // "Wait" and "hold on" are not commands and not courtesies — they are a
+  // request for a pause. Answering them with a calendar lookup is worse than
+  // answering them with nothing.
+  [SMALL.HOLD, /^(?:wait|hold on|hold up|hang on|one sec(?:ond)?|just a sec(?:ond)?|gimme a sec|give me a (?:sec(?:ond)?|minute|moment)|stand by|not yet)\b/],
+
+  // Asked to say it again. Anchored hard: "what?" is a request to repeat and
+  // "what's Friday?" very much is not, so anything with a request in it must
+  // fall through.
+  [SMALL.REPEAT, /^(?:huh|eh|what|wha|sorry what|come again|say (?:that )?again|repeat(?: that| it)?|pardon(?: me)?|once more|i missed that|didn'?t (?:catch|hear|get) that|read (?:that|it) (?:back|again))\s*[?.!]*$/],
+
+  // Checking she is still there. People do this to software that has been
+  // quiet, and silence in response confirms exactly the fear.
+  [SMALL.PRESENCE, /^(?:(?:are|r) ?you (?:there|awake|alive|listening|still there|around)|you (?:there|up|awake|around|still there)|did you (?:get|catch|hear) (?:that|me)|you (?:get|catch) that|anyone there|still (?:there|with me)|hello\?+)\s*[?.!]*$/],
 
   [SMALL.TIME, /^\s*time\s*\??\s*$|\b(?:what(?:'s| is)? the )?time is it\b|\bwhat time is it\b|\bcurrent time\b|\bwhat'?s the time\b|\bgot the time\b/i],
   [SMALL.DATE, /\bwhat(?:'s| is)? (?:the )?(?:date|day)(?: is it)?\b|\bwhat day is (?:it|today)\b|\btoday'?s date\b|\bwhat'?s today\b/i],
@@ -65,6 +91,23 @@ const RULES = [
 
   [SMALL.COUNT, /\bhow many (?:tasks?|projects?|meetings?|events?)\b|\bwhat do i have (?:left|open|outstanding)\b/i],
 
+  /**
+   * Said out of frustration rather than as a request.
+   *
+   * The temptation is to answer with sympathy, which is the one thing she is
+   * badly placed to offer. What she has instead is the actual arithmetic — how
+   * many hours of meetings, how much work, what will not fit — and turning
+   * "I'm swamped" into a number and an offer is both more useful and more
+   * honest than "that sounds hard".
+   *
+   * Anchored at the front and kept clear of anything nameable: "I'm behind on
+   * the board deck" is a triage request and belongs to the real parser, which
+   * gives a better answer than this ever could.
+   */
+  [SMALL.OVERWHELM, /^(?:i'?m|im|i am|i feel|feeling)\s+(?:so |really |very |completely |totally |a bit |kind of |kinda |pretty )?(?:swamped|slammed|buried|drowning|underwater|overwhelmed|overloaded|stressed|stretched|frazzled|burnt? out|spread thin|losing it|in trouble)\b/i],
+  [SMALL.OVERWHELM, /^(?:this|the|my)\s+(?:week|day|month|schedule|calendar|diary)\s+(?:is|looks?)\s+(?:a\s+)?(?:mess|insane|crazy|nuts|brutal|mental|chaos|chaotic|ridiculous|awful|terrible|rough|heavy|hell|packed|slammed|jammed|too much)\b/i],
+  [SMALL.OVERWHELM, /\b(?:too much on(?: my plate)?|can'?t keep up|cannot keep up|not enough hours|no time for anything)\b/i],
+
   // General knowledge, which she genuinely does not have. Detected on purpose
   // so she can say so instead of falling through to "I didn't catch that",
   // which reads as a failure rather than a boundary.
@@ -73,7 +116,22 @@ const RULES = [
 
 const COURTESY = new Set([
   SMALL.GREET, SMALL.HOWAREYOU, SMALL.THANKS, SMALL.BYE, SMALL.SORRY, SMALL.AFFIRM,
+  // "Wait" is in here rather than with the anchored rules because its pattern
+  // is open-ended by necessity — "hold on a moment" — and open-ended plus
+  // ungated would make "wait, cancel my 3pm" a request for a pause.
+  SMALL.HOLD,
 ]);
+
+/**
+ * A verb that makes a sentence an instruction.
+ *
+ * Narrower than HAS_REQUEST, which counts any calendar noun and so matches
+ * "this week is a mess" on the word "week". Only used to stop a complaint with
+ * a command bolted onto it — "I'm swamped, move my Thursday" — from being read
+ * as only the complaint.
+ */
+const HAS_COMMAND =
+  /\b(?:book|schedule|blocks?|move|shift|push|pull|cancel|delete|remove|clear|wipe|add|create|make|set|put|rename|delegate|assign|finish|complete|undo|plan|spread|split|show|list|tell me|find|what'?s|what is|what do|when(?:'s| is)?|how many|how much|who)\b/i;
 
 /**
  * Anything that makes a sentence a request rather than a pleasantry.
@@ -104,8 +162,15 @@ export function classify(text) {
     }
   }
 
+  // Tested against the original text rather than the stripped version: these
+  // are anchored end to end, so they cannot swallow a longer sentence, and
+  // stripping would break them — FILLER eats "there", which is the entire
+  // difference between "are you there" and "are you".
   for (const [kind, re] of RULES) {
-    if (!COURTESY.has(kind) && re.test(text)) return kind;
+    if (COURTESY.has(kind)) continue;
+    // A complaint with an instruction attached is an instruction.
+    if (kind === SMALL.OVERWHELM && HAS_COMMAND.test(text)) continue;
+    if (re.test(text)) return kind;
   }
   return null;
 }
@@ -229,6 +294,76 @@ export function answer(kind, state, now = new Date(), seed = 0) {
       };
     }
 
+    case SMALL.HOLD:
+      return { text: pick([`Take your time${comma}.`, `No rush${comma}.`, `Standing by${comma}.`], seed), variant: "calendar" };
+
+    case SMALL.PRESENCE: {
+      // "Did you get that?" is asking whether the last instruction landed, and
+      // the honest answer is the receipt for it. "Still here" is only the right
+      // answer when there is nothing to point at.
+      const last = [...(state.chat || [])].reverse().find((m) => m.role === "assistant");
+      const did = last?.actions?.[0]?.summary;
+      if (did) return { text: `Got it${comma} — ${did}.`, variant: "calendar" };
+      return {
+        text: pick([
+          `Still here${comma}.`,
+          `Here${comma} — go ahead.`,
+          `Right here${comma}. What do you need?`,
+        ], seed),
+        variant: "calendar",
+      };
+    }
+
+    case SMALL.REPEAT: {
+      // The last thing she actually said, verbatim. Paraphrasing it would be
+      // answering a different question than the one asked.
+      const said = [...(state.chat || [])].reverse().find((m) => m.role === "assistant" && m.text);
+      if (!said) return { text: `I haven't said anything yet${comma}.`, variant: "calendar" };
+      return { text: said.text, variant: "calendar", repeated: true };
+    }
+
+    /**
+     * Frustration, answered with arithmetic.
+     *
+     * Sympathy is the one thing she is badly placed to offer and the first
+     * thing a language model would reach for. What she has instead is the real
+     * shape of the week — hours committed, work that will not fit, the single
+     * biggest thing on the list — and one concrete offer. That is worth more
+     * at 7pm on a Tuesday than "that sounds tough".
+     */
+    case SMALL.OVERWHELM: {
+      const from = new Date(now);
+      const to = new Date(now);
+      to.setDate(to.getDate() + 7);
+      const week = events.filter((e) => {
+        const at = new Date(e.start);
+        return at >= from && at < to;
+      });
+      const meetingMins = week.reduce((n, e) => n + (new Date(e.end) - new Date(e.start)) / 60000, 0);
+      const late = tasks.filter((t) => t.due && t.due < dayStr(now));
+      const short = (state.shortfalls || []).length;
+
+      const bits = [];
+      if (week.length) {
+        bits.push(`${week.length} ${week.length === 1 ? "meeting" : "meetings"} in the next seven days, ${hours(meetingMins)} of them`);
+      }
+      if (tasks.length) bits.push(`${tasks.length} open ${tasks.length === 1 ? "task" : "tasks"}`);
+      if (late.length) bits.push(`${late.length} already past due`);
+
+      const head = bits.length
+        ? `Here's the actual shape of it${comma}: ${bits.join(", ")}.`
+        : `Nothing on the calendar and nothing open${comma} — whatever this is, it isn't in here.`;
+
+      const offer =
+        short > 0
+          ? ` ${short} ${short === 1 ? "thing doesn't" : "things don't"} fit as scheduled. Say “what should I drop” and I'll tell you which.`
+          : tasks.length
+            ? ` Say “plan my week” and I'll lay the work into the gaps.`
+            : "";
+
+      return { text: head + offer, variant: "calendar" };
+    }
+
     case SMALL.OUTSIDE:
       return {
         text:
@@ -240,6 +375,14 @@ export function answer(kind, state, now = new Date(), seed = 0) {
     default:
       return null;
   }
+}
+
+/** "3h 30m" — the same shape the scheduler uses, so the app speaks one dialect. */
+function hours(mins) {
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  if (!h) return `${m}m`;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 const pad = (n) => String(n).padStart(2, "0");

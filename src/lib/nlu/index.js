@@ -14,7 +14,7 @@
 import { parse, INTENTS, placeIn } from "./parse.js";
 import { classify as smallTalk, answer as smallAnswer } from "./smalltalk.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
-import { describe, toLocalIso, dayKey, atLocal, parseRange, dayRange, fixDateWords } from "./datetime.js";
+import { describe, toLocalIso, dayKey, atLocal, parseDate, parseRange, dayRange, fixDateWords } from "./datetime.js";
 import { acknowledge, describeDay, addressOf, confirmLine, composeTitle, joinNames } from "./voice.js";
 import {
   EMPTY_MEMORY, remember, carryable, lastTurn, focusOf, setOf, topicDay, inherit,
@@ -26,8 +26,8 @@ import {
 import { record as recordMiss, resolve as pairMiss, REASONS } from "../misses.js";
 import { interpret, hasResolver, contextFor } from "./fallback.js";
 import { findFreeSlots, fmtTime, workOn } from "../agenda.js";
-import { distribute, describePlan, projectLoad, describeLoad, triage } from "../schedule.js";
-import { planOpts, hoursOf, describeHours, sayMins, sayHour, weeklyMins } from "../hours.js";
+import { distribute, describePlan, projectLoad, describeLoad, triage, isWorkday } from "../schedule.js";
+import { planOpts, hoursOf, describeHours, sayMins, saySpan, sayHour, weeklyMins } from "../hours.js";
 import { duration } from "../format.js";
 
 const DEFAULT_MEETING_MINS = 60;
@@ -231,11 +231,16 @@ const listEvents = (events, limit = 4) => {
 export const EXAMPLES = [
   "What time is it?",
   "Reschedule my 3pm Monday to Wednesday at 2",
-  "Block 2 hours Thursday morning for the board deck",
+  "Put a debrief right after the board call",
+  "Bring the standup forward an hour",
+  "Swap the standup and the board call",
+  "Spread the board deck over the rest of the week",
+  "No meetings before 10 tomorrow",
   "What does Friday look like?",
   "The board deck will take 8 hours",
   "Every Monday at 9, standup",
   "Clear my Friday afternoon",
+  "What should I drop?",
   "Undo that",
 ];
 
@@ -291,7 +296,11 @@ export function ask(text, state, opts = {}) {
   // touches the calendar. Checked after the confirmation branch above, so
   // "ok" while a proposal is open still means yes rather than hello — and the
   // patterns are anchored, so "hi, what's on Tuesday?" is a Tuesday question.
-  const chat = !pending && !opts.resolvedId ? smallTalk(p.body) : null;
+  // `p.body` with the original behind it: the opener stripper removes "wait"
+  // as courtesy, and a message that was *entirely* courtesy leaves nothing to
+  // classify — which read as an empty greeting. Falling back to what was
+  // actually typed keeps "wait" a request for a pause.
+  const chat = !pending && !opts.resolvedId ? smallTalk(p.body || text) : null;
   if (chat) {
     const said = smallAnswer(chat, state, now, memory.turns?.length || 0);
     if (said) {
@@ -531,6 +540,134 @@ export function ask(text, state, opts = {}) {
   switch (p.intent) {
     // ------------------------------------------------------------- move
     case INTENTS.MOVE_EVENT: {
+      /**
+       * "Bring the standup forward." "Push the board call out a week."
+       *
+       * A move with a direction instead of a destination. Resolved before
+       * anything else asks for a time, because there isn't one to give — the
+       * new time is the old one plus a shift, and it can only be worked out
+       * once the meeting itself has been found.
+       */
+      // Gated on the nudge alone. A named day here is scope, not a
+      // destination — "move everything on Wednesday an hour later" carries a
+      // date and still has nowhere to land — and `parse` has already dropped
+      // the nudge wherever an actual clock time was given.
+      if (slots.nudge) {
+        /**
+         * "Move everything an hour later."
+         *
+         * A nudge aimed at a set rather than at one meeting, handled before
+         * the single-event resolver gets a look at it — that resolver goes
+         * hunting for a meeting called "everything" and reports it missing,
+         * which is how a request to shift a whole morning came back as a
+         * failed lookup.
+         */
+        const bulk = p.plural ||
+          /\b(?:everything|every ?thing|all|the rest|the lot|meetings|appointments|events|calls)\b/i
+            .test(slots.subjectPhrase);
+        if (bulk) {
+          if (!slots.nudge.mins) {
+            return needs(`How far ${slots.nudge.dir === "earlier" ? "forward" : "back"}? \u201cAn hour\u201d works.`);
+          }
+          // The named stretch, then whatever was just being discussed, then the
+          // day under discussion. Never the whole calendar: "move everything
+          // later" is about a morning, and applying it to every meeting anyone
+          // has ever booked is not a reading worth offering.
+          const span = parseRange(slots.subjectPhrase, now) || parseRange(p.body, now);
+          const remembered = setOf(memory, state, now);
+          const moving = span
+            ? inRange(state.events, span)
+            : remembered?.kind === "event"
+              ? state.events.filter((e) => remembered.ids.includes(e.id))
+              : (() => {
+                  const day = topicDay(memory, now);
+                  return day ? inRange(state.events, dayRange(day, now)) : null;
+                })();
+
+          // No stretch named and nothing in mind. Rather than guess at "today"
+          // — which for a shift is a real change to real meetings — offer the
+          // days that actually have something on them, so the answer is one tap
+          // and the question is worth asking.
+          if (!moving) {
+            return askWhich("Everything on which day?", {
+              kind: "range",
+              text: p.body,
+              options: [
+                { id: "today", label: "Today" },
+                { id: "tomorrow", label: "Tomorrow" },
+                { id: "this week", label: "The rest of this week" },
+                { id: "cancel", label: "Never mind" },
+              ],
+            });
+          }
+          if (!moving.length) return reply("Nothing there to move.");
+
+          const shift = slots.nudge.mins * 60000 * (slots.nudge.dir === "earlier" ? -1 : 1);
+          const by = saySpan(slots.nudge.mins);
+          const way = slots.nudge.dir === "earlier" ? "earlier" : "later";
+          const where = span ? ` on ${span.label}` : "";
+
+          return gate(`moving all ${moving.length}${where} ${by} ${way}`, () => {
+            batch(`moving ${moving.length} ${by} ${way}`, () => {
+              for (const e of moving) {
+                updateEvent(e.id, {
+                  start: toLocalIso(new Date(new Date(e.start).getTime() + shift)),
+                  end: toLocalIso(new Date(new Date(e.end).getTime() + shift)),
+                });
+              }
+            });
+            return reply(
+              `Moved ${moving.length} ${moving.length === 1 ? "meeting" : "meetings"} ${by} ${way}.`,
+              [{ summary: `Moved ${moving.length} ${by} ${way}` }],
+              {
+                entity: null,
+                set: { kind: "event", ids: moving.map((e) => e.id) },
+                day: dayKey(new Date(new Date(moving[0].start).getTime() + shift)),
+              },
+            );
+          });
+        }
+
+        const found = opts.resolvedId
+          ? state.events.filter((e) => e.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
+          : resolveEvent(slots.subjectPhrase, state.events, now);
+
+        if (!found.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
+        if (!isConfident(found)) {
+          return askWhich("Which one?", {
+            kind: "event", intent: "nudge", text: p.text,
+            options: found.slice(0, 4).map((r) => ({
+              id: r.item.id, label: `${r.item.title} · ${describe(new Date(r.item.start), now)}`,
+            })),
+          });
+        }
+        // "Move it later" without saying how much is genuinely underspecified,
+        // and picking a default would move a real meeting by an amount nobody
+        // asked for. One question is cheaper than one apology.
+        if (!slots.nudge.mins) {
+          return needs(
+            `How far ${slots.nudge.dir === "earlier" ? "forward" : "back"}? ` +
+            `“${slots.nudge.dir === "earlier" ? "An hour earlier" : "An hour later"}” works.`,
+          );
+        }
+
+        const ev = found[0].item;
+        const shift = slots.nudge.mins * 60000 * (slots.nudge.dir === "earlier" ? -1 : 1);
+        const start = new Date(new Date(ev.start).getTime() + shift);
+        const end = new Date(new Date(ev.end).getTime() + shift);
+        const by = saySpan(slots.nudge.mins);
+        const way = slots.nudge.dir === "earlier" ? "earlier" : "later";
+
+        return gate(`moving “${ev.title}” ${by} ${way}, to ${describe(start, now)}`, () => {
+          updateEvent(ev.id, { start: toLocalIso(start), end: toLocalIso(end) });
+          return reply(
+            `Moved “${ev.title}” ${by} ${way} — now ${describe(start, now)}.`,
+            [{ summary: `Moved “${ev.title}” ${by} ${way}` }],
+            { entity: { kind: "event", id: ev.id }, day: dayKey(start) },
+          );
+        });
+      }
+
       if (!slots.when) {
         return needs("Move it to when? Give me a day and a time — “Wednesday at 2”, say.");
       }
@@ -948,8 +1085,114 @@ export function ask(text, state, opts = {}) {
 
     // ----------------------------------------------------------- create
     case INTENTS.CREATE_EVENT: {
-      if (!slots.when) return needs("When should I put it? A day and time works — “Thursday at 10”.");
       const mins = slots.durationMins || DEFAULT_MEETING_MINS;
+
+      /**
+       * "No meetings before 10 tomorrow." "Nothing after 4 on Friday."
+       *
+       * Said as a prohibition, meant as a booking: the way to stop something
+       * landing in a stretch of calendar is to put something there first. So
+       * it becomes an ordinary held block, running from the start of the
+       * working day to the boundary or from the boundary to the end of it.
+       *
+       * Anything already inside is named rather than moved. Being told a hold
+       * clashes with two meetings is useful; having those two meetings
+       * silently rescheduled by a sentence that never mentioned them is not.
+       */
+      if (slots.protect) {
+        const day = slots.dateOnly || (slots.range ? new Date(slots.range.from) : null);
+        if (!day) return needs("Which day should I keep clear?");
+
+        const h = hoursOf(state.settings);
+        const asHour = (v) => [Math.floor(v), Math.round((v % 1) * 60)];
+        const [sh, sm] = asHour(h.start);
+        const [eh, em] = asHour(h.end);
+
+        let from;
+        let to;
+        if (slots.protect.h == null) {
+          // No clock — a named stretch is doing the work, as in "keep Friday
+          // morning free". Without either there is nothing to fence off.
+          if (!slots.range || slots.range.scope !== "part") {
+            return needs("Clear until when? “No meetings before 10” works.");
+          }
+          // A daypart begins at midnight. Holding from midnight is technically
+          // true and reads as nonsense on a calendar, so the working day's
+          // start wins wherever it falls later.
+          const partFrom = new Date(slots.range.from);
+          from = new Date(Math.max(partFrom, atLocal(partFrom, sh, sm)));
+          to = new Date(slots.range.to);
+        } else if (slots.protect.side === "before") {
+          from = atLocal(day, sh, sm);
+          to = atLocal(day, slots.protect.h, slots.protect.m);
+        } else {
+          from = atLocal(day, slots.protect.h, slots.protect.m);
+          to = atLocal(day, eh, em);
+        }
+
+        if (to <= from) return reply("That leaves nothing to hold — the day is already over by then.");
+
+        const clashes = state.events.filter((e) => new Date(e.start) < to && new Date(e.end) > from);
+        const label = slots.protect.side === "before"
+          ? `No meetings before ${fmtTime(to)}`
+          : `No meetings after ${fmtTime(from)}`;
+
+        return gate(
+          `holding ${describe(from, now)} to ${fmtTime(to)} as “${label}”`,
+          () => {
+            const made = addEvent({ title: label, start: toLocalIso(from), end: toLocalIso(to) });
+            const warn = clashes.length
+              ? `\n\n⚠ ${clashes.length === 1 ? "One thing is" : `${clashes.length} things are`} already in there: ` +
+                `${clashes.map((e) => e.title).join(", ")}. Say “move them” and I'll shift them out.`
+              : "";
+            return reply(
+              `Held ${describe(from, now)} to ${fmtTime(to)}. Nothing gets booked in there.${warn}`,
+              [{ summary: `Held ${describe(from, now)} — ${fmtTime(to)}` }],
+              {
+                entity: { kind: "event", id: made.id },
+                day: dayKey(from),
+                set: clashes.length ? { kind: "event", ids: clashes.map((e) => e.id) } : null,
+              },
+            );
+          },
+        );
+      }
+
+      /**
+       * "Right after the board call" — a time named by what it sits next to.
+       *
+       * Resolved here rather than in the parser because it needs the calendar.
+       * If the phrase matches nothing, the anchor is dropped and the sentence
+       * is read the ordinary way, so "book lunch before the trip" with no trip
+       * on the calendar asks when rather than inventing a Tuesday.
+       */
+      if (!slots.when && slots.anchor) {
+        const ranked = resolveEvent(slots.anchor.phrase, state.events, now);
+        if (!ranked.length) {
+          return needs(`I can't find “${slots.anchor.phrase}” on your calendar. When should I put it?`);
+        }
+        if (!isConfident(ranked)) {
+          return askWhich(`Which one is “${slots.anchor.phrase}”?`, {
+            kind: "event", intent: "anchor", text: p.text,
+            options: ranked.slice(0, 4).map(({ item }) => ({
+              id: item.id, label: `${item.title} — ${describe(new Date(item.start), now)}`,
+            })),
+          });
+        }
+        const at = ranked[0].item;
+        const start = slots.anchor.side === "after"
+          ? new Date(new Date(at.end).getTime() + slots.anchor.offsetMins * 60000)
+          // Before means finishing before it starts, so the meeting's own
+          // length comes off too. Placing it to *start* at the offset would
+          // run it straight through the thing it was meant to precede.
+          : new Date(new Date(at.start).getTime() - (slots.anchor.offsetMins + mins) * 60000);
+        slots.when = start;
+        slots.hadDate = true;
+        slots.hadTime = true;
+        slots.anchorTitle = at.title;
+      }
+
+      if (!slots.when) return needs("When should I put it? A day and time works — “Thursday at 10”.");
       const people = slots.people || [];
       // A bare time belongs to the day being discussed. Asked "what does Friday
       // look like?" then "book a 2pm" — that 2pm is Friday's, not today's. The
@@ -1089,6 +1332,118 @@ export function ask(text, state, opts = {}) {
     }
 
     // ------------------------------------------------------- one thing
+    /**
+     * "What's next?"
+     *
+     * The most ordinary question anyone asks a diary, and it used to be
+     * answered "I couldn't find that on your calendar" — the resolver was
+     * being handed the word "next" and going looking for a meeting by that
+     * name. It wants the clock, not a lookup.
+     *
+     * Planned work counts as much as meetings. A day laid out by the scheduler
+     * and then described as empty is a schedule nobody trusts twice.
+     */
+    /**
+     * "Swap the standup and the board call."
+     *
+     * Two meetings changing places. Written as one move it is two moves that
+     * have to happen together, and doing them one at a time puts the first on
+     * top of the second for as long as it takes to do the second — which the
+     * undo stack would then take back one half at a time. Hence `batch`.
+     *
+     * Each keeps its own length. Exchanging durations as well would turn a
+     * fifteen-minute standup into an hour because the thing it traded with
+     * happened to be long, which is not what anybody means by "swap".
+     */
+    case INTENTS.SWAP_EVENTS: {
+      const halves = slots.subjectPhrase
+        .replace(/^.*?\b(?:swap|switch|exchange|trade|flip)\b\s*/i, "")
+        .split(/\s+\b(?:and|with|for)\b\s+/i)
+        .map((x) => x.replace(/\b(?:round|around|over)\b/gi, "").trim())
+        .filter(Boolean);
+
+      if (halves.length < 2) {
+        return needs("Swap which two? Name them both — “swap the standup and the board call”.");
+      }
+
+      const picked = [];
+      for (const half of halves.slice(0, 2)) {
+        const ranked = resolveEvent(half, state.events, now);
+        if (!ranked.length) {
+          return dead(`I couldn't find “${half}” on your calendar.`, REASONS.NO_MATCH);
+        }
+        if (!isConfident(ranked)) {
+          return askWhich(`Which one is “${half}”?`, {
+            kind: "event", intent: "swap", text: p.text,
+            options: ranked.slice(0, 4).map(({ item }) => ({
+              id: item.id, label: `${item.title} · ${describe(new Date(item.start), now)}`,
+            })),
+          });
+        }
+        picked.push(ranked[0].item);
+      }
+
+      const [a, b] = picked;
+      if (a.id === b.id) return reply("That's the same meeting twice — nothing to swap.");
+
+      const aStart = new Date(b.start);
+      const bStart = new Date(a.start);
+      const aEnd = new Date(aStart.getTime() + (new Date(a.end) - new Date(a.start)));
+      const bEnd = new Date(bStart.getTime() + (new Date(b.end) - new Date(b.start)));
+
+      return gate(
+        `swapping “${a.title}” and “${b.title}” — ${a.title} to ${describe(aStart, now)}, ` +
+        `${b.title} to ${describe(bStart, now)}`,
+        () => {
+          batch(`swapping “${a.title}” and “${b.title}”`, () => {
+            updateEvent(a.id, { start: toLocalIso(aStart), end: toLocalIso(aEnd) });
+            updateEvent(b.id, { start: toLocalIso(bStart), end: toLocalIso(bEnd) });
+          });
+          return reply(
+            `Swapped them. “${a.title}” is now ${describe(aStart, now)}, ` +
+            `“${b.title}” is ${describe(bStart, now)}.`,
+            [{ summary: `Swapped “${a.title}” and “${b.title}”` }],
+            { entity: null, set: { kind: "event", ids: [a.id, b.id] }, day: dayKey(aStart) },
+          );
+        },
+      );
+    }
+
+    case INTENTS.QUERY_NEXT: {
+      const upcoming = state.events
+        .filter((e) => new Date(e.start) > now)
+        .sort((a, b) => new Date(a.start) - new Date(b.start));
+      const block = workOn(state.blocks, state.tasks, dayKey(now))
+        .filter((b) => new Date(b.start) > now)
+        .sort((a, b) => new Date(a.start) - new Date(b.start))[0];
+
+      const next = upcoming[0];
+      if (!next && !block) {
+        return reply("Nothing else on your calendar. The rest of the day is yours.");
+      }
+
+      // Whichever comes first — a meeting tomorrow does not outrank an hour of
+      // focus work starting in twenty minutes.
+      const workFirst = block && (!next || new Date(block.start) < new Date(next.start));
+      const at = new Date(workFirst ? block.start : next.start);
+      const title = workFirst ? block.task.title : next.title;
+
+      const mins = Math.round((at - now) / 60000);
+      const away =
+        mins < 1 ? "starting now"
+        : mins < 60 ? `in ${mins} ${mins === 1 ? "minute" : "minutes"}`
+        : dayKey(at) === dayKey(now) ? `at ${fmtTime(at)}`
+        : `${describe(at, now)}`;
+
+      const kind = workFirst ? "Work on " : "";
+      const who = !workFirst && next.attendees?.length ? ` with ${joinNames(next.attendees)}` : "";
+      const after = upcoming[1] && dayKey(new Date(upcoming[1].start)) === dayKey(at)
+        ? ` Then ${upcoming[1].title} at ${fmtTime(new Date(upcoming[1].start))}.`
+        : "";
+
+      return reply(`${kind}${title}${who}, ${away}.${after}`, [], { day: dayKey(at) });
+    }
+
     case INTENTS.QUERY_EVENT: {
       const ranked = resolveEvent(p.body, state.events, now);
       if (!ranked.length) return dead("I couldn't find that on your calendar.", REASONS.NO_MATCH);
@@ -1238,6 +1593,122 @@ export function ask(text, state, opts = {}) {
       if (!slots_.length) return reply("Nothing open that day inside working hours.", [], { day });
       const lines = slots_.map((s) => `${fmtTime(s.start)}–${fmtTime(s.end)} (${duration(s.mins * 60000)})`);
       return reply(`Open time:\n${lines.join("\n")}`, [], { day });
+    }
+
+    /**
+     * "Spread the board deck over the rest of the week."
+     *
+     * The planner already knows how to lay a long job across the days before
+     * its deadline — that is the whole of `distribute`. What it could not be
+     * told, until now, is *which* days, so the only way to influence it was to
+     * go and edit a due date by hand.
+     *
+     * So this changes exactly one thing: the deadline. The layout that follows
+     * is the ordinary one, computed the ordinary way, still respecting working
+     * hours, meetings already booked, and everything else competing for the
+     * same week. A second mechanism that placed blocks directly would drift
+     * from the first one the day either of them changed.
+     */
+    case INTENTS.SPREAD_TASK: {
+      const ranked = resolveTask(slots.subjectPhrase, openTasks);
+      if (!ranked.length) return dead("I couldn't find an open task matching that.", REASONS.NO_MATCH);
+      if (!isConfident(ranked)) {
+        return askWhich("Which task?", {
+          kind: "task", intent: "spread", text: p.text,
+          options: ranked.slice(0, 4).map(({ item }) => ({ id: item.id, label: item.title })),
+        });
+      }
+      const task = ranked[0].item;
+      if (!task.estimateMins) {
+        return needs(`How long is “${task.title}” altogether? I can't spread it without knowing.`);
+      }
+
+      // The last day it may run to. A named stretch gives that directly; a
+      // rate — "two hours a day" — gives it by division, which is the same
+      // question asked from the other end.
+      let last = null;
+      let first = null;
+      if (slots.range) {
+        // Ranges are half-open, so the final working day is one before the end.
+        last = new Date(slots.range.to);
+        last.setDate(last.getDate() - 1);
+        // "across tomorrow and Thursday" — parseRange takes the first date it
+        // finds and stops there. The day after the "and" is the one that
+        // decides how far this runs.
+        const tail = slots.subjectPhrase.split(/\b(?:and|to|through|until|till)\b/i).slice(1).join(" ");
+        const later = tail ? parseDate(tail, now)?.date : null;
+        if (later && later > last) last = later;
+        // And the start of the stretch is a real instruction too, not just a
+        // way of naming the end of it.
+        if (slots.range.from > atLocal(now, 0)) first = new Date(slots.range.from);
+      } else if (slots.durationMins) {
+        const days = Math.max(1, Math.ceil(task.estimateMins / slots.durationMins));
+        last = atLocal(now, 0);
+        // Counted in working days rather than calendar days — four days of work
+        // starting Thursday should not quietly assume the weekend.
+        // Stops *on* the last working day it needs, not past it — both branches
+        // hand the same thing to the buffer arithmetic below.
+        let placed = 0;
+        while (placed < days) {
+          if (isWorkday(last, work)) placed++;
+          if (placed < days) last.setDate(last.getDate() + 1);
+        }
+      }
+      // The planner stops a buffer short of a deadline on purpose, so a due
+      // date set to the last working day would quietly lose that day. The
+      // buffer is added back here rather than removed there — finishing early
+      // is the right default for work that wasn't given an explicit deadline.
+      if (last) last.setDate(last.getDate() + (work.bufferDays ?? 1));
+
+      if (!last) {
+        return needs(`Across which days? “This week” or “two hours a day” both work.`);
+      }
+
+      // A rate is a standing instruction about the task, not a one-off, so it
+      // is written onto the task itself — the planner re-runs on every change
+      // and would otherwise forget it the next time anything moved.
+      const patch = { due: dayKey(last) };
+      if (slots.durationMins) patch.maxPerDayMins = slots.durationMins;
+      if (first) patch.notBeforeDay = dayKey(first);
+      const { due } = patch;
+
+      return gate(
+        `spreading “${task.title}” across the days up to ${due}` +
+        (patch.maxPerDayMins ? `, at most ${sayMins(patch.maxPerDayMins)} a day` : ""),
+        () => {
+        updateTask(task.id, patch);
+        const spread = distribute(
+          state.tasks.map((t) => (t.id === task.id ? { ...t, ...patch } : t)),
+          state.events, state.sessions, { ...work, now },
+        );
+        const mine = spread.blocks.filter((b) => b.taskId === task.id);
+        if (!mine.length) {
+          return reply(
+            `Set “${task.title}” to finish by ${due} — but nothing fits, the days up to then are full.`,
+            [{ summary: `“${task.title}” due ${due}` }],
+            { entity: { kind: "task", id: task.id }, day: due },
+          );
+        }
+
+        const byDay = new Map();
+        for (const b of mine) {
+          const k = dayKey(new Date(b.start));
+          byDay.set(k, (byDay.get(k) || 0) + b.mins);
+        }
+        const lines = [...byDay.entries()].map(([d, m]) => {
+          const when = describe(new Date(`${d}T12:00:00`), now).split(" at ")[0];
+          return `${when} — ${sayMins(m)}`;
+        });
+        const done = [...byDay.values()].reduce((a, b) => a + b, 0);
+        const missing = task.estimateMins - done;
+        return reply(
+          `“${task.title}” laid across ${byDay.size} ${byDay.size === 1 ? "day" : "days"}:\n${lines.join("\n")}` +
+          (missing > 0 ? `\n\n⚠ ${sayMins(missing)} of it still doesn't fit before ${due}.` : ""),
+          [{ summary: `Spread “${task.title}” over ${byDay.size} ${byDay.size === 1 ? "day" : "days"}` }],
+          { entity: { kind: "task", id: task.id }, day: due },
+        );
+      },
+      );
     }
 
     case INTENTS.PLAN_DAY: {

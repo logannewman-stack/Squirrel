@@ -541,6 +541,18 @@ export function parseDuration(text) {
   if (hm || mm) {
     return Math.round((hm ? Number(hm[1]) * 60 : 0) + (mm ? Number(mm[1]) : 0));
   }
+
+  /**
+   * "A quick 15 with Priya." "Grab a fast 30."
+   *
+   * A bare number is a time far more often than a length — "book 3 with Bob"
+   * means three o'clock — so this stays deliberately narrow: only directly
+   * after a word that can only mean brevity, never in front of a meridiem or a
+   * colon, and only for values that read as a number of minutes.
+   */
+  const brief = s.match(/\b(?:quick|fast|short|brief|little)\s+(\d{1,3})\b(?!\s*(?::|\s*[ap]\.?m\.?|o'?clock))/);
+  if (brief && Number(brief[1]) >= 5 && Number(brief[1]) <= 240) return Number(brief[1]);
+
   return null;
 }
 

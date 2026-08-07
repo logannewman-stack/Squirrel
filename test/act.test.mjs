@@ -447,6 +447,23 @@ for (const q of SINGLES) {
   t("saying no leaves everything alone", count() === 8, `${count()}`);
   t("and says so plainly", /left it/i.test(r.text), r.text);
 }
+// A bare "ok" is a yes when something is pending and agreement when nothing
+// is. `ask` claims it before small talk is ever consulted, and this pair is
+// the guard on that ordering — the classifier itself now reads "ok" as a
+// courtesy, so the proxy assertion that used to stand here no longer holds.
+{
+  seed({ confirm: true });
+  say("clear my calendar friday");
+  say("ok");
+  t("ok confirms an open proposal", count() === 5, titles().join(" · "));
+}
+{
+  seed({ confirm: true });
+  const r = say("ok");
+  t("ok with nothing pending is answered, not queried",
+    !r.miss && r.intent === "small:affirm", `${r.intent} | ${r.text}`);
+  t("and it changes nothing", count() === 8, `${count()}`);
+}
 {
   seed({ confirm: true });
   say("clear my calendar friday");

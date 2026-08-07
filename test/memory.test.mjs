@@ -284,8 +284,14 @@ const NOW = new Date(2026, 7, 2, 10, 0, 0);
   const a2 = answer("thanks", state, at(9), 1).text;
   t("phrasing varies between turns", a1 !== a2, `${a1} / ${a2}`);
 
-  // "ok" has to stay a yes while a proposal is open — checked in the e2e too.
-  t("bare yes is not mistaken for small talk", classify("ok") === null, classify("ok"));
+  // A bare "ok" with nothing pending is agreement, not a mystery. Being told
+  // "I didn't catch that" straight after saying ok is a strange way to end an
+  // exchange, and it was the commonest way she ended one.
+  t("a bare ok is agreement", classify("ok") === "affirm", classify("ok"));
+  // It still means *yes* while a proposal is open — but because `ask` claims
+  // it before small talk is ever consulted, not because the classifier refuses
+  // it. That is the invariant worth guarding, and it is asserted against `ask`
+  // itself in act.test.mjs rather than through a proxy here.
 
   // The failure that started this: anchored patterns meant one trailing word
   // turned a greeting into an error page.

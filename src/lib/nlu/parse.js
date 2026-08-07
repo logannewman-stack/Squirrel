@@ -27,6 +27,9 @@ export const INTENTS = {
   REPEAT_EVENT: "repeat_event",
   RESIZE_EVENT: "resize_event",
   QUERY_FREE: "query_free",
+  QUERY_NEXT: "query_next",
+  SWAP_EVENTS: "swap_events",
+  SPREAD_TASK: "spread_task",
   PLAN_DAY: "plan_day",
   HELP: "help",
   UNKNOWN: "unknown",
@@ -204,12 +207,170 @@ const hasClock = (s) => /\d\s*(?:am|pm|a\.m\.|p\.m\.|:\d{2})|\bat\s+\d|\b\d{1,2}
 const CANCEL_THEN_REBOOK =
   /\b(?:cancel\w*|delete|remove|drop|scrap|move|push)\b(.+?)(?:,\s*)?\b(?:and|then|&)\s+(?:can you\s+|please\s+)?(?:re-?schedul\w*|re-?book\w*|re-?arrange|rearrange|move|put|book|set|slot|pop|stick|do)\b\s*(?:it|that|this|them|the\s+\w+)?\s*(?:back\s+)?(?:for|to|on|at|in)\b(.+)$/i;
 
+/**
+ * "Right after the board call." "An hour before the standup."
+ *
+ * Executives do not schedule against the clock nearly as often as they
+ * schedule against each other — the debrief goes after the meeting it debriefs,
+ * the prep goes before the thing being prepped for. Every one of those
+ * sentences used to fall through to "I didn't catch that", because there is no
+ * time in them at all.
+ *
+ * What comes back is the phrase naming the other event, which side of it, and
+ * how far. Resolving the phrase is the caller's job — it needs the calendar,
+ * and if nothing matches, the sentence is read the ordinary way instead.
+ */
+const OFFSET_WORD = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, half: 0.5, "a couple": 2, "a couple of": 2 };
+const UNIT_MINS = { h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, m: 1, min: 1, mins: 1, minute: 1, minutes: 1 };
+
+const ANCHOR =
+  /\b(?:(\d+|an?|one|two|three|four|half an?|a couple(?: of)?)\s*(hours?|hrs?|h|minutes?|mins?|m)\s+)?(right\s+|just\s+|immediately\s+|straight\s+)?(after|before|following|ahead of|prior to)\s+(?:the\s+|my\s+|our\s+|that\s+)?([^,.]+?)\s*[,.]?\s*$/i;
+
+/** Phrases that read as an anchor but name a stretch of time, not a meeting. */
+const NOT_AN_ANCHOR =
+  /^(?:that|this|it|then|lunch|now|today|tomorrow|tonight|yesterday|the weekend|work|hours?|noon|midday|midnight|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|this week|the week|the day|the morning|the afternoon|the evening|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$/i;
+
+function parseAnchor(text) {
+  const m = text.match(ANCHOR);
+  if (!m) return null;
+
+  const [, count, unit, , side, phraseRaw] = m;
+  const phrase = phraseRaw.trim();
+  if (!phrase || NOT_AN_ANCHOR.test(phrase)) return null;
+
+  const rest = text.slice(0, m.index).trim();
+
+  /**
+   * "Book 30 minutes after the board call" is thirty minutes long.
+   * "Book a debrief 30 minutes after the board call" is thirty minutes later.
+   *
+   * Same words, opposite meanings, and the thing that separates them is what
+   * sits between the verb and the number. If the number is the direct object
+   * of the booking verb it is a length; if something else is being booked, the
+   * number is the distance. Reading it wrong books an hour-long meeting at the
+   * wrong time, which is the sort of error nobody notices until they are late.
+   */
+  const isLength = count && BARE_BOOKING.test(rest);
+
+  let offsetMins = 0;
+  if (count && unit && !isLength) {
+    const key = count.toLowerCase().replace(/^half an?$/, "half").replace(/^a couple of$/, "a couple");
+    const n = /^\d+$/.test(count) ? Number(count) : (OFFSET_WORD[key] ?? 1);
+    const u = unit.toLowerCase();
+    offsetMins = Math.round(n * (UNIT_MINS[u] ?? UNIT_MINS[u.replace(/s$/, "")] ?? 1));
+  }
+
+  return {
+    phrase,
+    side: /^(?:before|ahead of|prior to)$/i.test(side) ? "before" : "after",
+    offsetMins,
+    // The sentence with the anchor removed, so the length and the title are
+    // read from what is actually left of it. When the number turned out to be
+    // a length rather than a distance, it is put back for `parseDuration`.
+    rest: isLength ? `${rest} ${count} ${unit}` : rest,
+  };
+}
+
+/** Verbs that put something somewhere, without necessarily saying when. */
+const PLACE_VERB = /\b(?:put|slot|squeeze|wedge|stick|pop|pencil|schedule|book|add|set up|fit)\b|\bgive me an?\b|\bi (?:need|want)s? an?\b/;
+
+/** A booking verb with nothing between it and what follows. */
+const BARE_BOOKING =
+  /^(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:book|schedule|put|add|set|make|find|block|slot|pop|stick|get|grab|arrange|pencil|reserve|hold|carve out|set aside)(?:\s+(?:me|us|in|out|up|aside))*$/i;
+
+
+/**
+ * "Bring the standup forward." "Push the board call out a week."
+ *
+ * A move with no destination — only a direction and, sometimes, a distance.
+ * It is how anyone actually talks about nudging a meeting, and it used to be
+ * unparseable because every move rule was looking for somewhere to move *to*.
+ *
+ * Returns null when the sentence also names a real time, because then the
+ * direction is decoration: "move it back to Friday at 2" is a move to Friday,
+ * not a shift backwards.
+ */
+const NUDGE_DIR = /\b(forwards?|earlier|sooner|ahead|back|backwards?|later|out|up)\b/i;
+const NUDGE_AMOUNT =
+  /\b(?:by\s+)?(\d+|an?|one|two|three|four|five|six|half an?|a couple(?: of)?|a few)\s*(hours?|hrs?|h|minutes?|mins?|m|days?|weeks?|wks?)\b/i;
+const NUDGE_UNIT = { h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, m: 1, min: 1, mins: 1, minute: 1, minutes: 1,
+  day: 1440, days: 1440, week: 10080, weeks: 10080, wk: 10080, wks: 10080 };
+
+function parseNudge(text) {
+  const dir = text.match(NUDGE_DIR);
+  if (!dir) return null;
+
+  // "up" and "out" are only directions next to a movement verb. Without this,
+  // "set up a call" and "sort out Friday" both read as nudges.
+  if (/^(?:up|out)$/i.test(dir[1]) && !/\b(?:mov|push|bump|shift|bring|pull|shuffl|slid|knock|kick)\w*\b/i.test(text)) {
+    return null;
+  }
+
+  const earlier = /^(?:forwards?|earlier|sooner|ahead|up)$/i.test(dir[1]);
+  const amt = text.match(NUDGE_AMOUNT);
+  let mins = null;
+  if (amt) {
+    const key = amt[1].toLowerCase().replace(/^half an?$/, "half").replace(/^a couple of$/, "a couple").replace(/^a few$/, "three");
+    const n = /^\d+$/.test(amt[1]) ? Number(amt[1]) : (OFFSET_WORD[key] ?? 1);
+    const u = amt[2].toLowerCase();
+    mins = Math.round(n * (NUDGE_UNIT[u] ?? NUDGE_UNIT[u.replace(/s$/, "")] ?? 1));
+  }
+  return { dir: earlier ? "earlier" : "later", mins };
+}
+
+
+/**
+ * "No meetings before 10 tomorrow." "Nothing after 4 on Friday."
+ *
+ * A statement about what must *not* be booked, which is the one shape the
+ * booking rules could never see — there is no thing being scheduled in it,
+ * only a boundary. Kept as a side and read against the working day, so the
+ * hold runs from when the day starts rather than from midnight.
+ */
+const PROTECT =
+  /\bno\s+(?:meetings?|calls?|appointments?|anything)\b|\bnothing\b[^.]*\b(?:before|after|until|till|past)\b|\bkeep\b[^.]{0,24}\b(?:free|clear|open)\b|\bprotect\b/i;
+
+function parseProtect(text) {
+  if (!PROTECT.test(text)) return null;
+  const after = /\b(?:after|past|from)\b/i.test(text) && !/\b(?:before|until|till)\b/i.test(text);
+  const side = after ? "after" : "before";
+
+  /**
+   * The boundary, read here rather than by `parseTime`.
+   *
+   * A bare number is normally too ambiguous to be a time — "book 3 with Bob"
+   * is three o'clock, not three minutes — so `parseTime` rightly wants an "at"
+   * or a meridiem. Directly after "before" or "after" there is no ambiguity
+   * left: nothing else in English follows those words in a sentence about a
+   * calendar.
+   */
+  const at = text.match(/\b(?:before|until|till|after|past|from)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/i);
+  if (!at) return { side, h: null, m: 0 };
+
+  let h = Number(at[1]);
+  const m = Number(at[2] || 0);
+  const mer = at[3]?.[0]?.toLowerCase();
+  if (mer === "p" && h < 12) h += 12;
+  else if (mer === "a" && h === 12) h = 0;
+  // No meridiem, in a sentence about a working day: single digits below eight
+  // are the afternoon. "Nothing after 4" is never four in the morning.
+  else if (!mer && h >= 1 && h <= 7) h += 12;
+
+  return { side, h, m };
+}
+
 const RULES = [
   // First, and unmissable. Undo is the thing people reach for while something
   // is going wrong, and it must never be shadowed by a verb inside the same
   // sentence — "undo that meeting move" is an undo, not a move.
   [INTENTS.UNDO, /\bundo\b|\bredo that\b|\bput (?:it|that|them) back\b|\brevert\b|\btake (?:that|it) back\b|\bnever ?mind that,? undo\b|\bi didn'?t mean (?:that|to)\b|\bthat was a mistake\b|\bchange (?:that|it) back\b|\brestore\b/],
   [INTENTS.HELP, /\b(help|what can you do|commands?)\b/],
+  // Asking what to give up is a triage question, not a cancellation. It has to
+  // come this early because "drop", "cut", and "lose" are all cancel verbs, and
+  // CANCEL was answering "what should I drop?" with "I couldn't find that on
+  // your calendar" — a question about the whole week, answered as a failed
+  // lookup of a meeting called "I".
+  [INTENTS.PLAN_DAY, /\bwhat should i (?:drop|cut|skip|postpone|shelve|lose|let go)\b|\bwhat (?:can|could) i (?:drop|cut|skip)\b|\bwhat (?:has to|needs to|should) (?:go|give)\b/],
   [INTENTS.INVITE, /\b(invite|send (?:an? )?invit|email .* about|send .* (?:the )?(?:invite|calendar))\b/],
   // Very early, and deliberately narrow. "Finish" belongs to completing a task
   // and "how many hours" to progress, so both are only surrendered when the
@@ -222,8 +383,21 @@ const RULES = [
   // Ahead of move and cancel on purpose. "Bump the term sheet to critical" is
   // not a reschedule and "delete the diligence index task" is not a
   // cancellation, and both verbs belong to those rules. The object decides.
+  // Laying one job across several days, as opposed to setting how long it
+  // takes. Ahead of EDIT_TASK because "give the term sheet two hours a day"
+  // has the exact shape of an estimate — a task, a number, a unit — and being
+  // read as one would quietly replace a six-hour job with a two-hour one.
+  [INTENTS.SPREAD_TASK, /\b(?:spread|split|divide|break (?:it |them |this |that )?up|chunk|stagger|stretch|lay)\b[^.]*\b(?:across|over|out|between|into|through|up)\b|\b(?:\d+|an?|one|two|three|four|half an?)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)\s*(?:a|per|each|every)\s+day\b/],
   [INTENTS.EDIT_TASK, isTaskEdit],
-  [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|slid(?:e|ing))\b/],
+  // Two meetings changing places. Ahead of MOVE because "swap X and Y" has no
+  // move verb in it at all, and a rule that merely tolerated it would move one
+  // of the two and leave the other sitting on top of it.
+  // Holding time open, said as a prohibition. Ahead of the clearing and
+  // cancelling rules because "no meetings before 10" is a fence, not a
+  // deletion, and either of those would have read it as one.
+  [INTENTS.CREATE_EVENT, (body) => Boolean(parseProtect(body))],
+  [INTENTS.SWAP_EVENTS, /\b(?:swap|switch|exchange|trade|flip)\b[^.]*\b(?:and|with|for|round|around)\b/],
+  [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|slid(?:e|ing)|bring\w*\s+(?:it|that|them|the|my|forward)|pull\w*\s+(?:it|that|them|the|my)\b)\b/],
   // Before cancel, after move: "move everything on Friday to Monday" is a bulk
   // move and stays a move; "cancel everything on Friday" is a bulk clear.
   [INTENTS.CLEAR_RANGE, isClearRange],
@@ -243,11 +417,17 @@ const RULES = [
   [INTENTS.RESIZE_EVENT, /\b(shorten|lengthen|extend|trim|cut)\b.*\b(?:to|by|in half)\b|\bmake\b.*\b(?:\d+|one|two|three|four|five|half)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)/],
   // Questions about one specific thing on the calendar, which want a fact
   // rather than a day's worth of listing.
+  // "When is my next meeting" is a question about the calendar, not about a
+  // meeting called "next" — which is what QUERY_EVENT tried to look up, and it
+  // answered "I couldn't find that on your calendar" to the single most
+  // ordinary question anyone asks a diary. Placed ahead of it for that reason;
+  // MOVE and CANCEL still win, so "move my next meeting" is a move.
+  [INTENTS.QUERY_NEXT, /\b(?:what|when|which)(?:'s| is)?\s+(?:my |the )?next\b|\bwhat'?s (?:up )?next\b|\bnext (?:meeting|thing|one|up|appointment|call)\b|\bwhat'?s after (?:this|that)\b|\bhow long (?:until|till|til|to) (?:my |the )?next\b/],
   [INTENTS.QUERY_EVENT, /\b(?:where(?:'s| is)|how long is|who am i (?:meeting|seeing)|is .* still on|when(?:'s| is) (?:my|the)|what time is (?:my|the))\b/],
   [INTENTS.QUERY_PROGRESS, /\bhow much (?:time|have i|did i)\b|\bhow am i doing\b|\bwhat did i (?:do|finish|get done)\b|\bhow many hours\b|\bhow'?s my (?:focus|week)\b/],
-  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up))\b/],
-  [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|any (?:time|gaps?)|when can i)\b/],
-  [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week))\b/],
+  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
+  [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|gaps?|any time|when can i|spare (?:time|hour|minutes?))\b/],
+  [INTENTS.QUERY_DAY, /\b(what(?:'s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left)|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
   // A series, not a booking. Checked before create, or only the first one of
   // twelve ever reaches the calendar.
   [INTENTS.REPEAT_EVENT, /\bevery (?:day|weekday|week|other week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:daily|weekly|fortnightly|biweekly|monthly)\b|\brepeat(?:s|ing)?\b|\brecurring\b|\beach (?:day|week|monday|tuesday|wednesday|thursday|friday)\b/],
@@ -271,7 +451,19 @@ const PRIORITY = [
  * command it is — otherwise "no schedule it for friday" becomes an event
  * titled "No schedule it", which is exactly the failure this exists to stop.
  */
-const REPAIR = /^\s*(?:no+|nope|nah|actually|sorry|wait|whoops|oops|i meant|i said|not that|scratch that|never ?mind that|instead)\b[\s,.:;!—-]*/i;
+/**
+ * "No, make it Monday."
+ *
+ * A correction marker, stripped so what follows is read as content.
+ *
+ * The bare negatives carry an exception, because "no" is also an ordinary
+ * determiner: "no meetings before 10" is an instruction about the morning, and
+ * stripping the "no" off the front turned it into precisely its opposite. The
+ * exception lists the nouns rather than the verbs — what can follow a
+ * correction is most of English, and what makes "no" a determiner here is a
+ * short closed set of calendar words.
+ */
+const REPAIR = /^\s*(?:(?:no+|nope|nah|wait|whoops|oops)(?!\s+(?:meetings?|calls?|appointments?|events?|bookings?|commitments?|time|room|space|more|one)\b)|actually|sorry|i meant|i said|not that|scratch that|never ?mind that|instead)\b[\s,.:;!—-]*/i;
 
 /** "make it 3pm", "move it to Friday" — an edit to something already named. */
 const AMEND = /^\s*(?:make|change|set|push|move|shift|bump)\s+(?:it|that|this|them)\b/i;
@@ -282,7 +474,7 @@ const PRONOUN = /\b(?:it|that one|that|this one|them|those|the meeting|the event
 const PLURAL_PRONOUN = /\b(?:them|those|these|they|both|all of (?:them|it|those)|the rest of (?:them|it)|everything)\b/i;
 
 /** The noun that decides whether a bare booking is a "Call" or a "Meeting". */
-const KIND_NOUN = /\b(call|meeting|sync|standup|stand-up|interview|review|1:1|one on one|lunch|dinner|coffee|appointment|catch ?up)\b/i;
+const KIND_NOUN = /\b(call|meeting|sync|standup|stand-up|interview|review|1:1|one on one|lunch|dinner|coffee|appointment|catch ?up|break|breather|debrief|prep|block|slot|session|walk|workout|gym|school run|commute|travel|drive|flight|train)\b/i;
 
 /**
  * Words that follow "with" but are not people.
@@ -450,7 +642,7 @@ function stripVerbs(text) {
     // phrase loses its anchor, leaving the word "calendar" behind as a title.
     .replace(/\s*(?:it|this|that|them)?\s*\b(?:on|in)(?:to)?\s+(?:my|the)\s+(?:calendar|schedule|diary)\b/i, " ")
     .replace(
-      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|mov(?:e|ing)|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
+      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|i need(?: to)?|i want(?: to)?|i'?d like|we need(?: to)?|i have to|i've got to|i gotta|mov(?:e|ing)|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
       "",
     )
     .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder|appointment|sync|standup|stand-up|catch ?up|chat|block|slot|interview|review|1:1|one on one)\s+(?:to|for|called|named)?\s*/i, "")
@@ -588,6 +780,9 @@ function cleanTitle(text, people = [], subject = null) {
   t = stripTemporal(t);
   t = stripVerbs(t);
   t = t.replace(/\b(?:high priority|low priority|critical|urgent|asap|drop everything)\b/gi, " ");
+  // "a quick 15 with Priya" is fifteen minutes long, not a meeting called
+  // "Quick 15" — the length is read elsewhere and has no business in the name.
+  t = t.replace(/\b(?:quick|fast|short|brief|little)\s+\d{1,3}\b/gi, " ");
   t = t.replace(/\s{2,}/g, " ").trim();
   // Peel connectors, articles, and stranded pronouns off both ends until
   // nothing changes: "for the board deck" is a phrase from the command,
@@ -653,7 +848,11 @@ export function parse(text, now = new Date()) {
   }
 
   const when = parseDateTime(targetPhrase, now);
-  const durationMins = parseDuration(body);
+  // The anchor is read first and its span cut out before the length is looked
+  // for, or "an hour before the board call" books an hour-long meeting at some
+  // default time instead of a meeting one hour earlier than the board call.
+  const anchor = parseAnchor(body);
+  const durationMins = parseDuration(anchor ? anchor.rest : body);
 
   let priority = null;
   for (const [re, level] of PRIORITY) {
@@ -665,21 +864,62 @@ export function parse(text, now = new Date()) {
 
   // "delegate X to Anders" / "assign X to Priya"
   const toPerson = body.match(/\b(?:to|with|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/);
-  const people = extractPeople(body);
-  const subject = extractSubject(body, people);
+  // With an anchor present, everything descriptive is read from the half of
+  // the sentence that isn't the anchor. Otherwise "put a debrief right after
+  // the board call" is titled "Debrief right after the board call", and the
+  // meeting it is named for ends up inside its own name.
+  const said = anchor ? anchor.rest : body;
+  const people = extractPeople(said);
+  const subject = extractSubject(said, people);
   // A move carries two of everything: where it is now, and where it is going.
   // Scanning the whole sentence finds the first date in it, which is the one
   // being moved *away from* — so "move that appointment from tomorrow at 4 to
   // Saturday at 2" resolved to tomorrow at 4 and reported nothing had changed.
   const whenPhrase = targetPhrase === body ? body : targetPhrase;
   const dateOnly = parseDate(whenPhrase, now)?.date ?? null;
-  const timeOnly = parseTime(whenPhrase);
+  let timeOnly = parseTime(whenPhrase);
+  // "Make it 1." In a correction there is nothing else a bare number can be —
+  // the thing being corrected already exists, so the number is not a length,
+  // a count, or a person. Everywhere else it stays ambiguous and is left alone.
+  if (!timeOnly && AMEND.test(body)) {
+    const bare = body.match(/\b(?:make|change|set|move|shift|push|bump)\s+(?:it|that|this|them)\s+(?:to\s+)?(\d{1,2})(?::(\d{2}))?\s*$/i);
+    if (bare) {
+      let h = Number(bare[1]);
+      // A working day, so single digits below eight are the afternoon.
+      if (h >= 1 && h <= 7) h += 12;
+      timeOnly = { h, m: Number(bare[2] || 0), source: "amend" };
+    }
+  }
   const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;
 
   // "lunch with priya friday at 12" — nobody writes a verb in front of that.
   // A meeting noun with a time attached is a booking, and the only reason it
   // needed "schedule" in front was that the rules were looking for a verb.
   if (intent === INTENTS.UNKNOWN && kindNoun && (dateOnly || timeOnly)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  // "I need an hour with Bob Thursday at 2." "Quick 15 with Priya."
+  //
+  // No booking verb anywhere in either, because people state what they need as
+  // often as they command it. A length and a person together is a request for
+  // a meeting whatever else is in the sentence; with a day attached it is a
+  // complete one, and without a day the handler asks — which is a far better
+  // answer than not understanding the sentence at all.
+  //
+  // Only reached when every rule above declined, so the verbs that mean
+  // something else have already had their turn.
+  if (intent === INTENTS.UNKNOWN && durationMins && (people.length || kindNoun || dateOnly || timeOnly)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  // "Put a debrief right after the board call." There is no clock in that
+  // sentence at all, which is exactly why every phrasing like it fell through
+  // — the booking rules are looking for a time and this names a position
+  // instead. Something has to be being placed, though: a kind of meeting, a
+  // person, or a placement verb. "After the board call" on its own is a
+  // fragment and belongs to the follow-up machinery, not to a new booking.
+  if (intent === INTENTS.UNKNOWN && anchor && (kindNoun || people.length || PLACE_VERB.test(s))) {
     intent = INTENTS.CREATE_EVENT;
   }
 
@@ -694,7 +934,7 @@ export function parse(text, now = new Date()) {
     subjectPhrase: renameSubject(body) || subjectPhrase,
     targetPhrase,
     // Title with verbs, temporal phrases, and priority wording removed.
-    title: cleanTitle(body, people, subject),
+    title: cleanTitle(said, people, subject),
     rename: extractRename(body),
     people,
     subject,
@@ -710,6 +950,20 @@ export function parse(text, now = new Date()) {
     // Digits, not "afternoon" — the difference between naming one meeting and
     // naming a stretch of the day.
     hadClock: hasClock(s),
+    // "after the board call" — a position relative to something else on the
+    // calendar. Null unless the sentence actually names one; resolving it to a
+    // real event happens where the calendar is in hand.
+    anchor,
+    // "forward an hour" — a direction with no destination. Read only when the
+    // sentence names no actual time: "move it back to Friday at 2" is a move to
+    // Friday, and treating the word "back" there as a shift would send a
+    // meeting into last week.
+    // A named day is *scope* — "move everything on Wednesday an hour later"
+    // says which meetings, not where they go. Only an actual clock time means
+    // a destination was given, and only that cancels the nudge.
+    nudge: when?.hadTime ? null : parseNudge(body),
+    // Which side of the named time has to stay empty, if either.
+    protect: parseProtect(body),
   };
 
   // A fragment carries information but no verb: "for friday", "make it 30 min",
