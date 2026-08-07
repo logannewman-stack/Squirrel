@@ -8,7 +8,7 @@
  */
 import {
   rangeOf, shiftBy, titleOf, monthMatrix, monthsIn, mondayOf, quarterOf,
-  loadIndex, loadOf, isScale,
+  loadIndex, loadOf, isScale, SCALES,
 } from "../src/lib/calendar.js";
 import { hoursOf } from "../src/lib/hours.js";
 
@@ -132,6 +132,22 @@ const WED = new Date(2026, 7, 5, 14, 30);
   t("and a standing commitment counts against the day too",
     loadOf(new Date(2026, 7, 5), index, withLunch).ratio > wed.ratio,
     loadOf(new Date(2026, 7, 5), index, withLunch).ratio);
+}
+
+// -------------------------------------------------------------- the agenda
+// The vertical schedule, and the reason it exists: the week grid is unreadable
+// on a phone, so the default scale has to be one that isn't.
+{
+  t("agenda is the first scale", SCALES[0].id === "agenda", SCALES[0].id);
+  t("and a real scale", isScale("agenda"));
+  t("it spans three weeks forward", span(rangeOf("agenda", WED)) === "2026-08-05→2026-08-26",
+    span(rangeOf("agenda", WED)));
+  // Forward, not centred: "what's coming" starts today, not eleven days ago.
+  t("it starts at the anchor day", key(rangeOf("agenda", WED).from) === "2026-08-05");
+  t("paging moves by the whole window", key(shiftBy("agenda", WED, 1)) === "2026-08-26",
+    key(shiftBy("agenda", WED, 1)));
+  t("and back", key(shiftBy("agenda", WED, -1)) === "2026-07-15", key(shiftBy("agenda", WED, -1)));
+  t("its title is a date range", /Aug/.test(titleOf("agenda", WED)), titleOf("agenda", WED));
 }
 
 console.log(`\nCalendar ranges: ${pass} passed, ${fail} failed`);

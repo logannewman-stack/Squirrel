@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fmtTime } from "../lib/agenda";
+import { fmtTime, workOn } from "../lib/agenda";
 import { dayKey, setSetting } from "../lib/store";
 import { hoursOf, breaksOn, sayMins } from "../lib/hours";
 import {
@@ -19,7 +19,10 @@ const HOUR_PX = 52;
  */
 export default function Calendar({ state, onNewEvent, onOpenEvent }) {
   const stored = state.settings?.calendarScale;
-  const [scale, setScale] = useState(isScale(stored) ? stored : "week");
+  // Agenda by default: it is the one scale that is legible the instant the
+  // calendar opens, on the screen most people open it on. A returning user's
+  // chosen scale still wins.
+  const [scale, setScale] = useState(isScale(stored) ? stored : "agenda");
   const [anchor, setAnchor] = useState(() => new Date());
 
   const hours = useMemo(() => hoursOf(state.settings), [state.settings]);
@@ -110,7 +113,15 @@ export default function Calendar({ state, onNewEvent, onOpenEvent }) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {scale === "day" || scale === "week" ? (
+        {scale === "agenda" ? (
+          <AgendaList
+            range={range}
+            state={state}
+            now={now}
+            onOpenEvent={onOpenEvent}
+            onNewEvent={onNewEvent}
+          />
+        ) : scale === "day" || scale === "week" ? (
           <TimeGrid
             days={daysOf(range)}
             state={state}
@@ -206,6 +217,158 @@ const LoadKey = () => (
     <span>Full</span>
   </div>
 );
+
+/* ---------------------------------------------------------------- agenda */
+
+/**
+ * What's coming, as a list you can actually read on a phone.
+ *
+ * The week grid is seven columns, and seven columns on a 400-pixel screen
+ * either overflow sideways — hiding half your week off the edge, which is how
+ * you open the calendar and see nothing — or squeeze to a width no event title
+ * survives. A schedule reads top to bottom instead: each day that has
+ * something on it, its meetings and its planned work in order, and empty days
+ * simply left out. It is the default because it is the one view that answers
+ * "what's next" without a single sideways scroll.
+ */
+function AgendaList({ range, state, now, onOpenEvent, onNewEvent }) {
+  const today = dayKey(now);
+  const from = range.from.getTime();
+  const to = range.to.getTime();
+
+  // One pass, grouped by day: meetings, planned focus work, and anything due.
+  const days = useMemo(() => {
+    const byDay = new Map();
+    const bucket = (key) => {
+      if (!byDay.has(key)) byDay.set(key, { key, events: [], work: [], due: [] });
+      return byDay.get(key);
+    };
+
+    for (const e of state.events) {
+      const at = new Date(e.start).getTime();
+      if (at >= from && at < to) bucket(dayKey(new Date(e.start))).events.push(e);
+    }
+    // Planned work is time already spoken for, so it belongs on the schedule —
+    // shown lighter than a meeting, the same as it is on the grid.
+    const spanDays = Math.round((to - from) / 86400000);
+    for (let i = 0; i < spanDays; i++) {
+      const d = new Date(from);
+      d.setDate(d.getDate() + i);
+      const k = dayKey(d);
+      const w = workOn(state.blocks, state.tasks, k);
+      if (w.length) bucket(k).work.push(...w);
+    }
+    for (const t of state.tasks) {
+      if (!t.done && t.due && t.due >= dayKey(new Date(from)) && t.due < dayKey(new Date(to))) {
+        bucket(t.due).due.push(t);
+      }
+    }
+
+    return [...byDay.values()]
+      .filter((d) => d.events.length || d.work.length || d.due.length)
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map((d) => {
+        d.events.sort((a, b) => new Date(a.start) - new Date(b.start));
+        d.work.sort((a, b) => new Date(a.start) - new Date(b.start));
+        return d;
+      });
+  }, [state.events, state.blocks, state.tasks, from, to]);
+
+  if (!days.length) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col items-center px-6 py-20 text-center">
+        <p className="text-sm text-[var(--muted)]">Nothing scheduled in the next three weeks.</p>
+        <button
+          onClick={onNewEvent}
+          className="mt-4 rounded-full border border-[var(--line)] px-5 py-2 text-sm
+                     transition-colors hover:border-[var(--ink)]"
+        >
+          New event
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl px-4 pb-8 sm:px-6">
+      {days.map(({ key, events, work, due }) => {
+        const d = new Date(`${key}T00:00:00`);
+        const isToday = key === today;
+        const rel = relativeDay(d, now);
+
+        return (
+          <section key={key} className="border-b border-[var(--hairline)] py-4 last:border-0">
+            {/* The date header is sticky so you always know which day you are
+                looking at while the events scroll under it. */}
+            <div className="sticky top-0 z-10 -mx-4 mb-2 flex items-baseline gap-2 bg-[var(--paper)]/95
+                            px-4 py-1 backdrop-blur-sm sm:-mx-6 sm:px-6">
+              <span
+                className={`num grid h-7 w-7 shrink-0 place-items-center rounded-full text-sm ${
+                  isToday ? "bg-[var(--ink)] font-semibold text-[var(--paper)]" : "text-[var(--ink)]"
+                }`}
+              >
+                {d.getDate()}
+              </span>
+              <span className="text-sm font-medium">{rel}</span>
+              <span className="label">{d.toLocaleDateString([], { month: "short" })}</span>
+              {due.length > 0 && (
+                <span className="alert-chip ml-auto">{due.length} due</span>
+              )}
+            </div>
+
+            <ul className="space-y-0.5">
+              {events.map((e) => (
+                <li key={e.id}>
+                  <button
+                    onClick={() => onOpenEvent(e)}
+                    className="row-hover flex w-full items-baseline gap-3 rounded-lg px-2 py-2 text-left"
+                  >
+                    <span className="num w-16 shrink-0 text-xs text-[var(--muted)]">{fmtTime(e.start)}</span>
+                    <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ink)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{e.title}</span>
+                      <span className="mt-0.5 block truncate text-xs text-[var(--muted)]">
+                        {sayMins((new Date(e.end) - new Date(e.start)) / 60000)}
+                        {e.attendees?.length ? ` · ${e.attendees.map((a) => a.name).join(", ")}` : ""}
+                        {e.location ? ` · ${e.location}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+
+              {work.map((b) => {
+                const task = state.tasks.find((t) => t.id === b.taskId);
+                return (
+                  <li key={`${b.taskId}-${b.start}`}>
+                    <div className="flex items-baseline gap-3 rounded-lg px-2 py-2">
+                      <span className="num w-16 shrink-0 text-xs text-[var(--faint)]">{fmtTime(b.start)}</span>
+                      <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full border border-dashed border-[var(--muted)]" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-[var(--muted)]">{task?.title || "Focus"}</span>
+                        <span className="mt-0.5 block text-xs text-[var(--faint)]">{sayMins(b.mins)} of focus</span>
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/** "Today", "Tomorrow", then the weekday — the label people actually think in. */
+function relativeDay(d, now) {
+  const key = dayKey(d);
+  const t = new Date(now);
+  if (key === dayKey(t)) return "Today";
+  t.setDate(t.getDate() + 1);
+  if (key === dayKey(t)) return "Tomorrow";
+  return d.toLocaleDateString([], { weekday: "long" });
+}
 
 /* ------------------------------------------------------------ day and week */
 

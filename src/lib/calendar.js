@@ -18,6 +18,7 @@ import { dayKey } from "./store.js";
 import { worksOn, breakMinsOn } from "./hours.js";
 
 export const SCALES = [
+  { id: "agenda", label: "Agenda", key: "a" },
   { id: "day", label: "Day", key: "d" },
   { id: "week", label: "Week", key: "w" },
   { id: "month", label: "Month", key: "m" },
@@ -48,6 +49,8 @@ export const quarterOf = (d) => Math.floor(new Date(d).getMonth() / 3);
 export function rangeOf(scale, anchor) {
   const a = midnight(anchor);
   switch (scale) {
+    case "agenda":
+      return { from: a, to: addDays(a, 21) };
     case "day":
       return { from: a, to: addDays(a, 1) };
     case "week": {
@@ -78,6 +81,8 @@ export function rangeOf(scale, anchor) {
 export function shiftBy(scale, anchor, n) {
   const a = midnight(anchor);
   switch (scale) {
+    case "agenda":
+      return addDays(a, n * 21);
     case "day":
       return addDays(a, n);
     case "week":
@@ -103,6 +108,13 @@ function clampedMonth(a, months) {
 export function titleOf(scale, anchor) {
   const a = new Date(anchor);
   switch (scale) {
+    case "agenda": {
+      const end = addDays(a, 20);
+      const sameMonth = a.getMonth() === end.getMonth();
+      return sameMonth
+        ? `${a.toLocaleDateString([], { month: "long" })} ${a.getDate()}–${end.getDate()}`
+        : `${a.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric" })}`;
+    }
     case "day":
       return a.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
     case "week": {
@@ -124,7 +136,9 @@ export function titleOf(scale, anchor) {
 
 /** The year, shown under the title when the title itself does not carry it. */
 export const subtitleOf = (scale, anchor) =>
-  scale === "day" || scale === "week" ? String(new Date(anchor).getFullYear()) : "";
+  scale === "agenda" || scale === "day" || scale === "week"
+    ? String(new Date(anchor).getFullYear())
+    : "";
 
 /**
  * Six weeks of cells for one month, Monday-first.

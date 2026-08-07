@@ -62,6 +62,51 @@ await p.getByRole("dialog").getByRole("button", { name: "Delete it" }).click();
 await p.waitForTimeout(300);
 t("and then removes it", (await p.evaluate(async () => (await import("/src/lib/store.js")).getState().events.length)) === 0);
 
+// ---- the agenda, on a phone-width screen ----
+// The reason the view exists: a week grid pushes half the week off the side of
+// a phone, so the default scale has to be one that fits. Cleared to a fresh
+// install so no earlier scale choice is remembered — the default is the thing
+// being tested.
+await p.setViewportSize({ width: 390, height: 844 });
+await p.evaluate(() => localStorage.clear());
+await p.reload({ waitUntil: "networkidle" });
+await p.getByRole("button", { name: "Mr." }).click();
+await p.getByPlaceholder("Surname").fill("Newman");
+await p.getByRole("button", { name: "Continue" }).click();
+await p.evaluate(async () => {
+  const s = await import("/src/lib/store.js");
+  const base = new Date(); base.setHours(0, 0, 0, 0);
+  const iso = (x) => `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}T${String(x.getHours()).padStart(2,"0")}:00:00`;
+  const mk = (off, h, title) => { const st = new Date(base); st.setDate(st.getDate()+off); st.setHours(h);
+    const en = new Date(st); en.setHours(h+1); s.addEvent({ title, start: iso(st), end: iso(en) }); };
+  mk(0, 9, "Exec staff"); mk(2, 11, "Design review"); mk(4, 15, "Late week sync");
+});
+await p.reload({ waitUntil: "networkidle" });
+await p.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
+await p.waitForTimeout(400);
+
+t("the calendar opens on Agenda by default",
+  await p.getByRole("tab", { name: "Agenda" }).getAttribute("aria-selected") === "true");
+
+// Every meeting is on the list, including the one four days out that a week
+// grid would have hidden off the right edge.
+for (const title of ["Exec staff", "Design review", "Late week sync"]) {
+  t(`${title} is on the agenda`, await p.getByText(title, { exact: true }).first().isVisible());
+}
+
+// The page itself must not scroll sideways — that is the whole failure mode.
+const noSideScroll = await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+t("the page does not scroll sideways", noSideScroll,
+  await p.evaluate(() => `${document.documentElement.scrollWidth} vs ${window.innerWidth}`));
+
+// And a meeting on the agenda opens the same editor a grid tap does.
+await p.getByText("Design review", { exact: true }).first().click();
+const agDlg = p.getByRole("dialog");
+await agDlg.waitFor({ state: "visible", timeout: 4000 });
+t("tapping an agenda row opens the editor",
+  (await agDlg.locator('input[placeholder="Title"]').inputValue()) === "Design review");
+await p.keyboard.press("Escape");
+
 let failed = 0;
 for (const [n, ok, d] of out) { if (!ok) failed++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${!ok && d ? `  → ${d}` : ""}`); }
 console.log(errs.length ? `page errors: ${errs.slice(0,3).join(" | ")}` : "page errors: none");
