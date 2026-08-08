@@ -443,7 +443,7 @@ await p.reload({ waitUntil: "networkidle" });
 
 await p.getByRole("button", { name: "Mr." }).click();
 await p.getByPlaceholder("Surname").fill("Newman");
-await p.getByRole("button", { name: "Continue" }).click();
+await p.getByRole("button", { name: "Get started" }).click();
 
 await p.getByRole("button", { name: "New event" }).click();
 await p.getByPlaceholder("Title").fill("Partner sync");

@@ -9,6 +9,7 @@ import Settings from "./components/Settings";
 import FocusScreen from "./components/FocusScreen";
 import EventDialog from "./components/EventDialog";
 import Identity from "./components/Identity";
+import Welcome from "./components/Welcome";
 import CommandPalette from "./components/CommandPalette";
 import Squirrel from "./components/Squirrel";
 import { SidebarNav, BottomNav } from "./components/Nav";
@@ -193,13 +194,10 @@ export default function App() {
 
   // ------------------------------------------------------------- overlays
   // Asked once, before anything else — the assistant greets by name and has
-  // nothing to greet with until this is answered.
+  // nothing to greet with until this is answered. It is also the only screen a
+  // brand-new user has seen, so it says what the app is at the same time.
   if (!state.settings?.identity) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center px-6">
-        <Identity value={{}} onDone={() => setView({ name: "today" })} />
-      </div>
-    );
+    return <Welcome onDone={() => setView({ name: "today" })} />;
   }
 
   if (active) {

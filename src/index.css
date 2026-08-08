@@ -28,6 +28,19 @@
      reliable meaning. */
   --lift: 0 1px 2px rgba(9, 9, 11, 0.04), 0 1px 1px rgba(9, 9, 11, 0.03);
   --float: 0 12px 32px -8px rgba(9, 9, 11, 0.16), 0 4px 10px -4px rgba(9, 9, 11, 0.08);
+
+  /* The brand panel — the dark half of the welcome screen.
+     Deliberately NOT --ink. --ink is "whatever colour text is", and in dark
+     mode that is near-white: a panel painted with it inverts to white while
+     anything written in literal white on top of it disappears entirely. This
+     is a surface that is dark in both themes, so it gets its own tokens and
+     its own text colours that always belong to it. */
+  --brand: #0b0b0d;
+  --brand-ink: #fafafa;
+  --brand-muted: rgba(255, 255, 255, 0.66);
+  --brand-faint: rgba(255, 255, 255, 0.42);
+  --brand-chip: rgba(255, 255, 255, 0.10);
+  --brand-edge: transparent;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,6 +60,12 @@
        raised surface itself, so the lift is only a hairline of light. */
     --lift: 0 0 0 1px rgba(255, 255, 255, 0.04);
     --float: 0 16px 40px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+
+    /* Lifted rather than deepened. On a near-black page a near-black panel is
+       not a panel at all — the division vanishes — so in dark mode the brand
+       surface sits slightly above the page and carries a hairline edge. */
+    --brand: #16161a;
+    --brand-edge: rgba(255, 255, 255, 0.07);
   }
 }
 
@@ -229,6 +248,12 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 /* In the tab bar she takes the tab's own colour, so she dims with the rest
    instead of staying stubbornly black. */
 .sq-tab .sq-fill { fill: currentColor; }
+
+/* On the brand panel she is always pale, because that panel is always dark.
+   `--paper` would have been the obvious choice and is wrong: in dark mode it is
+   near-black, which paints her black on a black panel — the same trap as the
+   body copy that vanished there. */
+.sq-invert .sq-fill { fill: var(--brand-ink); }
 
 /* Reduced motion: she holds still. The status line already says what is
    happening, so nothing is lost but the movement. */

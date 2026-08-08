@@ -18,7 +18,7 @@ await p.reload({ waitUntil: "networkidle" });
 
 await p.getByRole("button", { name: "Mr." }).click();
 await p.getByPlaceholder("Surname").fill("Newman");
-await p.getByRole("button", { name: "Continue" }).click();
+await p.getByRole("button", { name: "Get started" }).click();
 
 // Seed a meeting today so the day grid has something to tap.
 await p.evaluate(async () => {
@@ -72,7 +72,7 @@ await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: "networkidle" });
 await p.getByRole("button", { name: "Mr." }).click();
 await p.getByPlaceholder("Surname").fill("Newman");
-await p.getByRole("button", { name: "Continue" }).click();
+await p.getByRole("button", { name: "Get started" }).click();
 await p.evaluate(async () => {
   const s = await import("/src/lib/store.js");
   const base = new Date(); base.setHours(0, 0, 0, 0);

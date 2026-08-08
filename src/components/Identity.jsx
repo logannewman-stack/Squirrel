@@ -9,7 +9,7 @@ import { HONORIFICS, addressOf, greeting } from "../lib/nlu/voice";
  * "no name" options exist because an honorific is a preference, not a default
  * to be guessed from anything.
  */
-export default function Identity({ value = {}, onDone, compact = false }) {
+export default function Identity({ value = {}, onDone, compact = false, submitLabel }) {
   const [style, setStyle] = useState(value.style || "formal");
   // Deliberately blank. Pre-selecting one would put a guess about the person on
   // screen before they have said anything, which is the whole thing this
@@ -103,10 +103,10 @@ export default function Identity({ value = {}, onDone, compact = false }) {
       <button
         onClick={save}
         disabled={!ready}
-        className="w-full rounded-md bg-[var(--ink)] py-3 text-sm font-medium text-[var(--paper)]
-                   transition-opacity disabled:opacity-30"
+        className="w-full rounded-lg bg-[var(--ink)] py-3 text-sm font-medium text-[var(--paper)]
+                   transition-opacity hover:opacity-90 disabled:opacity-30"
       >
-        {compact ? "Save" : "Continue"}
+        {submitLabel ?? (compact ? "Save" : "Continue")}
       </button>
     </div>
   );
