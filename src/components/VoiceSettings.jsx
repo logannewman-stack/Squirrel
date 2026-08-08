@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { setSetting } from "../lib/store";
-import { canSpeak, canListen, onVoicesReady, speak, stopSpeaking, voiceSettings } from "../lib/speech";
+import { canSpeak, canListen, onVoicesReady, speak, stopSpeaking, voiceSettings, PERSONAS, bestVoiceFor } from "../lib/speech";
 
 /**
  * Voice, on both sides.
@@ -31,6 +31,7 @@ export default function VoiceSettings({ state }) {
     speak("Good morning. You have three meetings on Friday, and two hours of work planned.", {
       voiceURI: next.voiceURI,
       rate: next.rate,
+      pitch: next.pitch,
     });
   };
 
@@ -59,6 +60,48 @@ export default function VoiceSettings({ state }) {
 
           {v.speak && (
             <div className="space-y-5 border-l border-[var(--line)] pl-4">
+              {/* A character rather than three sliders. Nobody wants to tune a
+                  pitch value; people want "the calm English one", and the
+                  persona sets the voice, the rate and the register together. */}
+              <div>
+                <label className="label mb-2 block">Character</label>
+                <div className="flex flex-col gap-2">
+                  {Object.values(PERSONAS).map((persona) => {
+                    const on = v.persona === persona.id;
+                    return (
+                      <button
+                        key={persona.id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => {
+                          // Clearing the explicit voice and rate lets the
+                          // persona choose both; keeping them would make the
+                          // picker look broken for anyone who had tuned it.
+                          save({ persona: persona.id, voiceURI: null, rate: null, pitch: null });
+                          preview({
+                            persona: persona.id,
+                            voiceURI: bestVoiceFor(persona.id)?.voiceURI ?? null,
+                            rate: persona.rate,
+                            pitch: persona.pitch,
+                          });
+                        }}
+                        className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                          on ? "border-[var(--ink)] bg-[var(--hover)]" : "border-[var(--line)] hover:border-[var(--ink)]"
+                        }`}
+                      >
+                        <span className="block text-sm font-medium">{persona.name}</span>
+                        <span className="mt-0.5 block text-xs text-[var(--muted)]">{persona.blurb}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">
+                  Characters use the voices already on your device. On iPhone and
+                  Mac, Settings → Accessibility → Spoken Content → Voices has more
+                  of them, including higher-quality English ones worth the download.
+                </p>
+              </div>
+
               <div>
                 <label className="label mb-2 block" htmlFor="voice-pick">Voice</label>
                 <div className="flex flex-wrap items-center gap-2">

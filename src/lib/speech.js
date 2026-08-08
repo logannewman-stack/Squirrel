@@ -100,6 +100,88 @@ export function onVoicesReady(fn) {
   return () => speechSynthesis.removeEventListener("voiceschanged", handler);
 }
 
+/* ---------------------------------------------------------------- personas
+   How she sounds, as a small set of choices rather than three sliders.
+   Nobody wants to tune a pitch value; people want "the calm British one".
+
+   A word on the obvious request. The voice from the films is a specific
+   performer, and cloning a real person's voice is their right to license, not
+   ours to take — so this does not attempt it and never will. What it does
+   instead is the part that actually carries the character: an English male
+   voice, measured rather than brisk, pitched a little low, addressing you by
+   title. Most of what people recognise in that assistant is diction and
+   manner, and diction and manner are ours to write.
+   ------------------------------------------------------------------------ */
+
+export const PERSONAS = {
+  natural: {
+    id: "natural",
+    name: "Natural",
+    blurb: "Whatever your device does best.",
+    prefer: { lang: null, names: [] },
+    rate: 1,
+    pitch: 1,
+  },
+  butler: {
+    id: "butler",
+    name: "The butler",
+    blurb: "English, unhurried, faintly amused. Calls you by name.",
+    // Daniel is the long-standing en-GB male voice on Apple platforms; Arthur
+    // and Oliver are the newer ones. Named rather than guessed at, because
+    // "pick a male voice" is not something the API will answer.
+    prefer: { lang: "en-GB", names: ["daniel", "arthur", "oliver", "graham", "jamie"] },
+    // Slower and lower. The measured delivery is most of the impression — the
+    // same words at 1.0 and default pitch sound like a train announcement.
+    rate: 0.94,
+    pitch: 0.9,
+  },
+  brisk: {
+    id: "brisk",
+    name: "Brisk",
+    blurb: "Quick and out of the way.",
+    prefer: { lang: null, names: [] },
+    rate: 1.15,
+    pitch: 1,
+  },
+};
+
+/**
+ * The best available voice for a persona, or null to let the device decide.
+ *
+ * Scored rather than matched, because the catalogue differs on every device
+ * and an exact name that is missing should degrade to something close instead
+ * of to silence.
+ */
+export function bestVoiceFor(personaId) {
+  const persona = PERSONAS[personaId];
+  if (!persona || !canSpeak()) return null;
+  // A persona with no preferences means "whatever this device does best",
+  // which is the device default — not the first entry of a catalogue that
+  // opens with novelty voices on macOS.
+  if (!persona.prefer.lang && !persona.prefer.names.length) return null;
+
+  const all = speechSynthesis.getVoices();
+  if (!all.length) return null;
+
+  const score = (v) => {
+    let n = 0;
+    const name = v.name.toLowerCase();
+    if (persona.prefer.names.some((w) => name.includes(w))) n += 100;
+    if (persona.prefer.lang && v.lang === persona.prefer.lang) n += 40;
+    else if (persona.prefer.lang && v.lang.startsWith(persona.prefer.lang.slice(0, 2))) n += 10;
+    // Apple ships "Enhanced" and "Premium" variants that sound markedly better
+    // and are worth preferring wherever the person has downloaded one.
+    if (/premium|enhanced/i.test(v.name)) n += 25;
+    if (v.localService) n += 5;
+    return n;
+  };
+
+  const best = all.map((v) => ({ v, n: score(v) })).sort((a, b) => b.n - a.n)[0];
+  // A zero score means nothing matched at all; the device default is a better
+  // answer than an arbitrary voice from the top of the list.
+  return best && best.n > 0 ? best.v : null;
+}
+
 /**
  * Say something.
  * @returns {() => void} stop
@@ -283,10 +365,25 @@ export function listen({ onInterim, onFinal, onEnd, onError, continuous = false 
   };
 }
 
-/** The settings blob, with defaults, so no caller has to guess. */
-export const voiceSettings = (settings = {}) => ({
-  speak: settings?.voice?.speak ?? false,
-  handsFree: settings?.voice?.handsFree ?? false,
-  voiceURI: settings?.voice?.voiceURI ?? null,
-  rate: Number(settings?.voice?.rate ?? 1),
-});
+/**
+ * The settings blob, with defaults, so no caller has to guess.
+ *
+ * Speaking is on by default in the native app and off on the web. In an app
+ * somebody installed, a voice answering is the feature; in a browser tab it is
+ * a surprise noise, and possibly one in an open-plan office.
+ */
+export const voiceSettings = (settings = {}) => {
+  const persona = PERSONAS[settings?.voice?.persona] ?? PERSONAS.natural;
+  const native = globalThis.__SQUIRREL_NATIVE__ === true;
+  return {
+    speak: settings?.voice?.speak ?? native,
+    handsFree: settings?.voice?.handsFree ?? false,
+    // An explicitly chosen voice always wins; otherwise the persona picks.
+    voiceURI: settings?.voice?.voiceURI ?? bestVoiceFor(persona.id)?.voiceURI ?? null,
+    persona: persona.id,
+    // A rate the person set by hand beats the persona's, so the slider still
+    // means something after a persona is chosen.
+    rate: Number(settings?.voice?.rate ?? persona.rate),
+    pitch: Number(settings?.voice?.pitch ?? persona.pitch),
+  };
+};

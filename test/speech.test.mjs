@@ -7,7 +7,7 @@
  * arrives in a shape the parser already understands. Both were the difference
  * between "the microphone works" and "I can book a meeting by talking".
  */
-import { toSpeech, fromSpeech } from "../src/lib/speech.js";
+import { toSpeech, fromSpeech, voiceSettings, bestVoiceFor } from "../src/lib/speech.js";
 import { parse } from "../src/lib/nlu/parse.js";
 
 let pass = 0, fail = 0;
@@ -117,6 +117,68 @@ for (const [heard, contains, time] of HEARD) {
 {
   const p = parse(fromSpeech("clear my calendar for this week"), new Date(2026, 7, 5, 9));
   t("a dictated clear is still a clear", p.intent === "clear_range", p.intent);
+}
+
+/* ------------------------------------------------------------------ personas
+   The defaults decide whether anybody ever hears the assistant at all, so they
+   are worth pinning down: speaking is on in the installed app and off in a
+   browser tab, and a choice already made always beats both. */
+{
+  // A catalogue in the shape a device returns one, deliberately opening with a
+  // novelty voice so "first in the list" would be visibly wrong.
+  const CATALOGUE = [
+    { name: "Albert", lang: "en-US", voiceURI: "albert", localService: true },
+    { name: "Samantha", lang: "en-US", voiceURI: "samantha", localService: true },
+    { name: "Daniel", lang: "en-GB", voiceURI: "daniel", localService: true },
+    { name: "Kate", lang: "en-GB", voiceURI: "kate", localService: true },
+    { name: "Google UK English Male", lang: "en-GB", voiceURI: "guk", localService: false },
+  ];
+  globalThis.speechSynthesis = { getVoices: () => CATALOGUE };
+  globalThis.SpeechSynthesisUtterance = function () {};
+
+  t("the butler finds the English male voice", bestVoiceFor("butler")?.voiceURI === "daniel",
+    bestVoiceFor("butler")?.name);
+
+  globalThis.speechSynthesis = {
+    getVoices: () => [...CATALOGUE, { name: "Daniel (Enhanced)", lang: "en-GB", voiceURI: "daniel-x", localService: true }],
+  };
+  t("and prefers the downloaded high-quality one", bestVoiceFor("butler")?.voiceURI === "daniel-x",
+    bestVoiceFor("butler")?.name);
+
+  globalThis.speechSynthesis = { getVoices: () => CATALOGUE };
+  t("a persona with no preference defers to the device", bestVoiceFor("natural") === null,
+    bestVoiceFor("natural")?.name);
+  t("an unknown persona does not throw", bestVoiceFor("jarvis") === null);
+
+  // Defaults.
+  delete globalThis.__SQUIRREL_NATIVE__;
+  t("a browser tab does not start talking at you", voiceSettings({}).speak === false);
+  globalThis.__SQUIRREL_NATIVE__ = true;
+  t("an installed app answers out loud", voiceSettings({}).speak === true);
+  t("but a person who turned it off stays off",
+    voiceSettings({ voice: { speak: false } }).speak === false);
+  t("hands-free is never assumed", voiceSettings({}).handsFree === false);
+
+  // Personas carry the delivery, not just the voice.
+  const butler = voiceSettings({ voice: { persona: "butler" } });
+  t("the butler is slower than default", butler.rate < 1, butler.rate);
+  t("and pitched lower", butler.pitch < 1, butler.pitch);
+  t("and reaches for its own voice", butler.voiceURI === "daniel", butler.voiceURI);
+  t("brisk is quicker", voiceSettings({ voice: { persona: "brisk" } }).rate > 1);
+
+  // A slider moved by hand outranks the persona that suggested it.
+  t("a hand-set rate wins",
+    voiceSettings({ voice: { persona: "butler", rate: 1.4 } }).rate === 1.4);
+  t("a hand-picked voice wins",
+    voiceSettings({ voice: { persona: "butler", voiceURI: "samantha" } }).voiceURI === "samantha");
+  t("a nonsense persona falls back rather than breaking",
+    voiceSettings({ voice: { persona: "nope" } }).persona === "natural");
+
+  delete globalThis.__SQUIRREL_NATIVE__;
+  delete globalThis.speechSynthesis;
+  delete globalThis.SpeechSynthesisUtterance;
+  t("with no engine at all there is still a settings object",
+    voiceSettings({}).voiceURI === null && voiceSettings({}).speak === false);
 }
 
 console.log(`\nSpeech: ${pass} passed, ${fail} failed`);

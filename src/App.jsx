@@ -371,6 +371,8 @@ export default function App() {
     onNavigate: (name) => setView({ name }),
     onAskSquirrel: () => setAssistantOpen(true),
     attention,
+    state,
+    onUpgrade: () => setView({ name: "settings" }),
   };
 
   return (

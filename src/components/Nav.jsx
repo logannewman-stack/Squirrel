@@ -1,4 +1,5 @@
 import Squirrel from "./Squirrel";
+import PlanCard from "./PlanCard";
 
 /**
  * The navigation, in the two shapes the app wears.
@@ -96,7 +97,7 @@ export function BottomNav({ isActive, settingsActive, onNavigate, onAskSquirrel,
    screen want a persistent rail and the width back for the work. Squirrel is
    the first thing in it — a full "Ask Squirrel" button, not an icon to decode —
    because on desktop there is room to name the action, not just draw it. */
-export function SidebarNav({ isActive, settingsActive, onNavigate, onAskSquirrel, attention }) {
+export function SidebarNav({ isActive, settingsActive, onNavigate, onAskSquirrel, attention, state, onUpgrade }) {
   const item = ([name, label, d]) => (
     <button
       key={name}
@@ -136,6 +137,16 @@ export function SidebarNav({ isActive, settingsActive, onNavigate, onAskSquirrel
       </button>
 
       <nav className="flex flex-1 flex-col gap-0.5">{ITEMS.map(item)}</nav>
+
+      {/* The plan, where it can be seen without being looked for. It used to
+          live below eight sections of Settings, which meant somebody hit a wall
+          on Tuesday, worked around it, and never heard about the way past it
+          again. */}
+      {state && (
+        <div className="mb-2 mt-4">
+          <PlanCard state={state} onUpgrade={onUpgrade} onManage={() => onNavigate("settings")} />
+        </div>
+      )}
 
       <button
         onClick={() => onNavigate("settings")}

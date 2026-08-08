@@ -120,6 +120,9 @@ export default function Assistant({ state, onClose, metered = false }) {
       speak(said, {
         voiceURI: voice.voiceURI,
         rate: voice.rate,
+        // Without this the persona's lower register is dropped and the butler
+        // sounds exactly like the default voice, only slower.
+        pitch: voice.pitch,
         onEnd: () => {
           setTalking(false);
           // Hands-free: reopen the microphone, but only where the turn is
