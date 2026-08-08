@@ -7,6 +7,7 @@ import VoiceSettings from "./VoiceSettings";
 import Misses from "./Misses";
 import Billing from "./Billing";
 import Calendars from "./Calendars";
+import SetupCheck from "./SetupCheck";
 import { configured as canSync } from "../lib/supabase";
 import { duration } from "../lib/format";
 
@@ -132,6 +133,15 @@ export default function Settings({ state, onBack }) {
       <section className="mb-10">
         <h2 className="mb-2 font-medium">Reminders</h2>
         <Reminders state={state} />
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">Deployment</h2>
+        <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
+          What this copy of Squirrel has configured. Only whether a key is set,
+          never any part of its value.
+        </p>
+        <SetupCheck />
       </section>
 
       <section className="mb-10">
