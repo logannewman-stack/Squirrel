@@ -41,6 +41,10 @@ const EMPTY = {
   // never a source of truth: the server meters anything that costs money, so
   // editing this by hand unlocks the drawing of a feature and nothing behind it.
   plan: "free",
+  // {day, n} — how many turns a free account has spent with the assistant
+  // today. Reset by the date changing rather than by a timer, so it needs no
+  // scheduler and survives the app being closed overnight.
+  assists: { day: "", n: 0 },
 };
 
 let cache = null;
@@ -453,6 +457,27 @@ export const setSetting = (key, value) =>
  */
 export const setPlanTier = (plan) =>
   read().plan === (plan || "free") ? undefined : update({ plan: plan || "free" });
+
+/** How many of today's free assistant turns have been used. */
+export function assistsToday(now = new Date()) {
+  const a = read().assists;
+  return a?.day === dayKey(now) ? a.n : 0;
+}
+
+/**
+ * Spend one of today's free assistant turns.
+ *
+ * Called only when the account is not entitled outright — a paid plan never
+ * reaches here, so the counter stays at zero and there is nothing to reset when
+ * somebody upgrades.
+ */
+export function claimAssist(now = new Date()) {
+  const today = dayKey(now);
+  const a = read().assists;
+  const n = (a?.day === today ? a.n : 0) + 1;
+  update({ assists: { day: today, n } });
+  return n;
+}
 
 // ------------------------------------------------------------------ planning
 /**

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { askAsync, resolveChoice, EXAMPLES } from "../lib/nlu";
 import { addressOf } from "../lib/nlu/voice";
-import { appendChat, clearChat, setSetting } from "../lib/store";
+import { appendChat, clearChat, setSetting, claimAssist } from "../lib/store";
 import { canSpeak, canListen, speak, stopSpeaking, listen, voiceSettings } from "../lib/speech";
 import Thinking from "./Thinking";
 import Squirrel from "./Squirrel";
@@ -17,7 +17,7 @@ import Squirrel from "./Squirrel";
  */
 const THINK_MS = { calendar: 900, pen: 650 };
 
-export default function Assistant({ state, onClose }) {
+export default function Assistant({ state, onClose, metered = false }) {
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(null);
   const [pendingChoice, setPendingChoice] = useState(null);
@@ -147,6 +147,11 @@ export default function Assistant({ state, onClose }) {
     setInput("");
     setPendingChoice(null);
     appendChat({ role: "user", text: msg });
+    // A free account is spending one of its few turns for the day. Counted on
+    // the way in rather than on a successful answer: a turn she could not parse
+    // still used her, and refunding it would make the allowance impossible to
+    // reason about from the outside.
+    if (metered) claimAssist();
 
     const started = Date.now();
     const res = await askAsync(msg, state, {

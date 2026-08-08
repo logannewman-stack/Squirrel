@@ -6,6 +6,7 @@ import WorkingHours from "./WorkingHours";
 import VoiceSettings from "./VoiceSettings";
 import Misses from "./Misses";
 import Billing from "./Billing";
+import Calendars from "./Calendars";
 import { configured as canSync } from "../lib/supabase";
 import { duration } from "../lib/format";
 
@@ -42,6 +43,17 @@ export default function Settings({ state, onBack }) {
         </section>
       )}
 
+      {canSync && (
+        <section className="mb-10">
+          <h2 className="mb-2 font-medium">Calendars</h2>
+          <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
+            Connect Google Calendar and the two stay in step — meetings booked
+            anywhere show up here, and anything Squirrel schedules appears there.
+          </p>
+          <Calendars plan={state.plan} email={state.settings?.email || null} />
+        </section>
+      )}
+
       <section className="mb-10">
         <h2 className="mb-2 font-medium">How I address you</h2>
         <p className="mb-4 text-sm text-[var(--muted)]">
@@ -72,8 +84,9 @@ export default function Settings({ state, onBack }) {
           onChange={() => setSetting("confirm", !confirms)}
         />
         <p className="mt-3 text-xs text-[var(--muted)]">
-          The assistant runs entirely on this device. No account, no API key, no per-message
-          cost — which is why every plan gets unlimited chats.
+          The assistant runs entirely on this device — no API key and no per-message cost, so
+          she answers instantly and works offline. Pro removes the daily limit on how often
+          you can ask.
         </p>
       </section>
 

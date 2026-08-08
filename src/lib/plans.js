@@ -121,6 +121,23 @@ export const can = (plan, feature) => {
   return f.tiers.includes(plan ?? "free");
 };
 
+/**
+ * How many turns a free account gets with the assistant each day.
+ *
+ * She is the reason to pay, and a wall in front of something nobody has used is
+ * a wall in front of nothing: "unlimited assistant" means little to someone who
+ * has never watched her move a meeting. A few turns a day is enough to feel
+ * what it does and short enough to run out of on a busy morning, which is the
+ * moment the upgrade makes sense.
+ *
+ * Counted in the browser, and deliberately so. The built-in assistant is
+ * deterministic and costs nothing to run, so this is a pricing decision rather
+ * than a spend control — there is nothing here worth defending with a server
+ * round-trip. The one thing that does cost money, the model fallback, is
+ * metered in SQL where it cannot be argued with.
+ */
+export const FREE_ASSISTS_PER_DAY = 5;
+
 /** The cheapest tier that unlocks a feature — what the lock should offer. */
 export const unlocks = (feature) => {
   const f = FEATURES[feature];
