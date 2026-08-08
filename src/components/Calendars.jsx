@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { listCalendars, connectGoogle, syncNow, disconnect, connectResult } from "../lib/calendars";
+import {
+  appleCalendarAvailable, requestAppleAccess, appleCalendars, syncAppleCalendar,
+} from "../lib/apple-calendar";
 import { can } from "../lib/plans";
 import { Button } from "./ui";
 
@@ -42,6 +45,31 @@ export default function Calendars({ plan, email }) {
       history.replaceState({}, "", location.pathname);
     }
   }, [email]);
+
+  /**
+   * Connect the device's own calendar.
+   *
+   * No OAuth and no server: permission comes from the operating system, and the
+   * sync runs here. The default calendar is used rather than asking which one —
+   * picking from a list of six calendars named "Calendar" is not a decision
+   * anyone wants before they have seen it work.
+   */
+  async function connectApple() {
+    const access = await requestAppleAccess();
+    if (access !== "granted") {
+      throw new Error(
+        access === "unavailable"
+          ? "Apple Calendar needs the iPhone or Mac app."
+          : "Squirrel needs calendar permission — you can grant it in Settings.",
+      );
+    }
+    const [first] = (await appleCalendars()).filter((c) => c.writable);
+    if (!first) throw new Error("No calendar on this device can be written to.");
+
+    const out = await syncAppleCalendar(first.id);
+    if (!out.ok) throw new Error("Couldn't read that calendar.");
+    return { pulled: out.pulled, pushed: out.pushed };
+  }
 
   async function go(fn, key) {
     setBusy(key);
@@ -104,12 +132,34 @@ export default function Calendars({ plan, email }) {
         >
           {busy === "connect" ? "Opening Google…" : "Connect Google Calendar"}
         </Button>
+
+        {/* Apple only appears where it can actually work. There is no
+            server-side Apple Calendar API, so this is the native app or
+            nothing — and an button that cannot do anything is worse than an
+            absent one. */}
+        {appleCalendarAvailable() && (
+          <Button
+            variant="secondary"
+            disabled={busy !== null || !allowed}
+            onClick={() => go(connectApple, "apple")}
+          >
+            {busy === "apple" ? "Asking permission…" : "Connect Apple Calendar"}
+          </Button>
+        )}
+
         {links?.length > 0 && (
           <Button variant="ghost" disabled={busy !== null} onClick={() => go(syncNow, "sync")}>
             {busy === "sync" ? "Syncing…" : "Sync now"}
           </Button>
         )}
       </div>
+
+      {!appleCalendarAvailable() && (
+        <p className="mt-3 text-xs text-[var(--muted)]">
+          Apple Calendar syncs in the iPhone and Mac apps. Apple publishes no way
+          for a website to reach it — it has to run on your own device.
+        </p>
+      )}
 
       {!allowed && (
         <p className="mt-3 text-sm text-[var(--muted)]">

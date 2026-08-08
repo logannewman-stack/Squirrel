@@ -33,13 +33,24 @@ export default async function handler(req, res) {
   const auth = await requireUser(req);
   if (!auth) return json(res, 401, { error: "unauthorized" });
 
-  const db = asService();
+  return json(res, 200, await syncUser(asService(), auth.user.id));
+}
+
+/**
+ * Sync every Google calendar one account has connected.
+ *
+ * Exported because the scheduled job needs exactly this, for every account in
+ * turn. A cron that reimplemented the loop would drift from the one the button
+ * runs, and the difference would only ever show up in the version nobody is
+ * watching.
+ */
+export async function syncUser(db, userId) {
   const { data: links } = await db
     .from("calendar_links").select("*")
-    .eq("user_id", auth.user.id).eq("provider", "google")
+    .eq("user_id", userId).eq("provider", "google")
     .not("refresh_token", "is", null);
 
-  if (!links?.length) return json(res, 200, { synced: 0, links: 0 });
+  if (!links?.length) return { pulled: 0, pushed: 0, links: 0, errors: [] };
 
   let pulled = 0, pushed = 0;
   const errors = [];
@@ -47,8 +58,8 @@ export default async function handler(req, res) {
   for (const link of links) {
     try {
       const token = await accessTokenFor(link, db);
-      pulled += await pull(db, link, token, auth.user.id);
-      pushed += await push(db, link, token, auth.user.id);
+      pulled += await pull(db, link, token, userId);
+      pushed += await push(db, link, token, userId);
       await db.from("calendar_links")
         .update({ last_synced_at: new Date().toISOString(), last_error: null })
         .eq("id", link.id);
@@ -63,7 +74,7 @@ export default async function handler(req, res) {
     }
   }
 
-  return json(res, 200, { pulled, pushed, links: links.length, errors });
+  return { pulled, pushed, links: links.length, errors };
 }
 
 /**

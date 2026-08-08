@@ -1,3 +1,5 @@
+import { isEcho, resolve } from "../../src/lib/calsync.js";
+
 /**
  * Google Calendar, in the parts that can be reasoned about without a network.
  *
@@ -22,6 +24,14 @@
  * prefers the remote — Google is shared with other people, so its copy is the
  * one others have already seen and planned around.
  */
+
+/**
+ * Echo detection and conflict resolution live in src/lib/calsync.js, shared
+ * with the Apple path that runs on the device. Re-exported here so callers and
+ * tests keep one import site, and so there is exactly one copy of the rules
+ * that decide whether a meeting survives.
+ */
+export { isEcho, resolve };
 
 /** Scopes: read and write events, plus the account's address to label the link. */
 export const SCOPES = [
@@ -124,47 +134,6 @@ export function fromGoogle(g) {
       .filter((a) => !a.self)
       .map((a) => ({ name: a.displayName || a.email, email: a.email })),
   };
-}
-
-/**
- * Is this remote row our own write echoing back?
- *
- * Google returns the event we just created on the very next incremental pull.
- * Without this it reads as something new and gets created a second time.
- * Matching on etag rather than on time is what makes it reliable: clocks are
- * not comparable across machines, but an etag is the exact version we wrote.
- */
-export function isEcho(remote, link) {
-  if (!link) return false;
-  if (link.etag && remote?.etag && link.etag === remote.etag) return true;
-  // A push we recorded but whose etag we never saw. Anything within the window
-  // is ours; beyond it, treat it as a real change and let `resolve` decide.
-  if (!link.pushed_at) return false;
-  const pushed = new Date(link.pushed_at).getTime();
-  const updated = new Date(remote?.updated ?? 0).getTime();
-  return Number.isFinite(pushed) && Number.isFinite(updated) && Math.abs(updated - pushed) < 5000;
-}
-
-/**
- * Which copy wins when both sides moved.
- *
- * Remote wins a genuine tie. Google is the shared calendar — other people have
- * already been sent that time and planned around it — so silently preferring
- * our own copy would put the user in a meeting nobody else thinks is happening.
- */
-export function resolve({ localUpdatedAt, remoteUpdatedAt, link }) {
-  const local = new Date(localUpdatedAt ?? 0).getTime() || 0;
-  const remote = new Date(remoteUpdatedAt ?? 0).getTime() || 0;
-  const pulled = new Date(link?.pulled_at ?? 0).getTime() || 0;
-  const pushed = new Date(link?.pushed_at ?? 0).getTime() || 0;
-
-  const localMoved = local > Math.max(pulled, pushed);
-  const remoteMoved = remote > Math.max(pulled, pushed);
-
-  if (localMoved && !remoteMoved) return "push";
-  if (remoteMoved && !localMoved) return "pull";
-  if (!localMoved && !remoteMoved) return "none";
-  return "pull"; // both moved — the shared copy is the one others can see
 }
 
 /**

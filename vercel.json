@@ -4,6 +4,9 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm ci",
+  "crons": [
+    { "path": "/api/cron/calendars", "schedule": "*/15 * * * *" }
+  ],
   "rewrites": [
     { "source": "/((?!api/|.well-known/).*)", "destination": "/" }
   ],
