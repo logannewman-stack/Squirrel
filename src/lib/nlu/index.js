@@ -21,7 +21,7 @@ import {
 } from "./context.js";
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
-  deleteTask, setMemory, setPlan, batch, undo, lastChange,
+  deleteTask, addProject, setMemory, setPlan, batch, undo, lastChange,
 } from "../store.js";
 import { record as recordMiss, resolve as pairMiss, REASONS } from "../misses.js";
 import { interpret, hasResolver, contextFor } from "./fallback.js";
@@ -264,6 +264,8 @@ export const EXAMPLES = [
   "What does Friday look like?",
   "The board deck will take 8 hours",
   "Every Monday at 9, standup",
+  "Start a project called Q3 Launch",
+  "Put the board deck under Q3 Launch",
   "Clear my Friday afternoon",
   "What should I drop?",
   "Undo that",
@@ -883,6 +885,119 @@ export function ask(text, state, opts = {}) {
           return reply(`Cancelled “${ev.title}”.`, [{ summary: `Cancelled “${ev.title}”` }], { entity: null });
         },
       );
+    }
+
+    // ---------------------------------------------------------- projects
+    /**
+     * "Start a project called Q3 Launch."
+     *
+     * Projects were the one part of the app the assistant could not touch:
+     * twenty-four intents, and not one of them reached the layer everything
+     * else hangs off. Somebody could ask her to book a meeting and file a task,
+     * then had to go and make the project by hand before either could belong
+     * anywhere.
+     */
+    case INTENTS.CREATE_PROJECT: {
+      const name = slots.project;
+      if (!name) return needs("What should the project be called?");
+
+      // Already there. Making a second one quietly is how a board ends up with
+      // two "Series B"s and the work split between them.
+      const existing = resolveProject(name, state.projects);
+      if (existing.length && isConfident(existing)) {
+        return reply(
+          `\u201c${existing[0].item.name}\u201d already exists.`,
+          [], { entity: { kind: "project", id: existing[0].item.id } },
+        );
+      }
+
+      return gate(`starting a project called \u201c${name}\u201d`, () => {
+        const made = addProject({ name });
+        return reply(
+          `Started \u201c${made.name}\u201d. Say \u201cadd something to ${made.name}\u201d to put work in it.`,
+          [{ summary: `New project \u201c${made.name}\u201d` }],
+          { entity: { kind: "project", id: made.id } },
+        );
+      });
+    }
+
+    /** The projects, and what each is carrying. */
+    case INTENTS.QUERY_PROJECTS: {
+      const live = state.projects.filter((x) => !x.archived);
+      if (!live.length) {
+        return reply("No projects yet. Say \u201cstart a project called \u2026\u201d and I'll make one.");
+      }
+
+      const lines = live.slice(0, 8).map((project) => {
+        const load = projectLoad(project, state.tasks, state.sessions, state.events, { now });
+        return `\u2022 ${describeLoad(load)}`;
+      });
+      const more = live.length - Math.min(live.length, 8);
+
+      return reply(
+        `${live.length} ${live.length === 1 ? "project" : "projects"}.\n\n${lines.join("\n")}` +
+          (more > 0 ? `\n\nand ${more} more.` : ""),
+        [], { entity: null },
+      );
+    }
+
+    /**
+     * "Put the board deck under Series B."
+     *
+     * Filing something that already exists rather than making it. The task is
+     * resolved the same way every other task reference is, so "the deck" works
+     * as soon as there is a deck.
+     */
+    case INTENTS.FILE_TASK: {
+      const hit = resolveProject(slots.project, state.projects);
+      if (!hit.length) {
+        return dead(`I couldn't find a project called \u201c${slots.project}\u201d.`, REASONS.NO_MATCH);
+      }
+      if (!isConfident(hit)) {
+        return askWhich("Which project?", {
+          kind: "project", intent: "file", text: p.body,
+          options: hit.slice(0, 4).map((r) => ({ id: r.item.id, label: r.item.name })),
+        });
+      }
+      const project = hit[0].item;
+
+      // What is being filed: the sentence with the project part taken out, so
+      // "add the deck to the Marketing project" looks for "the deck" rather
+      // than for the whole line.
+      const escaped = project.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const what = (slots.subjectPhrase || p.body)
+        .replace(new RegExp(escaped, "ig"), " ")
+        .replace(/\bprojects?\b/ig, " ")
+        .replace(/\b(?:add|put|file|move|assign|link|attach|to|under|into|in|on|the|a|an|my)\b/ig, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const ranked = opts.resolvedId
+        ? state.tasks.filter((t) => t.id === opts.resolvedId).map((item) => ({ item, score: 9 }))
+        : resolveTask(what, openTasks);
+
+      if (!ranked.length) return dead(`I couldn't find \u201c${what}\u201d to file.`, REASONS.NO_MATCH);
+      if (!isConfident(ranked)) {
+        return askWhich("Which one?", {
+          kind: "task", intent: "file", text: p.body,
+          options: ranked.slice(0, 4).map((r) => ({ id: r.item.id, label: r.item.title })),
+        });
+      }
+
+      const task = ranked[0].item;
+      if (task.projectId === project.id) {
+        return reply(`\u201c${task.title}\u201d is already in ${project.name}.`, [],
+          { entity: { kind: "task", id: task.id } });
+      }
+
+      return gate(`filing \u201c${task.title}\u201d under ${project.name}`, () => {
+        updateTask(task.id, { projectId: project.id });
+        return reply(
+          `\u201c${task.title}\u201d is in ${project.name} now.`,
+          [{ summary: `${task.title} \u2192 ${project.name}` }],
+          { entity: { kind: "task", id: task.id } },
+        );
+      });
     }
 
     // -------------------------------------------------------------- undo

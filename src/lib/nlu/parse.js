@@ -32,6 +32,9 @@ export const INTENTS = {
   EDIT_ATTENDEES: "edit_attendees",
   SPREAD_TASK: "spread_task",
   PLAN_DAY: "plan_day",
+  CREATE_PROJECT: "create_project",
+  QUERY_PROJECTS: "query_projects",
+  FILE_TASK: "file_task",
   HELP: "help",
   UNKNOWN: "unknown",
 };
@@ -545,6 +548,93 @@ const RESIDUE = new Set([
   "a", "an", "my", "our", "its", "is", "are", "was", "were", "be", "been",
 ]);
 
+/**
+ * The project a sentence is about, as a phrase.
+ *
+ * Three shapes, and the order they are tried in is the whole trick. "a project
+ * called Q3 Launch" names one being made, so the name follows the word. "new
+ * project Marketing" is the same thing without the ceremony. "the Marketing
+ * project" points at one that exists, so the name sits in front — and that
+ * form has to be tried last, because it will happily match the "new" in "new
+ * project Marketing" and name a project after the word new.
+ *
+ * Returns a phrase, never a project. Matching it against what somebody
+ * actually has is the resolver's job; doing it here would put knowledge of the
+ * data inside the parser.
+ */
+
+/** Words that are never the start of a project name. */
+const NOT_A_PROJECT_WORD = /^(?:the|a|an|my|our|this|that|to|in|on|for|under|into|add|put|move|file|new|start|create|make|set|up|open|begin)\s+/i;
+
+/**
+ * Phrases that are grammar rather than a name.
+ *
+ * Tested against the *first* word, because these arrive as fragments — "show
+ * me", "do i have", "project going" — and a whole-string match would let every
+ * one of them through as a plausible-looking project name.
+ */
+const NOT_A_PROJECT_NAME =
+  /^(?:do|does|did|are|is|was|have|has|list|show|tell|what|which|how|when|why|going|doing|coming|looking|progressing|tracking|start|create|new|make|add|put|file|move|open|begin|set|me|us|it|that|there)\b/i;
+
+const trim = (name) => {
+  let out = String(name ?? "").trim().replace(/["“”']/g, "");
+  // Strip leading filler a word at a time — "to the Marketing" is "Marketing".
+  let before;
+  do { before = out; out = out.replace(NOT_A_PROJECT_WORD, ""); } while (out !== before);
+  return out.trim();
+};
+
+export function projectPhrase(body) {
+  const s = String(body ?? "");
+
+  // 1. Explicitly named: everything after "called" / "named".
+  const named = s.match(/\b(?:called|named|titled)\s+["“']?(.+?)["”']?\s*[?.!]*$/i);
+  if (named) return trim(named[1]) || null;
+
+  // 2. The name follows the word: "new project Marketing".
+  const leading = s.match(/\bprojects?\s+([A-Za-z0-9][\w'’&.-]*(?:\s+[\w'’&.-]+){0,3})\s*[?.!]*$/i);
+  if (leading) {
+    const name = trim(leading[1]);
+    // "projects do i have" is a question, not a project called "do i have",
+    // and "project going" is the tail of "how is the X project going" — the
+    // name is in front of the noun there, so fall through to the next shape.
+    if (name && !NOT_A_PROJECT_NAME.test(name)) return name;
+  }
+
+  // 3. The name precedes the word: "the Marketing project".
+  //
+  // Everything before the noun, cut at the last preposition or article. A
+  // regex that simply grabs the preceding few words reads "add the deck to the
+  // Marketing project" as a project called "deck to the Marketing" — the name
+  // is only ever the run of words after the last such boundary.
+  const before = s.match(/^(.*?)\s+projects?\b/i);
+  if (before) {
+    const chunks = before[1]
+      .split(/\b(?:to|under|into|in|on|for|the|a|an|my|our|this|that|about|with)\b/i)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const last = trim(chunks[chunks.length - 1] || "");
+    // A verb or a question word is not a name — "start a project" names
+    // nothing yet, and "show me projects" is a request rather than a subject.
+    if (last && !NOT_A_PROJECT_NAME.test(last)) return last;
+  }
+
+  // 4. Quoted after a filing preposition: put X under "Series B".
+  const quoted = s.match(/\b(?:under|into|in|to|on)\s+["“']([^"”']+)["”']/i);
+  return quoted ? trim(quoted[1]) || null : null;
+}
+
+/** Does this sentence talk about a project at all? A cheap guard for the rules. */
+const MENTIONS_PROJECT = /\bprojects?\b/i;
+
+/** The verb sits immediately before the noun: "start a project", "new project". */
+const MAKES_A_PROJECT =
+  /\b(?:new|start|create|set ?up|begin|open|make|add)\b(?:\s+(?:a|an|another|the))?\s+(?:new\s+)?projects?\b/i;
+
+/** Filing something that already exists under one: "…to the Marketing project". */
+const FILES_UNDER =
+  /\b(?:to|under|into|in|on)\s+(?:the\s+)?[\w'’&.-]+(?:\s+[\w'’&.-]+){0,3}\s+projects?\b|\b(?:file|move|put|assign|link|attach)\b.*\b(?:under|into|to)\s+["“']/i;
+
 const RULES = [
   // First, and unmissable. Undo is the thing people reach for while something
   // is going wrong, and it must never be shadowed by a verb inside the same
@@ -599,6 +689,13 @@ const RULES = [
   // not a request but it means exactly one thing.
   [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch|skip|get rid of)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b|\b(?:don'?t|do not|dont|didn'?t) (?:need|want)\b.*\b(?:any ?more|any longer)?\b|\b(?:not|isn'?t|is not|aren'?t|are not) happening\b|\bfell through\b|\bwe'?re not doing\b|\b(?:can'?t|cannot|won'?t|will not|unable to) (?:make|do|attend|be at|get to)\b|\bbail(?:ing)? on\b|\b(?:back|backing|pull|pulling) out of\b|\bhave to (?:miss|skip)\b|\bgoing to (?:miss|skip)\b|\bgonna (?:miss|skip)\b/],
   // "mark ... as done" allows words in between — that is how people write it.
+  // "Add a task to finish the board deck" is a task being *made*, and it was
+  // being read as one being finished — "finish" is a completion verb, and it
+  // won. An explicit "add a task to …" or "remind me to …" states the intent
+  // before any verb inside it, so it is settled here rather than left to
+  // whichever rule matched first.
+  [INTENTS.CREATE_TASK,
+    /^\s*(?:please\s+)?(?:can you\s+|could you\s+)?(?:add|create|make)\s+(?:a|an|another)?\s*(?:new\s+)?(?:task|todo|to-?do|reminder)\b|^\s*remind me to\b/i],
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b|\b(?:is|are|'s) (?:done|finished|complete|sorted|handled|out of the way)\b|\bi'?ve (?:done|finished|completed|sorted)\b|\ball done\b|\bwrapped up\b/],
   // `give (?!me)`: "give me something to do" is someone asking for work, not
   // handing it over, and it was being answered with "delegate it to whom?".
@@ -615,8 +712,22 @@ const RULES = [
   // ordinary question anyone asks a diary. Placed ahead of it for that reason;
   // MOVE and CANCEL still win, so "move my next meeting" is a move.
   [INTENTS.QUERY_NEXT, /\b(?:what|when|which)(?:'s| is)?\s+(?:my |the )?next\b|\bwhat'?s (?:up )?next\b|\bnext (?:meeting|thing|one|up|appointment|call)\b|\bwhat'?s after (?:this|that)\b|\bhow long (?:until|till|til|to) (?:my |the )?next\b/],
+  // Projects, ahead of the general question rules. "What projects do I have"
+  // is caught by QUERY_DAY's "do i have" otherwise, and answered as an empty
+  // calendar — a question about projects, answered about a day.
+  [INTENTS.QUERY_PROJECTS, /\bprojects?\b/i.source && ((body) =>
+    MENTIONS_PROJECT.test(body) &&
+    /\b(?:what|which|list|show|how many|how are|how's|tell me about)\b/i.test(body) &&
+    !MAKES_A_PROJECT.test(body))],
   [INTENTS.QUERY_EVENT, /\b(?:where(?:'?s| is)|how long is|is .* still on|when(?:'?s| is) (?:my|the)|what time is (?:my|the))\b/],
   [INTENTS.QUERY_PROGRESS, /\bhow much (?:time|have i|did i)\b|\bhow am i doing\b|\bwhat did i (?:do|finish|get done)\b|\bhow many hours\b|\bhow'?s my (?:focus|week)\b/],
+  // A project named inside a "how is it going" question is a progress
+  // question about that project. Without this it reached PLAN_DAY and came
+  // back as triage for the whole week.
+  [INTENTS.QUERY_PROGRESS, (body) =>
+    MENTIONS_PROJECT.test(body) &&
+    /\bhow(?:'?s| is| are| am i doing)\b|\bprogress\b|\bwhere (?:are|is) (?:we|it|that)\b/i.test(body) &&
+    Boolean(projectPhrase(body))],
   [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|gaps?|any time|when can i|spare (?:time|hour|minutes?))\b/],
   [INTENTS.QUERY_DAY, /\b(what(?:'?s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double ?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
@@ -632,6 +743,17 @@ const RULES = [
   // for it to be arranged. Guarded on there being a day or a clock, so "I've
   // got a lot on" stays the remark it is.
   [INTENTS.CREATE_EVENT, isReportedBooking],
+  // Both ahead of CREATE_TASK, which would otherwise take them: "new project
+  // called Q3" contains "new" and "add the deck to the Marketing project"
+  // contains "add", and both became tasks named after the sentence.
+  //
+  // Filing is tried first. "Add the deck to the Marketing project" satisfies
+  // both readings, and the one that files an existing thing is nearly always
+  // what was meant — creating a project called "deck" is not.
+  [INTENTS.FILE_TASK, (body) =>
+    MENTIONS_PROJECT.test(body) && FILES_UNDER.test(body) && Boolean(projectPhrase(body))],
+  [INTENTS.CREATE_PROJECT, (body) =>
+    MAKES_A_PROJECT.test(body) && Boolean(projectPhrase(body))],
   [INTENTS.CREATE_TASK, /\b(add|create|new|remind me to|need to|todo)\b/],
 ];
 
@@ -1273,6 +1395,8 @@ export function parse(text, now = new Date()) {
     person: toPerson ? toPerson[1] : null,
     // "Rename X to Y" carries its own subject, and it is not the whole line.
     subjectPhrase: renameSubject(body) || subjectPhrase,
+    // The project a sentence names, as a phrase. Resolved where the data is.
+    project: projectPhrase(body),
     targetPhrase,
     // Title with verbs, temporal phrases, and priority wording removed.
     title: cleanTitle(said, people, subject),
