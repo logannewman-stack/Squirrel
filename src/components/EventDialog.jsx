@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { addEvent, updateEvent, deleteEvent, dayKey } from "../lib/store";
 import { toLocalIso } from "../lib/nlu/datetime";
+import { parsePeople, formatPeople, invitable } from "../lib/addresses";
+import { sendInvite } from "../lib/calendars";
 
 /**
  * One form for making an event and for changing one.
@@ -33,12 +35,15 @@ export default function EventDialog({ event = null, onClose }) {
     editing ? Math.max(5, Math.round((new Date(event.end) - start) / 60000)) : 60,
   );
   const [location, setLocation] = useState(event?.location ?? "");
-  const [people, setPeople] = useState((event?.attendees || []).map((a) => a.name).join(", "));
+  const [people, setPeople] = useState(formatPeople(event?.attendees || []));
   const [about, setAbout] = useState(event?.notes ?? "");
   // Deleting a meeting is one tap away from here, so it asks — but in the
   // sheet rather than in a browser dialog, which on a phone appears somewhere
   // else entirely and reads as if the page has broken.
   const [confirming, setConfirming] = useState(false);
+  // null | "sending" | "sent", plus whatever should be said about it.
+  const [inviting, setInviting] = useState(null);
+  const [inviteNote, setInviteNote] = useState(null);
 
   const box = useRef(null);
   useEffect(() => {
@@ -58,16 +63,42 @@ export default function EventDialog({ event = null, onClose }) {
       // leave a 60-minute event ending hours away from where it started.
       end: toLocalIso(new Date(at.getTime() + mins * 60000)),
       location,
-      attendees: people
-        .split(/\s*,\s*|\s+and\s+/)
-        .map((n) => n.trim())
-        .filter(Boolean)
-        .map((name) => ({ name })),
+      // Addresses are kept when they are given: "Priya <p@acme.com>" is how a
+      // meeting becomes an invitation somebody actually receives.
+      attendees: parsePeople(people),
       notes: about.trim(),
     };
     if (editing) updateEvent(event.id, patch);
     else addEvent(patch);
     onClose();
+  }
+
+  /**
+   * Send the invitation.
+   *
+   * Saves first. The endpoint reads the recipients from the stored meeting
+   * rather than from anything posted to it — that is what stops it being an
+   * open relay — so an address typed a second ago has to be on the row before
+   * it can be invited.
+   */
+  async function sendInvites() {
+    if (!editing) return;
+    setInviting("sending");
+    try {
+      updateEvent(event.id, { attendees: parsePeople(people) });
+      const out = await sendInvite(event.id, about.trim());
+      setInviting("sent");
+      setInviteNote(`Sent to ${out.sent} ${out.sent === 1 ? "person" : "people"}.`);
+    } catch (e) {
+      setInviting(null);
+      setInviteNote(
+        e.message === "email_not_configured"
+          ? "Email isn't set up on this deployment yet."
+          : e.message === "not signed in"
+            ? "Sign in to send invitations."
+            : "Couldn't send that — try again.",
+      );
+    }
   }
 
   /** Move by whole days without opening the date picker. */
@@ -178,7 +209,7 @@ export default function EventDialog({ event = null, onClose }) {
         <input
           value={people}
           onChange={(e) => setPeople(e.target.value)}
-          placeholder="With — Bob, John"
+          placeholder="With — Bob, Priya &lt;priya@acme.com&gt;"
           className="mt-4 w-full border-b border-[var(--line)] bg-transparent pb-2 text-sm outline-none
                      transition-colors placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
         />
@@ -232,6 +263,24 @@ export default function EventDialog({ event = null, onClose }) {
           )}
 
           <span className="flex items-center gap-2">
+            {/* Only offered where it can work: an existing meeting with at
+                least one address on it. Offering "invite" for a meeting with
+                nobody addressable is a button that can only ever disappoint. */}
+            {editing && invitable(parsePeople(people)).length > 0 && (
+              <button
+                type="button"
+                disabled={inviting === "sending"}
+                onClick={sendInvites}
+                className="rounded-md border border-[var(--line)] px-3 py-2 text-xs
+                           transition-colors hover:border-[var(--ink)] disabled:opacity-50"
+              >
+                {inviting === "sending"
+                  ? "Sending…"
+                  : inviting === "sent"
+                    ? "Invites sent"
+                    : `Send invite${invitable(parsePeople(people)).length > 1 ? "s" : ""}`}
+              </button>
+            )}
             <button type="button" onClick={onClose} className="px-3 py-2 text-xs text-[var(--muted)]">
               Cancel
             </button>
@@ -240,6 +289,10 @@ export default function EventDialog({ event = null, onClose }) {
             </button>
           </span>
         </div>
+
+        {inviteNote && (
+          <p className="mt-2 text-right text-xs text-[var(--muted)]">{inviteNote}</p>
+        )}
 
         {editing && (
           <p className="mt-3 text-xs text-[var(--muted)]">

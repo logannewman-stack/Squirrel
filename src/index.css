@@ -323,3 +323,17 @@ input[type="date"], input[type="time"] { color-scheme: light; }
   .sq-fab-ring, .sq-scrim, .sq-sheet { animation: none !important; }
   .sq-fab { transition: none; }
 }
+
+/* ------------------------------------------------------------- onboarding
+   Each step arrives rather than appearing. Short and slight on purpose: the
+   frame holds still and only the content moves, which reads as being walked
+   through something instead of as a form reprinting itself. */
+.sq-step { animation: sq-step-in 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes sq-step-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sq-step { animation: none; }
+}

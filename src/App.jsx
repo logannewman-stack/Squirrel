@@ -100,6 +100,19 @@ export default function App() {
     };
   }, []);
 
+  // Anyone who already answered the naming question has been through the old
+  // first run and must not be shown the new one.
+  //
+  // On mount only, and that is the whole point rather than an optimisation:
+  // watching `identity` would fire the moment the first step of onboarding
+  // saves a name, mark the flow complete, and unmount the two steps after it —
+  // which is precisely the bug the `onboarded` flag exists to fix. Only someone
+  // who already had a name when the app started is an existing user.
+  useEffect(() => {
+    const s = getState().settings;
+    if (s?.identity && !s?.onboarded) setSetting("onboarded", true);
+  }, []);
+
   // Any local write is worth sending; nudge coalesces the burst from typing.
   useEffect(() => nudge(), [state.projects, state.tasks, state.events]);
 
@@ -193,10 +206,15 @@ export default function App() {
   }
 
   // ------------------------------------------------------------- overlays
-  // Asked once, before anything else — the assistant greets by name and has
-  // nothing to greet with until this is answered. It is also the only screen a
-  // brand-new user has seen, so it says what the app is at the same time.
-  if (!state.settings?.identity) {
+  // The first run, which is also the only screen a brand-new user has seen —
+  // so it says what the app is while it asks.
+  //
+  // Gated on an explicit flag rather than on `identity`. Naming was the first
+  // question, and answering it used to satisfy this condition immediately:
+  // Welcome unmounted the moment the name was saved and the two steps after it
+  // never appeared. The flag is set by the last step, so the flow owns when it
+  // is finished.
+  if (!state.settings?.onboarded) {
     return <Welcome onDone={() => setView({ name: "today" })} />;
   }
 

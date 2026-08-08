@@ -64,3 +64,14 @@ export function connectResult(search = location.search) {
   if (!state) return null;
   return { ok: state === "connected", reason: q.get("reason") };
 }
+
+/**
+ * Send the calendar invitation for a meeting.
+ *
+ * Only the meeting's id goes up. The addresses come from the stored event on
+ * the server, which is what keeps the endpoint from being a way to mail
+ * arbitrary strangers.
+ */
+export const sendInvite = (eventId, note) =>
+  authed("/api/email/invite", { method: "POST", body: JSON.stringify({ eventId, note }) })
+    .catch((e) => { throw new Error(e.message); });
