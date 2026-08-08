@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { addProject, dayKey } from "../lib/store";
+import { Button, Input } from "./ui";
 import { duration, money } from "../lib/format";
 
 export default function Projects({ state, onOpen }) {
@@ -40,16 +41,15 @@ export default function Projects({ state, onOpen }) {
         }}
         className="mb-8 flex gap-2"
       >
-        <input
+        <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="New project"
-          className="flex-1 rounded-md border border-[var(--line)] bg-transparent px-3.5 py-2 text-sm
-                     outline-none transition-colors placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+          className="flex-1"
         />
-        <button className="rounded-md bg-[var(--ink)] px-4 py-2 text-xs font-medium text-[var(--paper)]">
+        <Button type="submit" variant="primary" disabled={!name.trim()}>
           Create
-        </button>
+        </Button>
       </form>
 
       {rows.length === 0 ? (

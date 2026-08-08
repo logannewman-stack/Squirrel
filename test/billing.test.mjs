@@ -26,7 +26,7 @@ const t = (name, ok, detail) => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail !== undefined ? `  → ${detail}` : ""}`);
 };
 
-const PRICES = { plus: "price_plus_123", pro: "price_pro_456" };
+const PRICES = { plus: "price_plus_123", pro: "price_pro_456", studio: "price_studio_789" };
 const AT = 1_800_000_000; // a fixed epoch second
 
 /** A subscription as the pinned API version actually returns it. */
@@ -77,6 +77,9 @@ const sub = ({ status = "active", price = PRICES.plus, end = AT, meta = {}, id =
 {
   const active = profileFromSubscription(sub({ price: PRICES.pro }), PRICES);
   t("an active subscription grants its plan", active.plan === "pro", active.plan);
+
+  const studio = profileFromSubscription(sub({ price: PRICES.studio }), PRICES);
+  t("the studio price grants the studio tier", studio.plan === "studio", studio.plan);
   t("and records when it runs to", active.plan_renews_at === new Date(AT * 1000).toISOString());
   t("and keeps the subscription id", active.stripe_subscription_id === "sub_1");
   t("and raises no alert", active.billing_alert === null);

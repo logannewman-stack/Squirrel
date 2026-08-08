@@ -20,7 +20,7 @@
  */
 
 /** Plan tiers, worst to best. Mirrors the `plan_tier` enum in the schema. */
-export const TIERS = ["free", "plus", "pro"];
+export const TIERS = ["free", "plus", "pro", "studio"];
 
 /**
  * Which plan a price buys.

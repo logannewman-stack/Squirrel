@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { PLANS } from "../lib/plans";
+import { PLANS, PAID } from "../lib/plans";
 import { startCheckout, openPortal, fetchUsage } from "../lib/billing";
+import { Button } from "./ui";
 
 /**
  * The subscription, from the customer's side.
@@ -87,25 +88,51 @@ export default function Billing({ email }) {
       )}
 
       {plan === "free" ? (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {["plus", "pro"].map((id) => (
-            <button
-              key={id}
-              disabled={busy !== null}
-              onClick={() => go(() => startCheckout(id), id)}
-              className="rounded-md border border-[var(--line)] px-4 py-3 text-left
-                         transition-colors hover:border-[var(--ink)] disabled:opacity-50"
-            >
-              <span className="flex items-baseline justify-between gap-2">
-                <span className="font-medium">{PLANS[id].name}</span>
-                <span className="text-sm text-[var(--muted)]">${PLANS[id].price}/mo</span>
-              </span>
-              <span className="mt-1 block text-sm text-[var(--muted)]">{PLANS[id].blurb}</span>
-              <span className="mt-2 block text-xs">
-                {busy === id ? "Opening checkout…" : "Subscribe"}
-              </span>
-            </button>
-          ))}
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {PAID.map((id) => {
+            const tier = PLANS[id];
+            return (
+              <div
+                key={id}
+                className={`relative flex flex-col rounded-xl border p-5 ${
+                  tier.popular ? "border-[var(--ink)]" : "border-[var(--line)]"
+                }`}
+              >
+                {tier.popular && (
+                  <span className="absolute -top-2.5 left-5 rounded-full bg-[var(--ink)] px-2.5 py-0.5
+                                   text-[10px] font-semibold uppercase tracking-wider text-[var(--paper)]">
+                    Most popular
+                  </span>
+                )}
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{tier.name}</span>
+                  <span>
+                    <span className="figure">${tier.price}</span>
+                    <span className="text-sm text-[var(--muted)]"> /mo</span>
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-[var(--muted)]">{tier.tagline}</p>
+                <ul className="mt-4 flex-1 space-y-1.5">
+                  {tier.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-sm">
+                      <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 fill-none stroke-[var(--ink)] stroke-[2]">
+                        <path d="M5 12l5 5L20 6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  variant={tier.popular ? "primary" : "secondary"}
+                  disabled={busy !== null}
+                  onClick={() => go(() => startCheckout(id), id)}
+                  className="mt-5 w-full"
+                >
+                  {busy === id ? "Opening checkout…" : `Choose ${tier.name}`}
+                </Button>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <button

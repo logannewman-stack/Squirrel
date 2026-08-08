@@ -1,6 +1,7 @@
 import { useState } from "react";
 import TaskRow from "./TaskRow";
 import PersonPicker from "./PersonPicker";
+import { Button, Chip, Field } from "./ui";
 import { roster, workOf, keyOf } from "../lib/people";
 import {
   addTask, deleteProject, toggleTask, deleteTask, updateProject, dayKey,
@@ -64,17 +65,19 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
             />
           </div>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => {
             if (confirm(`Delete "${project.name}" and its ${tasks.length} tasks?`)) {
               deleteProject(project.id);
               onBack();
             }
           }}
-          className="shrink-0 text-xs text-[var(--muted)] hover:text-[var(--ink)]"
+          className="shrink-0 !text-[var(--muted)] hover:!text-[var(--alert)]"
         >
           Delete
-        </button>
+        </Button>
       </header>
 
       <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--line)]
@@ -121,7 +124,7 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
 
             <Field label="Priority">
               {PRIORITIES.map((p) => (
-                <Chip key={p} on={priority === p} onClick={() => setPriority(p)}>
+                <Chip key={p} on={priority === p} onClick={() => setPriority(p)} className="capitalize">
                   {p}
                 </Chip>
               ))}
@@ -142,14 +145,13 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
                 value={due}
                 onChange={(e) => setDue(e.target.value)}
                 aria-label="Due date"
-                className="rounded border border-[var(--line)] bg-transparent px-2 py-1 text-[11px] outline-none
+                className="rounded-lg border border-[var(--line)] bg-transparent px-2.5 py-1.5 text-xs outline-none
                            transition-colors focus:border-[var(--ink)]"
               />
               {due && (
-                <button type="button" onClick={() => setDue("")}
-                        className="px-1 text-[11px] text-[var(--muted)] underline-offset-4 hover:underline">
-                  clear
-                </button>
+                <Button variant="ghost" size="sm" onClick={() => setDue("")} className="!px-2">
+                  Clear
+                </Button>
               )}
             </Field>
           </div>
@@ -163,11 +165,9 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
                 className="w-full max-w-xs"
               />
             </Field>
-            <button className="rounded-md bg-[var(--ink)] px-5 py-2 text-xs font-medium text-[var(--paper)]
-                               transition-opacity hover:opacity-90 disabled:opacity-40"
-                    disabled={!title.trim()}>
+            <Button type="submit" variant="primary" disabled={!title.trim()}>
               Add
-            </button>
+            </Button>
           </div>
         </div>
       </form>
@@ -274,15 +274,6 @@ function byPerson(tasks) {
 }
 
 /** A labelled cluster of controls. Without the label they read as a toolbar. */
-function Field({ label, children, className = "" }) {
-  return (
-    <div className={className}>
-      <span className="label mb-1.5 block">{label}</span>
-      <div className="flex flex-wrap items-center gap-1.5">{children}</div>
-    </div>
-  );
-}
-
 /** "Friday" means the next one, which is what anyone saying it means. */
 function dayFor(days, label) {
   const d = new Date();
@@ -294,21 +285,6 @@ function dayFor(days, label) {
     d.setDate(d.getDate() + days);
   }
   return dayKey(d);
-}
-
-function Chip({ on, children, ...rest }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      className={`rounded border px-2.5 py-1 text-[11px] capitalize transition-colors ${
-        on ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--paper)]" : "border-[var(--line)] hover:border-[var(--ink)]"
-      }`}
-      {...rest}
-    >
-      {children}
-    </button>
-  );
 }
 
 function Stat({ label, value }) {

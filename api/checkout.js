@@ -1,7 +1,11 @@
 import Stripe from "stripe";
 import { asUser, asService, requireUser, json } from "./_lib/db.js";
 
-const PRICE = { plus: process.env.STRIPE_PRICE_PLUS, pro: process.env.STRIPE_PRICE_PRO };
+const PRICE = {
+  plus: process.env.STRIPE_PRICE_PLUS,
+  pro: process.env.STRIPE_PRICE_PRO,
+  studio: process.env.STRIPE_PRICE_STUDIO,
+};
 
 /**
  * Stripe checkout for WEB signups only.

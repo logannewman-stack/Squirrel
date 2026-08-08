@@ -5,7 +5,11 @@ import { profileFromSubscription, isStale } from "./_lib/billing.js";
 // Signature verification needs the raw body, which Vercel would otherwise parse.
 export const config = { api: { bodyParser: false } };
 
-const PRICES = { plus: process.env.STRIPE_PRICE_PLUS, pro: process.env.STRIPE_PRICE_PRO };
+const PRICES = {
+  plus: process.env.STRIPE_PRICE_PLUS,
+  pro: process.env.STRIPE_PRICE_PRO,
+  studio: process.env.STRIPE_PRICE_STUDIO,
+};
 
 const readRaw = (req) =>
   new Promise((resolve, reject) => {

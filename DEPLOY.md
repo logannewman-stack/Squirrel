@@ -254,8 +254,10 @@ concurrent requests all pass the check and the spend has no ceiling.
 
 ### Stripe — monthly subscriptions
 
-Create two **recurring monthly** prices ($20 and $50) and point
-`STRIPE_PRICE_PLUS` and `STRIPE_PRICE_PRO` at their price ids. Turn on the
+Create one **recurring monthly** price ($24.99) and point `STRIPE_PRICE_PRO`
+at its price id. `STRIPE_PRICE_PLUS` can point at the same price — the code
+treats `plus` as an alias of `pro`, so an older subscription on that tier keeps
+its full entitlement. Turn on the
 **customer portal** in Stripe's billing settings — `/api/portal` opens it, and
 without it customers cannot change a card, download an invoice, or cancel.
 
