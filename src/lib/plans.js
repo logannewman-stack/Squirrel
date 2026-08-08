@@ -41,7 +41,7 @@ export const PLANS = {
     chats: null,
     tagline: "Run your week",
     popular: true,
-    blurb: "Everything unlimited, synced everywhere, with the smart assistant.",
+    blurb: "Everything unlimited, synced everywhere, with Squirrel on tap.",
     features: [
       "Squirrel, your assistant — say it, she does it",
       "Unlimited projects and tasks",
@@ -56,7 +56,7 @@ export const PLANS = {
   // The top tier earns $50 by stopping being a personal app. A single person
   // rarely gets $50/month of value from a to-do list; a person who runs work
   // *through* other people does. So this is delegation with real teammates,
-  // client-facing projects, and the assistant on the top model.
+  // client-facing projects, and Squirrel at her most capable.
   studio: {
     id: "studio",
     name: "Studio",
@@ -65,12 +65,12 @@ export const PLANS = {
     tasks: null,
     chats: null,
     tagline: "Run your team",
-    blurb: "Pro, plus real delegation, client projects, and the top-tier assistant.",
+    blurb: "Pro, plus real delegation, client projects, and Squirrel at her most capable.",
     features: [
       "Everything in Pro",
       "Invite teammates — they see what's theirs",
       "Shared client projects with value and reporting",
-      "The assistant on the top model, higher limits",
+      "Squirrel at her most capable, with the highest limits",
       "Advanced automations and recurring rules",
       "Concierge setup and early access",
     ],
@@ -87,7 +87,7 @@ export const PAID = ["pro", "studio"];
 /**
  * The built-in assistant is deterministic and runs in the browser, so it costs
  * nothing to serve and stays unlimited on every plan. The metered thing is the
- * Haiku fallback (api/interpret.js), which only fires on what the rules miss:
+ * boost path (api/interpret.js), which only fires on what the rules miss:
  * Free gets a monthly taste (25), the paid tiers are effectively unlimited.
  * These numbers mirror plan_limit in supabase/migrations — the SQL is the
  * control; this copy is a courtesy.

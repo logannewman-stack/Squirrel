@@ -104,13 +104,12 @@ export default function Settings({ state, onBack }) {
         <section className="mb-10">
           <h2 className="mb-2 font-medium">Fallback</h2>
           <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
-            When she can't parse something, send just that message to a language model, have it
-            reword the request, and run the reworded version through the ordinary path — same
-            confirmation, same undo. Messages she already understands never leave the device, so
+            When she can't parse something, send just that message off to be reworded, then run the
+            reworded version through the ordinary path — same confirmation, same undo. Messages she already understands never leave the device, so
             this only ever costs anything on the ones she gets stuck on.
           </p>
           <Toggle
-            label="Ask a model when she gets stuck"
+            label="Give her a boost when she gets stuck"
             on={fallback}
             onChange={() => setSetting("fallback", !fallback)}
           />
