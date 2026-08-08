@@ -35,6 +35,12 @@ const EMPTY = {
   shortfalls: [],
   active: null,
   settings: {},
+  // Which tier this account is on, as last reported by the server. Cached here
+  // so gating is synchronous and survives a reload — a paid user must not see
+  // their own features locked for a moment on every launch. It is a cache and
+  // never a source of truth: the server meters anything that costs money, so
+  // editing this by hand unlocks the drawing of a feature and nothing behind it.
+  plan: "free",
 };
 
 let cache = null;
@@ -437,6 +443,16 @@ export const focusedOf = (a, now = Date.now()) =>
 // ---------------------------------------------------------------- settings
 export const setSetting = (key, value) =>
   update({ settings: { ...read().settings, [key]: value } });
+
+/**
+ * Cache the tier the server reported.
+ *
+ * Ephemeral on purpose — this is not a change anyone would want to undo, and it
+ * is re-fetched on every launch. Written only from the usage endpoint's answer;
+ * signing out reports nothing and drops back to free.
+ */
+export const setPlanTier = (plan) =>
+  read().plan === (plan || "free") ? undefined : update({ plan: plan || "free" });
 
 // ------------------------------------------------------------------ planning
 /**

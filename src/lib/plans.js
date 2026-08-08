@@ -24,9 +24,8 @@ export const PLANS = {
     blurb: "The whole planner on one device, capped at two projects.",
     features: [
       "Calendar, agenda, and focus timer",
-      "The built-in assistant — unlimited",
-      "25 AI assists a month when it gets stuck",
       "2 projects · 15 open tasks",
+      "Plan your week by hand",
       "This device only",
     ],
   },
@@ -44,11 +43,11 @@ export const PLANS = {
     popular: true,
     blurb: "Everything unlimited, synced everywhere, with the smart assistant.",
     features: [
+      "Squirrel, your assistant — say it, she does it",
       "Unlimited projects and tasks",
       "Sync across every device",
-      "Insights, delegation, and recurring work",
+      "Insights: where your time actually goes",
       "Auto-scheduling that lays work into your week",
-      "Smart assistant: AI steps in when the built-in one is stuck",
       "Calendar sync (Google, Apple)",
       "Priority support",
     ],
@@ -93,6 +92,42 @@ export const PAID = ["pro", "studio"];
  * These numbers mirror plan_limit in supabase/migrations — the SQL is the
  * control; this copy is a courtesy.
  */
+
+/**
+ * What each tier is allowed to *do*, as opposed to how much of it.
+ *
+ * Everything gated here is still visible on every plan — the screens render,
+ * the controls are drawn, the value is in plain sight. What a lower tier gets
+ * is a lock rather than a blank space, because a feature nobody can see is a
+ * feature nobody upgrades for. This is the list of what the lock covers.
+ *
+ * A courtesy, like the limits above: the server is the control. Anything that
+ * costs money (the AI fallback) is metered in SQL as well, so a determined
+ * client cannot spend by lying about its plan.
+ */
+export const FEATURES = {
+  assistant:   { tiers: ["pro", "plus", "studio"], name: "Squirrel, the assistant" },
+  calendarSync:{ tiers: ["pro", "plus", "studio"], name: "Calendar sync" },
+  insights:    { tiers: ["pro", "plus", "studio"], name: "Insights" },
+  autoSchedule:{ tiers: ["pro", "plus", "studio"], name: "Auto-scheduling" },
+  delegation:  { tiers: ["studio"], name: "Teammates and delegation" },
+  clientWork:  { tiers: ["studio"], name: "Client projects" },
+};
+
+/** Can this plan use this feature? Unknown features are open, never accidentally locked. */
+export const can = (plan, feature) => {
+  const f = FEATURES[feature];
+  if (!f) return true;
+  return f.tiers.includes(plan ?? "free");
+};
+
+/** The cheapest tier that unlocks a feature — what the lock should offer. */
+export const unlocks = (feature) => {
+  const f = FEATURES[feature];
+  if (!f) return null;
+  // "plus" is an alias of Pro, so it never needs naming as an upsell target.
+  return f.tiers.find((t) => t !== "plus") ?? null;
+};
 
 export const limitFor = (plan, resource) => PLANS[plan ?? "free"]?.[resource] ?? 0;
 

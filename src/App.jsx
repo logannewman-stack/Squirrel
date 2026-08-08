@@ -12,9 +12,12 @@ import Identity from "./components/Identity";
 import CommandPalette from "./components/CommandPalette";
 import Squirrel from "./components/Squirrel";
 import { SidebarNav, BottomNav } from "./components/Nav";
+import Locked from "./components/Locked";
+import { can } from "./lib/plans";
+import { fetchUsage } from "./lib/billing";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
-  remainingOf, toggleTask, setSetting, setPlan, dayKey,
+  remainingOf, toggleTask, setSetting, setPlan, setPlanTier, dayKey,
 } from "./lib/store";
 import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
@@ -98,6 +101,24 @@ export default function App() {
 
   // Any local write is worth sending; nudge coalesces the burst from typing.
   useEffect(() => nudge(), [state.projects, state.tasks, state.events]);
+
+  // Which tier this account is on, from the server rather than from anything
+  // the browser could talk itself into. Re-read whenever the session changes,
+  // so an upgrade takes effect on return from Stripe without a reload. Signed
+  // out reports nothing, which is free — the correct answer.
+  useEffect(() => {
+    // No backend on this build at all — a local-only or self-hosted copy. There
+    // is nothing to buy and nobody to bill, so gating the assistant behind a
+    // subscription that cannot be purchased would lock the best part of the app
+    // behind a door with no handle. Everything is unlocked instead.
+    if (!configured) { setPlanTier("studio"); return; }
+
+    let live = true;
+    fetchUsage()
+      .then((u) => { if (live) setPlanTier(u?.plan ?? "free"); })
+      .catch(() => { if (live) setPlanTier("free"); });
+    return () => { live = false; };
+  }, [state.settings?.email]);
 
   // The fallback is a socket in the assistant, and this is the only thing that
   // ever plugs anything into it. Off unless asked for, so the default build
@@ -267,7 +288,21 @@ export default function App() {
         onFocus={setPending}
       />
     ) : view.name === "insights" ? (
-      <Insights state={state} />
+      can(state.plan, "insights") ? (
+        <Insights state={state} />
+      ) : (
+        // The real screen renders underneath, with this over it. Seeing your own
+        // week measured — and being one tap from it — sells the upgrade in a way
+        // an empty state never could.
+        <Locked
+          feature="insights"
+          title="See where your time actually goes"
+          blurb="Insights measures your meetings, focus, and what you finish — the week you planned against the week you had."
+          onUpgrade={() => setView({ name: "settings" })}
+        >
+          <Insights state={state} />
+        </Locked>
+      )
     ) : (
       <Settings state={state} onBack={() => setView({ name: "today" })} />
     );
@@ -322,6 +357,7 @@ export default function App() {
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
         state={state}
+        onUpgrade={() => setView({ name: "settings" })}
       />
 
       {(newEvent || editingEvent) && (
