@@ -23,7 +23,11 @@ export default function EventDialog({ event = null, onClose }) {
   const [title, setTitle] = useState(event?.title ?? "");
   const [day, setDay] = useState(editing ? dayKey(start) : dayKey());
   const [time, setTime] = useState(
-    editing ? clock(start) : `${String(now.getHours() + 1).padStart(2, "0")}:00`,
+    // Top of the next hour, but never past 23:00 — at 11pm "+1" is 24, which is
+    // not a real time: it parses as midnight the next day, so the event lands on
+    // tomorrow while the date field still says today, and "what's on today"
+    // can't see it.
+    editing ? clock(start) : `${String(Math.min(now.getHours() + 1, 23)).padStart(2, "0")}:00`,
   );
   const [mins, setMins] = useState(
     editing ? Math.max(5, Math.round((new Date(event.end) - start) / 60000)) : 60,
