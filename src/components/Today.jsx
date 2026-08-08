@@ -1,6 +1,7 @@
 import { findFreeSlots, fmtTime, workOn } from "../lib/agenda";
 import { dayKey, toggleTask, eventsOn } from "../lib/store";
 import { planOpts, sayMins } from "../lib/hours";
+import { projectLoad } from "../lib/schedule";
 import { duration } from "../lib/format";
 import TaskRow from "./TaskRow";
 
@@ -42,6 +43,37 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
     .reduce((sum, s) => sum + s.focusedMs, 0);
   const overdue = state.tasks.filter((t) => !t.done && t.due && t.due < day);
   const next = events.find((e) => new Date(e.end) > now);
+
+  // What is actually on this person today, rather than only what the planner
+  // laid out. Those are not the same thing and treating them as the same hid
+  // the most important row on the screen: on a day the planner skips — a
+  // weekend, a day off, a day with no estimates — an overdue task disappeared
+  // from the one place that exists to say what needs doing, while the tile
+  // directly above it counted it.
+  const plannedTasks = [...new Map(blocks.map((b) => [b.taskId, b.task])).values()];
+  const dueToday = state.tasks.filter(
+    (t) => !t.done && !t.delegatedTo && t.due === day && !plannedTasks.some((x) => x.id === t.id),
+  );
+  const waiting = state.tasks.filter((t) => !t.done && t.delegatedTo);
+
+  // One list, in the order a person would triage it. Deduplicated, because a
+  // task that is overdue *and* planned should appear once, at its worst.
+  // How each live project is actually going, for the third column.
+  const liveProjects = (state.projects || [])
+    .filter((x) => !x.archived)
+    .map((project) => ({
+      project,
+      load: projectLoad(project, state.tasks, state.sessions, state.events, { now }),
+    }))
+    .filter(({ load }) => load.openCount > 0)
+    .sort((a, b) => (a.load.due || "9999").localeCompare(b.load.due || "9999"));
+
+  const seen = new Set();
+  const plate = [
+    ...overdue.map((task) => ({ task, why: "overdue" })),
+    ...dueToday.map((task) => ({ task, why: "today" })),
+    ...plannedTasks.map((task) => ({ task, why: "planned" })),
+  ].filter(({ task }) => (seen.has(task.id) ? false : seen.add(task.id)));
 
   // Meetings and planned work in one column, in the order they happen. Two
   // lists side by side made the day look emptier than it is and hid every
@@ -112,7 +144,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
         </div>
       )}
 
-      <div className="grid gap-10 md:grid-cols-[1fr_1fr]">
+      <div className="grid gap-8 lg:grid-cols-2 xl:grid-cols-[1.15fr_1fr_0.8fr] xl:gap-10">
         <section>
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="label">The day</h2>
@@ -191,27 +223,95 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
             )}
           </div>
 
-          {blocks.length === 0 && unestimated.length === 0 ? (
+          {plate.length === 0 && unestimated.length === 0 && waiting.length === 0 ? (
             <p className="py-4 text-sm text-[var(--muted)]">
-              Nothing scheduled for today. Add work with a deadline and an estimate, and it
-              lays itself out.
+              Nothing due and nothing planned. Add work with a deadline and an estimate,
+              and it lays itself out.
             </p>
           ) : (
             <ul className="divide-y divide-[var(--hairline)]">
-              {[...new Map(blocks.map((b) => [b.taskId, b.task])).values()].map((t) => (
-                <TaskRow
-                  key={t.id}
-                  task={t}
-                  project={state.projects.find((p) => p.id === t.projectId)}
-                  showProject
-                  onToggle={() => toggleTask(t.id)}
-                  onFocus={() => onFocus(t)}
-                />
+              {plate.map(({ task, why }) => (
+                <li key={task.id} className="relative">
+                  {/* The reason it is here, said once and quietly. Without it a
+                      list of five tasks is five equal things, and the overdue
+                      one reads the same as the one merely planned. */}
+                  {why !== "planned" && (
+                    <span
+                      className={`absolute right-0 top-3 text-[10px] font-semibold uppercase tracking-wider ${
+                        why === "overdue" ? "alert" : "text-[var(--faint)]"
+                      }`}
+                    >
+                      {why === "overdue" ? "Overdue" : "Due today"}
+                    </span>
+                  )}
+                  <TaskRow
+                    task={task}
+                    project={state.projects.find((x) => x.id === task.projectId)}
+                    showProject
+                    onToggle={() => toggleTask(task.id)}
+                    onFocus={() => onFocus(task)}
+                  />
+                </li>
               ))}
             </ul>
           )}
 
           {unestimated.length > 0 && <NoEstimate list={unestimated} />}
+
+        </section>
+
+        {/* The third column is what is true about the week rather than about
+            this hour: work that is somebody else's move, and how each project
+            is actually going. Both were visible nowhere on the screen people
+            open every morning. */}
+        <section className="lg:col-span-2 xl:col-span-1">
+          {waiting.length > 0 && (
+            <div className="mb-8">
+              <h2 className="label mb-3">Waiting on</h2>
+              <ul className="divide-y divide-[var(--hairline)]">
+                {waiting.slice(0, 6).map((task) => (
+                  <li key={task.id} className="flex items-baseline justify-between gap-3 py-2.5">
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--muted)]">
+                      {task.title}
+                    </span>
+                    <span className="shrink-0 text-xs font-medium">{task.delegatedTo}</span>
+                  </li>
+                ))}
+                {waiting.length > 6 && (
+                  <li className="pt-2 text-xs text-[var(--faint)]">+{waiting.length - 6} more</li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          {liveProjects.length > 0 && (
+            <div>
+              <h2 className="label mb-3">Projects</h2>
+              <ul className="flex flex-col gap-3">
+                {liveProjects.slice(0, 5).map(({ project, load }) => (
+                  <li key={project.id} className="card px-4 py-3">
+                    <p className="truncate text-sm font-medium">{project.name}</p>
+                    <p className="num mt-1 text-xs text-[var(--muted)]">
+                      {load.openCount} open · {sayMins(load.remainingMins)} left
+                    </p>
+                    {/* A bar rather than a percentage. "62%" of a project is a
+                        number nobody can act on; a bar that is nearly full is
+                        read without being calculated. */}
+                    <span className="mt-2 block h-1 w-full overflow-hidden rounded-full bg-[var(--line)]">
+                      <span
+                        className="block h-full rounded-full bg-[var(--ink)]"
+                        style={{
+                          width: `${Math.round(
+                            (load.doneCount / Math.max(1, load.doneCount + load.openCount)) * 100,
+                          )}%`,
+                        }}
+                      />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
       </div>
     </div>
