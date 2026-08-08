@@ -11,6 +11,8 @@
  * The planner's whole job is fitting the second around the first.
  */
 
+import { tap } from "./native.js";
+
 const KEY = "squirrel.v2";
 
 const EMPTY = {
@@ -281,6 +283,9 @@ export const updateTask = (id, patch) =>
     { tasks: read().tasks.map((t) => (t.id === id ? stamp({ ...t, ...patch }) : t)) });
 
 export function toggleTask(id) {
+  // The one action in the app that is worth feeling. A task ticking off is a
+  // small win, and on iOS a haptic is how a small win is acknowledged.
+  tap(read().tasks.find((t) => t.id === id)?.done ? "light" : "success");
   const was = read().tasks.find((t) => t.id === id);
   mutate(`marking “${was?.title || "a task"}” ${was?.done ? "not done" : "done"}`, {
     tasks: read().tasks.map((t) =>

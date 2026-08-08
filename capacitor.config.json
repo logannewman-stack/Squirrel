@@ -1,0 +1,24 @@
+{
+  "appId": "com.squirrelll.app",
+  "appName": "Squirrel",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": true,
+    "limitsNavigationsToAppBoundDomains": true,
+    "backgroundColor": "#ffffff"
+  },
+  "server": {
+    "iosScheme": "https"
+  },
+  "plugins": {
+    "Keyboard": {
+      "resize": "native",
+      "resizeOnFullScreen": true
+    },
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DEFAULT"
+    }
+  }
+}

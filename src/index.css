@@ -337,3 +337,93 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 @media (prefers-reduced-motion: reduce) {
   .sq-step { animation: none; }
 }
+
+/* ==========================================================================
+   Native (iOS / Mac Catalyst)
+   --------------------------------------------------------------------------
+   A web view in an app bundle gives itself away in about four seconds: text
+   selects on a long press, taps flash a grey box, the whole page rubber-bands
+   away from its own header, and the keyboard covers the field being typed in.
+   None of that is inherent to the technology — it is the browser defaults
+   showing through, and every one of them is switched off here.
+
+   All of it is scoped to `.native`, so the web build is untouched.
+   ========================================================================== */
+
+.native {
+  /* The system font stack, which -apple-system already resolves to on Apple
+     platforms. Stated explicitly because a planner is mostly text, and text in
+     the wrong face is the difference people notice without being able to name. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+}
+
+.native body {
+  /* Long-press selects text on the web and does nothing in an app. Left on, it
+     turns every mis-hold into a blue smear and a copy menu. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  /* The grey flash on tap is a browser affordance; iOS controls do not do it. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Anything genuinely readable stays selectable — a person copying a meeting
+   title or an address out of the app is doing something reasonable. */
+.native input,
+.native textarea,
+.native [contenteditable="true"],
+.native .selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Safe areas. The status bar and the home indicator are not padding the app
+   gets for free; without this the header sits under the clock and the tab bar
+   under the gesture line. */
+.native .sq-safe-top { padding-top: env(safe-area-inset-top); }
+.native nav { padding-bottom: max(env(safe-area-inset-bottom), 0.5rem); }
+.native aside { padding-top: env(safe-area-inset-top); }
+
+/* Momentum scrolling, and only inside the scrollers. The page itself must not
+   bounce: a whole layout that peels away from the top edge and springs back is
+   the single loudest "this is a web view" signal there is. */
+.native .overflow-y-auto,
+.native .overflow-auto {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.native body { overscroll-behavior: none; position: fixed; inset: 0; }
+.native #root { height: 100dvh; overflow: hidden; }
+
+/* The keyboard, as a measurement rather than a surprise. `--keyboard` is set by
+   the shell; anything anchored to the bottom adds it and rides up instead of
+   being covered. */
+:root { --keyboard: 0px; }
+.native .sq-sheet { padding-bottom: var(--keyboard); }
+
+/* Controls at a thumb's size. 44pt is Apple's minimum and it is a minimum
+   rather than a target — a 32px button is comfortable with a mouse and a
+   coin-toss with a thumb. */
+.native button,
+.native [role="button"],
+.native [role="switch"] {
+  min-height: 44px;
+}
+/* Except where a control is deliberately small and inline — a chip in a row of
+   chips, a checkbox beside a task — which have their own hit areas. */
+.native .sq-compact,
+.native .sq-compact button {
+  min-height: 0;
+}
+
+/* Press states, the iOS way: a quick dim and a slight give, rather than a
+   hover that a finger can never trigger. */
+.native button:active:not(:disabled) {
+  opacity: 0.72;
+  transform: scale(0.985);
+}
+.native button { transition: opacity 120ms ease, transform 120ms ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .native button:active:not(:disabled) { transform: none; }
+}

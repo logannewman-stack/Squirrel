@@ -10,6 +10,7 @@ import FocusScreen from "./components/FocusScreen";
 import EventDialog from "./components/EventDialog";
 import Identity from "./components/Identity";
 import Welcome from "./components/Welcome";
+import Legal from "./components/Legal";
 import CommandPalette from "./components/CommandPalette";
 import Squirrel from "./components/Squirrel";
 import { SidebarNav, BottomNav } from "./components/Nav";
@@ -214,6 +215,14 @@ export default function App() {
   // Welcome unmounted the moment the name was saved and the two steps after it
   // never appeared. The flag is set by the last step, so the flow owns when it
   // is finished.
+  // Reachable without an account and before the first run: /privacy and /terms
+  // are linked from Stripe and the App Store listing, and a policy you can only
+  // read after signing up is one nobody can consent to.
+  const path = typeof location !== "undefined" ? location.pathname : "/";
+  if (path === "/privacy" || path === "/terms") {
+    return <Legal page={path.slice(1)} onBack={() => location.assign("/")} />;
+  }
+
   if (!state.settings?.onboarded) {
     return <Welcome onDone={() => setView({ name: "today" })} />;
   }
@@ -337,8 +346,14 @@ export default function App() {
           <Insights state={state} />
         </Locked>
       )
+    ) : view.name === "legal" ? (
+      <Legal page={view.page} onBack={() => setView({ name: "settings" })} />
     ) : (
-      <Settings state={state} onBack={() => setView({ name: "today" })} />
+      <Settings
+        state={state}
+        onBack={() => setView({ name: "today" })}
+        onLegal={(page) => setView({ name: "legal", page })}
+      />
     );
 
   // The alert ring on her button means one thing, the same way the colour
@@ -365,7 +380,7 @@ export default function App() {
         // frame at full height.
         <div className="flex h-dvh">
           <SidebarNav {...nav} />
-          <main className={`min-w-0 flex-1 ${fullHeight ? "overflow-hidden" : "overflow-y-auto"}`}>
+          <main className={`sq-safe-top min-w-0 flex-1 ${fullHeight ? "overflow-hidden" : "overflow-y-auto"}`}>
             {body}
           </main>
         </div>
@@ -373,7 +388,7 @@ export default function App() {
         // Phone: the work fills the height, the bar sits under the thumb.
         <div className="flex h-dvh flex-col">
           <div
-            className={`flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
+            className={`sq-safe-top flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
             // A little room at the bottom so the last row clears the raised
             // Squirrel button rather than tucking under it. Full-height views
             // manage their own scroll.

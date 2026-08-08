@@ -8,10 +8,11 @@ import Misses from "./Misses";
 import Billing from "./Billing";
 import Calendars from "./Calendars";
 import SetupCheck from "./SetupCheck";
+import DeleteAccount from "./DeleteAccount";
 import { configured as canSync } from "../lib/supabase";
 import { duration } from "../lib/format";
 
-export default function Settings({ state, onBack }) {
+export default function Settings({ state, onBack, onLegal }) {
   const t = totals(state.sessions);
   const confirms = state.settings?.confirm !== false;
   // Off unless explicitly turned on. It is the only setting in the app that
@@ -164,6 +165,25 @@ export default function Settings({ state, onBack }) {
         >
           Erase everything
         </button>
+
+        {/* Erasing clears this device. Deleting removes the account itself,
+            everywhere — a different thing, so it is said separately and asks
+            for more than a click. */}
+        <div className="mt-6">
+          <DeleteAccount email={state.settings?.email || null} />
+        </div>
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">Legal</h2>
+        <div className="flex flex-wrap gap-4 text-sm">
+          <button onClick={() => onLegal?.("privacy")} className="text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline">
+            Privacy
+          </button>
+          <button onClick={() => onLegal?.("terms")} className="text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline">
+            Terms of service
+          </button>
+        </div>
       </section>
     </div>
   );

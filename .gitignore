@@ -3,3 +3,15 @@ dist
 __pycache__/
 *.pyc
 .DS_Store
+
+# --- iOS (Capacitor)
+# The Xcode project and native source are committed; the build output, the
+# synced copy of dist/, and per-developer state are not. `npx cap sync ios`
+# regenerates the public folder from the web build, so a copy in git is one
+# more thing that can be stale.
+ios/App/App/public/
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/DerivedData/
+*.xcuserstate
