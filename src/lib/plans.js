@@ -19,12 +19,13 @@ export const PLANS = {
     price: 0,
     projects: 2,
     tasks: 15,
-    chats: null,
+    chats: 25,
     tagline: "Get organized",
     blurb: "The whole planner on one device, capped at two projects.",
     features: [
       "Calendar, agenda, and focus timer",
       "The built-in assistant — unlimited",
+      "25 AI assists a month when it gets stuck",
       "2 projects · 15 open tasks",
       "This device only",
     ],
@@ -85,10 +86,12 @@ export const PLANS = {
 export const PAID = ["pro", "studio"];
 
 /**
- * The assistant is deterministic and runs in the browser, so a message costs
- * nothing to serve. Chats are therefore unlimited on every plan and the tiers
- * differentiate on projects, tasks, and features instead. Reintroduce a chat
- * limit only if a paid model is ever added behind it.
+ * The built-in assistant is deterministic and runs in the browser, so it costs
+ * nothing to serve and stays unlimited on every plan. The metered thing is the
+ * Haiku fallback (api/interpret.js), which only fires on what the rules miss:
+ * Free gets a monthly taste (25), the paid tiers are effectively unlimited.
+ * These numbers mirror plan_limit in supabase/migrations — the SQL is the
+ * control; this copy is a courtesy.
  */
 
 export const limitFor = (plan, resource) => PLANS[plan ?? "free"]?.[resource] ?? 0;
