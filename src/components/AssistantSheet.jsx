@@ -35,7 +35,7 @@ export default function AssistantSheet({ open, onClose, state, onUpgrade }) {
             feature="assistant"
             title="You've used today's free turns"
             blurb={`Free accounts get ${FREE_ASSISTS_PER_DAY} a day. On Pro she's unlimited — tell her what changed and she does it.`}
-            onUpgrade={() => { onClose(); onUpgrade?.(); }}
+            onUpgrade={() => { onClose(); onUpgrade?.("You've used today's free turns"); }}
           >
             <Assistant state={state} onClose={onClose} />
           </Locked>
@@ -52,7 +52,12 @@ export default function AssistantSheet({ open, onClose, state, onUpgrade }) {
                   {` of ${FREE_ASSISTS_PER_DAY} free turns left today`}
                 </span>
                 <button
-                  onClick={() => { onClose(); onUpgrade?.(); }}
+                  onClick={() => {
+                    onClose();
+                    onUpgrade?.(
+                      left === 1 ? "One turn left today" : `${left} turns left today`,
+                    );
+                  }}
                   className="shrink-0 font-semibold text-[var(--ink)] underline underline-offset-2"
                 >
                   Go unlimited

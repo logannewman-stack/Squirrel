@@ -138,6 +138,74 @@ export const can = (plan, feature) => {
  */
 export const FREE_ASSISTS_PER_DAY = 5;
 
+/**
+ * What this account is using of what it is allowed.
+ *
+ * One calculation, read by every surface that mentions the plan — the rail
+ * card, the phone strip, the moment a cap is reached. Three copies of "which
+ * limit is closest" drift within a week, and a meter that disagrees with the
+ * wall it is warning about is worse than no meter at all.
+ *
+ * Only limits that bind on *this* plan come back. On Pro every one of them is
+ * unlimited, so the list is empty and the surfaces fall silent rather than
+ * printing "unlimited" three times.
+ *
+ * @param state    the store, for what has been created
+ * @param assists  today's assistant turns — passed in because it is a clock
+ *                 reading, and this module has no business owning a clock
+ */
+export function usage(state, assists = 0) {
+  const plan = state?.plan ?? "free";
+  const tier = PLANS[plan] ?? PLANS.free;
+
+  const meters = [
+    {
+      key: "projects",
+      label: "Projects",
+      used: (state?.projects || []).filter((p) => !p.archived).length,
+      cap: tier.projects,
+    },
+    {
+      key: "tasks",
+      label: "Open tasks",
+      used: (state?.tasks || []).filter((t) => !t.done).length,
+      cap: tier.tasks,
+    },
+    ...(can(plan, "assistant")
+      ? []
+      : [{ key: "assists", label: "Squirrel today", used: assists, cap: FREE_ASSISTS_PER_DAY }]),
+  ].filter((m) => m.cap != null);
+
+  // The nearest wall, which is the only one worth leading with. Seeded at -1 so
+  // a set of meters all sitting at zero still names one, instead of returning
+  // null and making every caller handle a case that is not actually special.
+  const tightest = meters.reduce(
+    (worst, m) => (m.used / m.cap > (worst ? worst.used / worst.cap : -1) ? m : worst),
+    null,
+  );
+
+  return {
+    plan,
+    tier,
+    meters,
+    tightest,
+    // Close enough to be worth mentioning unprompted. Anything below this is an
+    // advert, and adverts are what stop people reading the notices that matter.
+    pressing: Boolean(tightest) && tightest.used / tightest.cap >= 0.6,
+    full: Boolean(tightest) && tightest.used >= tightest.cap,
+  };
+}
+
+/** A wall, said as the reason it is being brought up. */
+export const wallReason = (meter) => {
+  if (!meter) return null;
+  const at = meter.used >= meter.cap;
+  if (meter.key === "projects") return at ? `You're at ${meter.cap} projects` : "Nearly out of projects";
+  if (meter.key === "tasks") return at ? `You're at ${meter.cap} open tasks` : "Running out of task room";
+  if (meter.key === "assists") return at ? "You've used today's free turns" : "Nearly out of turns today";
+  return null;
+};
+
 /** The cheapest tier that unlocks a feature — what the lock should offer. */
 export const unlocks = (feature) => {
   const f = FEATURES[feature];

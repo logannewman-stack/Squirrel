@@ -6,13 +6,14 @@ import WorkingHours from "./WorkingHours";
 import VoiceSettings from "./VoiceSettings";
 import Misses from "./Misses";
 import Billing from "./Billing";
+import Usage from "./Usage";
 import Calendars from "./Calendars";
 import SetupCheck from "./SetupCheck";
 import DeleteAccount from "./DeleteAccount";
 import { configured as canSync } from "../lib/supabase";
 import { duration } from "../lib/format";
 
-export default function Settings({ state, onBack, onLegal }) {
+export default function Settings({ state, onBack, onLegal, onUpgrade }) {
   const t = totals(state.sessions);
   const confirms = state.settings?.confirm !== false;
   // Off unless explicitly turned on. It is the only setting in the app that
@@ -35,15 +36,23 @@ export default function Settings({ state, onBack, onLegal }) {
         <Account email={state.settings?.email || null} />
       </section>
 
-      {canSync && (
-        <section className="mb-10">
-          <h2 className="mb-2 font-medium">Plan</h2>
-          <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
-            Billed monthly, cancel any time. The free tier is not a trial — it keeps working.
-          </p>
-          <Billing email={state.settings?.email || null} />
-        </section>
-      )}
+      {/* Not gated on sync, unlike the billing panel below it. The caps are
+          local and they bind whether or not this build has a backend, so the
+          phone — which has no rail to put a plan card in — needs the numbers
+          here regardless. */}
+      <section className="mb-10">
+        <h2 className="mb-2 font-medium">Plan and usage</h2>
+        <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
+          What you're using of what the plan allows. Billed monthly, cancel any time —
+          the free tier is not a trial, it keeps working.
+        </p>
+        <Usage state={state} onUpgrade={onUpgrade} />
+        {canSync && (
+          <div className="mt-6">
+            <Billing email={state.settings?.email || null} />
+          </div>
+        )}
+      </section>
 
       {canSync && (
         <section className="mb-10">
@@ -52,7 +61,7 @@ export default function Settings({ state, onBack, onLegal }) {
             Connect Google Calendar and the two stay in step — meetings booked
             anywhere show up here, and anything Squirrel schedules appears there.
           </p>
-          <Calendars plan={state.plan} email={state.settings?.email || null} />
+          <Calendars plan={state.plan} email={state.settings?.email || null} onUpgrade={onUpgrade} />
         </section>
       )}
 

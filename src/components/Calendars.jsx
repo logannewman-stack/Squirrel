@@ -24,7 +24,7 @@ const REASONS = {
  * the server: the refresh token never reaches the browser, and the schema's
  * column grants mean it cannot even be selected.
  */
-export default function Calendars({ plan, email }) {
+export default function Calendars({ plan, email, onUpgrade }) {
   const [links, setLinks] = useState(null);
   const [busy, setBusy] = useState(null);
   const [note, setNote] = useState(null);
@@ -161,10 +161,17 @@ export default function Calendars({ plan, email }) {
         </p>
       )}
 
+      {/* This used to be a sentence with nothing to press: the app naming its
+          own price and then leaving you to go and find it. */}
       {!allowed && (
-        <p className="mt-3 text-sm text-[var(--muted)]">
-          Calendar sync is part of Pro. Your meetings and Squirrel's plan stay in step, both ways.
-        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <p className="min-w-[15rem] flex-1 text-sm text-[var(--muted)]">
+            Calendar sync is part of Pro. Your meetings and Squirrel's plan stay in step, both ways.
+          </p>
+          <Button variant="primary" size="sm" onClick={() => onUpgrade?.("Calendar sync is on Pro")}>
+            Upgrade
+          </Button>
+        </div>
       )}
 
       {note && (

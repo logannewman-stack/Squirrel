@@ -5,6 +5,7 @@ import Projects from "./components/Projects";
 import ProjectDetail from "./components/ProjectDetail";
 import Insights from "./components/Insights";
 import AssistantSheet from "./components/AssistantSheet";
+import Upgrade from "./components/Upgrade";
 import Settings from "./components/Settings";
 import FocusScreen from "./components/FocusScreen";
 import EventDialog from "./components/EventDialog";
@@ -14,6 +15,7 @@ import Legal from "./components/Legal";
 import CommandPalette from "./components/CommandPalette";
 import Squirrel from "./components/Squirrel";
 import { SidebarNav, BottomNav } from "./components/Nav";
+import PlanStrip from "./components/PlanStrip";
 import Locked from "./components/Locked";
 import { can } from "./lib/plans";
 import { fetchUsage } from "./lib/billing";
@@ -57,6 +59,10 @@ export default function App() {
   const [editingEvent, setEditingEvent] = useState(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [palette, setPalette] = useState(false);
+  // The upgrade sheet, and the wall that opened it. `null` is closed; a string
+  // is the reason to lead with, because "Upgrade to Pro" answers a question
+  // nobody asked and "You've used today's free turns" answers the one they hold.
+  const [upgrade, setUpgrade] = useState(null);
   const [, force] = useState(0);
   const desktop = useIsDesktop();
 
@@ -322,7 +328,11 @@ export default function App() {
         onOpenEvent={setEditingEvent}
       />
     ) : view.name === "projects" ? (
-      <Projects state={state} onOpen={(id) => setView({ name: "project", id })} />
+      <Projects
+        state={state}
+        onOpen={(id) => setView({ name: "project", id })}
+        onUpgrade={(reason) => setUpgrade(reason ?? null)}
+      />
     ) : view.name === "project" ? (
       <ProjectDetail
         state={state}
@@ -341,7 +351,7 @@ export default function App() {
           feature="insights"
           title="See where your time actually goes"
           blurb="Insights measures your meetings, focus, and what you finish — the week you planned against the week you had."
-          onUpgrade={() => setView({ name: "settings" })}
+          onUpgrade={() => setUpgrade("Insights is on Pro")}
         >
           <Insights state={state} />
         </Locked>
@@ -353,6 +363,7 @@ export default function App() {
         state={state}
         onBack={() => setView({ name: "today" })}
         onLegal={(page) => setView({ name: "legal", page })}
+        onUpgrade={(reason) => setUpgrade(reason ?? null)}
       />
     );
 
@@ -372,7 +383,7 @@ export default function App() {
     onAskSquirrel: () => setAssistantOpen(true),
     attention,
     state,
-    onUpgrade: () => setView({ name: "settings" }),
+    onUpgrade: (reason) => setUpgrade(reason ?? null),
   };
 
   return (
@@ -398,6 +409,11 @@ export default function App() {
           >
             {body}
           </div>
+          {/* Only when a limit is genuinely close, and never on Settings —
+              where the whole plan is already on the screen below. */}
+          {view.name !== "settings" && (
+            <PlanStrip state={state} onUpgrade={(reason) => setUpgrade(reason ?? null)} />
+          )}
           <BottomNav {...nav} />
         </div>
       )}
@@ -408,7 +424,18 @@ export default function App() {
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
         state={state}
-        onUpgrade={() => setView({ name: "settings" })}
+        onUpgrade={(reason) => setUpgrade(reason ?? null)}
+      />
+
+      {/* One destination for every wall in the app. It opens over whatever you
+          were doing, so paying does not cost you your place. */}
+      <Upgrade
+        open={upgrade !== null}
+        onClose={() => setUpgrade(null)}
+        reason={upgrade || null}
+        plan={state.plan}
+        email={state.settings?.email || null}
+        onAccount={() => setView({ name: "settings" })}
       />
 
       {(newEvent || editingEvent) && (

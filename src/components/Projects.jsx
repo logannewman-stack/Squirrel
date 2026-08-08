@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { addProject, dayKey } from "../lib/store";
 import { Button, Input } from "./ui";
+import { usage } from "../lib/plans";
 import { duration, money } from "../lib/format";
 
 /**
@@ -34,10 +35,17 @@ function sayDue(due, today) {
   return `due ${new Date(`${due}T00:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}`;
 }
 
-export default function Projects({ state, onOpen }) {
+export default function Projects({ state, onOpen, onUpgrade }) {
   const { projects, tasks, sessions } = state;
   const [name, setName] = useState("");
   const today = dayKey();
+
+  // The cap is enforced in SQL, so a third project on a free account is not
+  // merely discouraged — it will not survive the next sync. Letting it be typed
+  // and then quietly losing it is the worst of both, so the wall is here, at
+  // the moment somebody reaches it, with the way past it attached.
+  const room = usage(state).meters.find((m) => m.key === "projects");
+  const capped = Boolean(room) && room.used >= room.cap;
 
   const rows = projects
     .map((p) => {
@@ -80,25 +88,40 @@ export default function Projects({ state, onOpen }) {
 
         {/* Bounded rather than full-bleed. A project name is a few words, and a
             field eleven hundred pixels wide invites a sentence. */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!name.trim()) return;
-            onOpen(addProject({ name }).id);
-            setName("");
-          }}
-          className="flex w-full gap-2 sm:w-auto"
-        >
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="New project"
-            className="w-full sm:w-64"
-          />
-          <Button type="submit" variant="primary" disabled={!name.trim()}>
-            Create
-          </Button>
-        </form>
+        <div className="w-full sm:w-auto">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              // The wall is checked before the name, not after: at the cap this
+              // button is an upgrade, and an upgrade does not need a project
+              // name it is only going to throw away.
+              if (capped) return onUpgrade?.(`You're at ${room.cap} projects`);
+              if (!name.trim()) return;
+              onOpen(addProject({ name }).id);
+              setName("");
+            }}
+            className="flex w-full gap-2 sm:w-auto"
+          >
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="New project"
+              className="w-full sm:w-64"
+            />
+            {/* At the cap the button stops waiting for a name it cannot use.
+                Requiring one first would make the way out of a wall depend on
+                typing something that gets thrown away. */}
+            <Button type="submit" variant="primary" disabled={!capped && !name.trim()}>
+              {capped ? "Upgrade" : "Create"}
+            </Button>
+          </form>
+          {capped && (
+            <p className="mt-1.5 text-right text-xs text-[var(--muted)]">
+              <span className="num alert font-semibold">{room.used}/{room.cap}</span>{" "}
+              projects on the free plan. Pro is unlimited.
+            </p>
+          )}
+        </div>
       </header>
 
       {live.length === 0 ? (

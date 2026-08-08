@@ -1,4 +1,4 @@
-import { PLANS, FREE_ASSISTS_PER_DAY, can } from "../lib/plans";
+import { usage, wallReason } from "../lib/plans";
 import { assistsToday } from "../lib/store";
 
 /**
@@ -16,38 +16,14 @@ import { assistsToday } from "../lib/store";
  * the one moment it genuinely needs to ask.
  */
 export default function PlanCard({ state, onUpgrade, onManage, compact = false }) {
-  const plan = state.plan ?? "free";
-  const paid = plan !== "free";
-  const tier = PLANS[plan] ?? PLANS.free;
-
-  const projects = (state.projects || []).filter((p) => !p.archived).length;
-  const openTasks = (state.tasks || []).filter((t) => !t.done).length;
-  const assists = assistsToday();
-
-  // Only limits that actually bind on this plan. On Pro every one of these is
-  // unlimited, and a row reading "unlimited" three times is furniture.
-  const meters = paid
-    ? []
-    : [
-        { label: "Projects", used: projects, cap: tier.projects },
-        { label: "Open tasks", used: openTasks, cap: tier.tasks },
-        ...(can(plan, "assistant")
-          ? []
-          : [{ label: "Squirrel today", used: assists, cap: FREE_ASSISTS_PER_DAY }]),
-      ].filter((m) => m.cap != null);
-
-  // The nearest wall, which is the only one worth leading with.
-  const tightest = meters.reduce(
-    (worst, m) => (m.used / m.cap > (worst?.used ?? 0) / (worst?.cap ?? 1) ? m : worst),
-    null,
-  );
-  const pressing = tightest && tightest.used / tightest.cap >= 0.6;
+  const u = usage(state, assistsToday());
+  const paid = u.plan !== "free";
 
   if (paid) {
     return (
       <div className={compact ? "px-2" : "card px-4 py-3"}>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium">{tier.name}</span>
+          <span className="text-sm font-medium">{u.tier.name}</span>
           <button
             onClick={onManage}
             className="text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline"
@@ -64,20 +40,20 @@ export default function PlanCard({ state, onUpgrade, onManage, compact = false }
     <div className={compact ? "" : "card p-4"}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="label">Free plan</span>
-        {pressing && (
+        {u.pressing && (
           <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--alert)]">
-            Nearly full
+            {u.full ? "Full" : "Nearly full"}
           </span>
         )}
       </div>
 
-      {meters.length > 0 && (
+      {u.meters.length > 0 && (
         <ul className="mt-3 flex flex-col gap-2.5">
-          {meters.map((m) => {
+          {u.meters.map((m) => {
             const pct = Math.min(100, Math.round((m.used / m.cap) * 100));
             const full = m.used >= m.cap;
             return (
-              <li key={m.label}>
+              <li key={m.key}>
                 <div className="flex items-baseline justify-between gap-2 text-[11px]">
                   <span className="text-[var(--muted)]">{m.label}</span>
                   <span className={`num ${full ? "alert font-semibold" : "text-[var(--faint)]"}`}>
@@ -99,8 +75,10 @@ export default function PlanCard({ state, onUpgrade, onManage, compact = false }
         </ul>
       )}
 
+      {/* The upgrade carries the wall that prompted it, so the sheet opens
+          answering the question the person is actually holding. */}
       <button
-        onClick={onUpgrade}
+        onClick={() => onUpgrade?.(u.pressing ? wallReason(u.tightest) : null)}
         className="mt-4 w-full rounded-lg bg-[var(--ink)] px-3 py-2.5 text-xs font-semibold
                    text-[var(--paper)] transition-opacity hover:opacity-90"
       >
