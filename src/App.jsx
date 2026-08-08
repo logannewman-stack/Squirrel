@@ -4,7 +4,6 @@ import Calendar from "./components/Calendar";
 import Projects from "./components/Projects";
 import ProjectDetail from "./components/ProjectDetail";
 import Insights from "./components/Insights";
-import AssistantFab from "./components/AssistantFab";
 import AssistantSheet from "./components/AssistantSheet";
 import Settings from "./components/Settings";
 import FocusScreen from "./components/FocusScreen";
@@ -282,48 +281,82 @@ export default function App() {
   const todayKey = dayKey();
   const overdue = state.tasks.filter((t) => !t.done && t.due && t.due < todayKey).length;
   const attention = overdue > 0 || (state.shortfalls?.length ?? 0) > 0;
-  const anyModal = assistantOpen || newEvent || Boolean(editingEvent) || palette;
 
   const isActive = (n) => view.name === n || (n === "projects" && view.name === "project");
   const fullHeight = view.name === "calendar";
+
+  const renderTab = ([name, label, d]) => (
+    <button
+      key={name}
+      onClick={() => setView({ name })}
+      aria-current={isActive(name)}
+      className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5
+                  transition-colors sm:max-w-[76px] sm:px-3 ${
+                    isActive(name) ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
+                  }`}
+    >
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
+        <path d={d} strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <span className="w-full truncate text-center text-[10px] font-medium">{label}</span>
+    </button>
+  );
 
   return (
     <div className="flex h-dvh flex-col">
       <div
         className={`flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
-        // Room at the bottom of a scrolling view so the last row clears the
-        // floating button rather than hiding behind it. The full-height views
-        // manage their own scroll and put nothing in that corner.
-        style={fullHeight ? undefined : { paddingBottom: "5.5rem" }}
+        // A little room at the bottom so the last row clears the raised
+        // Squirrel button rather than tucking under it. Full-height views
+        // manage their own scroll.
+        style={fullHeight ? undefined : { paddingBottom: "1.75rem" }}
       >
         {body}
       </div>
 
-      {/* Flexible rather than fixed-width tabs: six at a 64px minimum overflow a
-          390px phone, which scrolls the whole page sideways. */}
-      <nav className="flex shrink-0 items-center justify-center gap-0.5 border-t border-[var(--line)]
-                      bg-[var(--paper)] px-2 py-2 sm:gap-1 sm:px-4">
-        {TABS.map(([name, label, d]) => (
-          <button
-            key={name}
-            onClick={() => setView({ name })}
-            aria-current={isActive(name)}
-            className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5
-                        transition-colors sm:max-w-[76px] sm:px-3 ${
-                          isActive(name) ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
-                        }`}
+      {/* Five destinations flanking one action. Squirrel sits in the middle,
+          raised onto her own disc: the assistant is the thing you *do* here, so
+          she is the largest target and the centre of gravity rather than a tab
+          you navigate to. The side tabs stay flexible — six fixed 64px targets
+          overflow a 390px phone and scroll the page sideways. */}
+      <nav className="flex shrink-0 items-end justify-center gap-0.5 border-t border-[var(--line)]
+                      bg-[var(--paper)] px-2 pb-2 pt-1.5 sm:gap-1 sm:px-4">
+        {TABS.slice(0, 2).map(renderTab)}
+
+        {/* One tap opens her over whatever screen you are on. The ring is the
+            same reserved signal as the alert colour — overdue, or work that
+            will not fit — so it never lights for anything ornamental. */}
+        <button
+          onClick={() => setAssistantOpen(true)}
+          aria-label="Ask Squirrel"
+          title="Ask Squirrel"
+          className="group flex w-16 shrink-0 flex-col items-center gap-1 pb-1.5"
+        >
+          <span
+            className="sq-fab relative -mt-5 grid h-14 w-14 place-items-center rounded-full
+                       bg-[var(--ink)] shadow-[var(--float)] ring-1 ring-black/5
+                       transition-transform group-active:scale-95
+                       group-hover:shadow-[0_16px_40px_-8px_rgba(9,9,11,0.28)]"
           >
-            {d ? (
-              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
-                <path d={d} strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            ) : (
-              <Squirrel size={19} className="sq-tab" />
+            {attention && (
+              <span aria-hidden className="sq-fab-ring absolute inset-0 rounded-full border-2 border-[var(--alert)]" />
             )}
-            <span className="w-full truncate text-center text-[10px] font-medium">{label}</span>
-          </button>
-        ))}
-        <span className="mx-1 h-6 w-px bg-[var(--line)]" />
+            <Squirrel size={30} className="sq-fab" title="Squirrel" />
+            {/* The quiet half of the same signal: a solid dot when there is
+                something to see. */}
+            {attention && (
+              <span
+                aria-hidden
+                className="absolute right-0 top-0 h-3.5 w-3.5 rounded-full border-2 border-[var(--paper)] bg-[var(--alert)]"
+              />
+            )}
+          </span>
+          <span className="text-[10px] font-medium text-[var(--ink)]">Squirrel</span>
+        </button>
+
+        {TABS.slice(2).map(renderTab)}
+
+        <span className="mx-1 h-6 w-px self-center bg-[var(--line)]" />
         <button
           onClick={() => setView({ name: "settings" })}
           aria-current={view.name === "settings"}
@@ -339,11 +372,6 @@ export default function App() {
         </button>
       </nav>
 
-      <AssistantFab
-        onClick={() => setAssistantOpen(true)}
-        hidden={anyModal}
-        attention={attention}
-      />
       <AssistantSheet
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}

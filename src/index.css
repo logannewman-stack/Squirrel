@@ -259,23 +259,15 @@ input[type="date"], input[type="time"] { color-scheme: light; }
   50% { transform: rotate(-4deg) translateY(-0.5px); }
 }
 
-/* ------------------------------------------------------- the floating button
-   She is one tap from anywhere. The button that reaches her floats over every
-   screen rather than living in a tab, because the assistant is not a place you
-   go — it is a thing you ask, and asking should not cost a navigation.
+/* --------------------------------------------------------- the Squirrel disc
+   She sits in the middle of the tab bar, raised onto her own disc, because the
+   assistant is not a place you go — it is the thing you do here, so she is the
+   largest target and one tap from any screen.
 
-   In the tab bar she took the tab's colour; here she is filled onto her own
-   disc, so she reads as a single object with weight rather than an icon
-   dropped on a circle. */
+   The other tabs let her take their colour and dim with them; here she is
+   filled onto the ink disc instead, so she reads as a single object with
+   weight rather than an icon dropped on a circle. */
 .sq-fab .sq-fill { fill: var(--paper); }
-
-/* Rising in: a short lift and settle, so the button arrives rather than
-   blinks. Paired with the scrim and sheet so the whole gesture is one motion. */
-.sq-fab-in { animation: sq-fab-in 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-@keyframes sq-fab-in {
-  from { transform: translateY(10px) scale(0.9); opacity: 0; }
-  to   { transform: translateY(0) scale(1); opacity: 1; }
-}
 
 /* Press: she yields a little, the way a physical button would. */
 .sq-fab:active { transform: scale(0.94); }
@@ -303,6 +295,6 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sq-fab-in, .sq-fab-ring, .sq-scrim, .sq-sheet { animation: none !important; }
+  .sq-fab-ring, .sq-scrim, .sq-sheet { animation: none !important; }
   .sq-fab { transition: none; }
 }
