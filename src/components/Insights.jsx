@@ -68,15 +68,26 @@ export default function Insights({ state }) {
         <Stat label="Delegated" value={String(delegated.length)} sub="open, with someone else" />
       </div>
 
-      <section className="mb-12">
+      {/* On its own surface, and bounded. Left bare and full-bleed, a quiet
+          fortnight is a hundred and thirty pixels of blank page with one bar in
+          the corner — which reads as a broken chart rather than as a quiet
+          fortnight. A card gives the emptiness an edge, so it reads as a canvas
+          with little on it. */}
+      <section className="card mb-10 max-w-4xl px-6 py-5">
         <h2 className="label mb-4">Focus vs meetings</h2>
         {/* Columns need an explicit full height: the row is `items-end`, so an
             auto-height column gives its percentage-sized children nothing to
             resolve against and the bars collapse to zero. Each bar caps at 48%
             so a stacked pair still fits the track. */}
-        <div className="flex gap-1.5" style={{ height: 132 }}>
+        <div className="flex gap-1.5 border-b border-[var(--line)]" style={{ height: 112 }}>
           {focusByDay.map((d) => (
-            <div key={d.key} className="flex h-full flex-1 flex-col justify-end gap-0.5">
+            <div key={d.key} className="group relative flex h-full flex-1 flex-col justify-end gap-0.5">
+              {/* An empty day still gets a mark. A fortnight of blank space
+                  reads as a broken chart; a row of faint ticks reads as a
+                  quiet fortnight, which is the truth. */}
+              {d.ms === 0 && d.meetingMs === 0 && (
+                <span aria-hidden className="absolute bottom-0 left-0 h-px w-full bg-[var(--hairline)]" />
+              )}
               <div
                 title={`Meetings ${duration(d.meetingMs)}`}
                 style={{ height: `${(d.meetingMs / peakAny) * 48}%` }}
@@ -108,6 +119,7 @@ export default function Insights({ state }) {
         </p>
       </section>
 
+      <div className="grid gap-10 xl:grid-cols-2">
       <section className="mb-12">
         <h2 className="label mb-4">Where the hours went</h2>
         {byProject.length === 0 ? (
@@ -154,6 +166,7 @@ export default function Insights({ state }) {
           )}
         </dl>
       </section>
+      </div>
     </div>
   );
 }
