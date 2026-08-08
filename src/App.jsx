@@ -11,6 +11,7 @@ import EventDialog from "./components/EventDialog";
 import Identity from "./components/Identity";
 import CommandPalette from "./components/CommandPalette";
 import Squirrel from "./components/Squirrel";
+import { SidebarNav, BottomNav } from "./components/Nav";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
   remainingOf, toggleTask, setSetting, setPlan, dayKey,
@@ -25,6 +26,7 @@ import { planOpts } from "./lib/hours";
 import { pending as dueReminders } from "./lib/reminders";
 import { sync as syncReminders } from "./lib/notify";
 import { duration } from "./lib/format";
+import { useIsDesktop } from "./hooks/useMediaQuery";
 
 /**
  * Closing copy. Every branch is neutral — nothing implies the session should
@@ -40,13 +42,6 @@ function closingLine(focusedMs, plannedMs) {
 
 const LENGTHS = [15, 25, 45, 90];
 
-const TABS = [
-  ["today", "Today", "M4 7h16M4 12h16M4 17h10"],
-  ["calendar", "Calendar", "M4 8h16M4 8a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V8zM9 4v4M15 4v4"],
-  ["projects", "Projects", "M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"],
-  ["insights", "Insights", "M5 19V11M10 19V5M15 19v-6M20 19v-9"],
-];
-
 export default function App() {
   const state = useSyncExternalStore(subscribe, getState);
   const [view, setView] = useState({ name: "today" });
@@ -58,6 +53,7 @@ export default function App() {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [palette, setPalette] = useState(false);
   const [, force] = useState(0);
+  const desktop = useIsDesktop();
 
   const active = state.active;
   const remaining = remainingOf(active);
@@ -285,93 +281,43 @@ export default function App() {
   const isActive = (n) => view.name === n || (n === "projects" && view.name === "project");
   const fullHeight = view.name === "calendar";
 
-  const renderTab = ([name, label, d]) => (
-    <button
-      key={name}
-      onClick={() => setView({ name })}
-      aria-current={isActive(name)}
-      className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5
-                  transition-colors sm:max-w-[76px] sm:px-3 ${
-                    isActive(name) ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
-                  }`}
-    >
-      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
-        <path d={d} strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <span className="w-full truncate text-center text-[10px] font-medium">{label}</span>
-    </button>
-  );
+  const nav = {
+    isActive,
+    settingsActive: view.name === "settings",
+    onNavigate: (name) => setView({ name }),
+    onAskSquirrel: () => setAssistantOpen(true),
+    attention,
+  };
 
   return (
-    <div className="flex h-dvh flex-col">
-      <div
-        className={`flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
-        // A little room at the bottom so the last row clears the raised
-        // Squirrel button rather than tucking under it. Full-height views
-        // manage their own scroll.
-        style={fullHeight ? undefined : { paddingBottom: "1.75rem" }}
-      >
-        {body}
-      </div>
-
-      {/* Five destinations flanking one action. Squirrel sits in the middle,
-          raised onto her own disc: the assistant is the thing you *do* here, so
-          she is the largest target and the centre of gravity rather than a tab
-          you navigate to. The side tabs stay flexible — six fixed 64px targets
-          overflow a 390px phone and scroll the page sideways. */}
-      <nav className="flex shrink-0 items-end justify-center gap-0.5 border-t border-[var(--line)]
-                      bg-[var(--paper)] px-2 pb-2 pt-1.5 sm:gap-1 sm:px-4">
-        {TABS.slice(0, 2).map(renderTab)}
-
-        {/* One tap opens her over whatever screen you are on. The ring is the
-            same reserved signal as the alert colour — overdue, or work that
-            will not fit — so it never lights for anything ornamental. */}
-        <button
-          onClick={() => setAssistantOpen(true)}
-          aria-label="Ask Squirrel"
-          title="Ask Squirrel"
-          className="group flex w-16 shrink-0 flex-col items-center gap-1 pb-1.5"
-        >
-          <span
-            className="sq-fab relative -mt-5 grid h-14 w-14 place-items-center rounded-full
-                       bg-[var(--ink)] shadow-[var(--float)] ring-1 ring-black/5
-                       transition-transform group-active:scale-95
-                       group-hover:shadow-[0_16px_40px_-8px_rgba(9,9,11,0.28)]"
+    <>
+      {desktop ? (
+        // Desktop: a persistent left rail, the work taking the rest of the
+        // frame at full height.
+        <div className="flex h-dvh">
+          <SidebarNav {...nav} />
+          <main className={`min-w-0 flex-1 ${fullHeight ? "overflow-hidden" : "overflow-y-auto"}`}>
+            {body}
+          </main>
+        </div>
+      ) : (
+        // Phone: the work fills the height, the bar sits under the thumb.
+        <div className="flex h-dvh flex-col">
+          <div
+            className={`flex-1 ${fullHeight ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}
+            // A little room at the bottom so the last row clears the raised
+            // Squirrel button rather than tucking under it. Full-height views
+            // manage their own scroll.
+            style={fullHeight ? undefined : { paddingBottom: "1.75rem" }}
           >
-            {attention && (
-              <span aria-hidden className="sq-fab-ring absolute inset-0 rounded-full border-2 border-[var(--alert)]" />
-            )}
-            <Squirrel size={30} className="sq-fab" title="Squirrel" />
-            {/* The quiet half of the same signal: a solid dot when there is
-                something to see. */}
-            {attention && (
-              <span
-                aria-hidden
-                className="absolute right-0 top-0 h-3.5 w-3.5 rounded-full border-2 border-[var(--paper)] bg-[var(--alert)]"
-              />
-            )}
-          </span>
-          <span className="text-[10px] font-medium text-[var(--ink)]">Squirrel</span>
-        </button>
+            {body}
+          </div>
+          <BottomNav {...nav} />
+        </div>
+      )}
 
-        {TABS.slice(2).map(renderTab)}
-
-        <span className="mx-1 h-6 w-px self-center bg-[var(--line)]" />
-        <button
-          onClick={() => setView({ name: "settings" })}
-          aria-current={view.name === "settings"}
-          className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5 sm:max-w-[76px] sm:px-3 ${
-            view.name === "settings" ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
-          }`}
-        >
-          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current stroke-[1.6]">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" strokeLinecap="round" />
-          </svg>
-          <span className="w-full truncate text-center text-[10px] font-medium">Settings</span>
-        </button>
-      </nav>
-
+      {/* Overlays sit above either chrome; being fixed-positioned, they do not
+          care which layout is underneath. */}
       <AssistantSheet
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
@@ -393,7 +339,7 @@ export default function App() {
           onNewEvent={() => setNewEvent(true)}
         />
       )}
-    </div>
+    </>
   );
 }
 

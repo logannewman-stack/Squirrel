@@ -46,7 +46,7 @@ export default function Insights({ state }) {
   const shortRuns = sessions.filter((s) => s.focusedMs < s.plannedMs * 0.5).length;
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-8">
+    <div className="mx-auto w-full max-w-7xl px-6 py-8">
       <header className="mb-6">
         <p className="label">Last {DAYS_BACK} days</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">Insights</h1>

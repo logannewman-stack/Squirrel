@@ -35,7 +35,7 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
   const shown = tab === "open" ? open : tab === "waiting" ? waiting : done;
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-8">
+    <div className="mx-auto w-full max-w-7xl px-6 py-8">
       <button onClick={onBack} className="text-xs text-[var(--muted)] hover:text-[var(--ink)]">
         ← Projects
       </button>

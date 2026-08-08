@@ -58,7 +58,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
   ].sort((a, b) => a.at - b.at);
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-8">
+    <div className="mx-auto w-full max-w-7xl px-6 py-8">
       <header className="mb-6 flex items-end justify-between gap-4">
         <div>
           <p className="label">
