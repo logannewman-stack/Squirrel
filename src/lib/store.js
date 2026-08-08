@@ -338,7 +338,13 @@ export const totals = (sessions = read().sessions) => ({
 
 // -------------------------------------------------------------------- chat
 export const appendChat = (msg) =>
-  update({ chat: [...read().chat, { id: uid(), at: Date.now(), ...msg }].slice(-200) });
+  // `updatedAt` and `dirty` are what make a message visible to sync — without
+  // them the thread stays on the device that produced it.
+  update({
+    chat: [...read().chat,
+      { id: uid(), at: Date.now(), updatedAt: Date.now(), dirty: true, ...msg },
+    ].slice(-200),
+  });
 
 /** Clearing the visible thread has to clear what the assistant remembers of it
  *  too, or the next message quietly amends something the user can no longer see. */
@@ -395,6 +401,7 @@ export function markSynced(sent, at = Date.now()) {
     tasks: clean("tasks", s.tasks),
     events: clean("events", s.events),
     sessions: clean("sessions", s.sessions),
+    chat: clean("chat", s.chat),
     tombstones: s.tombstones.map((t) =>
       byKind.get(t.kind)?.has(t.id) ? { ...t, dirty: false } : t),
   });

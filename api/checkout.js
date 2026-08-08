@@ -8,12 +8,35 @@ const PRICE = {
 };
 
 /**
- * Stripe checkout for WEB signups only.
+ * Where checkout sends the browser afterwards.
  *
- * Apple requires In-App Purchase for digital subscriptions bought inside an iOS
- * or Mac app (App Store Guideline 3.1.1) — routing an in-app upgrade here is a
- * rejection. The native client must use StoreKit and verify the receipt via
- * api/apple-webhook.js instead.
+ * Two callers, two destinations. The web app wants an ordinary URL. The native
+ * app opens this in Safari — deliberately, because a link-out has to leave the
+ * app to be allowed at all — and then needs the browser to hand control back,
+ * which is what the universal link does.
+ *
+ * An allow-list rather than an echo of whatever was posted. `success_url` is
+ * attacker-controlled input the moment it is taken from a request body, and a
+ * checkout that redirects anywhere is a phishing page with your domain on the
+ * receipt.
+ */
+const RETURNS = {
+  web: (base) => ({ ok: `${base}/?upgraded=1`, no: `${base}/?upgrade=cancelled` }),
+  // Same origin on purpose: iOS matches the universal link by domain and path,
+  // so this opens the app when it is installed and the site when it is not.
+  app: (base) => ({ ok: `${base}/app/upgraded`, no: `${base}/app/upgrade-cancelled` }),
+};
+
+/**
+ * Stripe checkout — for the web, and for the native app's link-out.
+ *
+ * Apple requires In-App Purchase for anything bought *inside* an iOS or Mac app
+ * (Guideline 3.1.1), so the native client uses StoreKit and api/apple/verify.
+ * The exception, on the US storefront, is a link that leaves the app entirely:
+ * since the 2025 Epic ruling an app may send someone to an external checkout in
+ * the system browser. That is what `return: "app"` is for. It must open in
+ * Safari rather than a webview — an in-app webview is still the app, and still
+ * a rejection.
  */
 export default async function handler(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" });
@@ -21,8 +44,9 @@ export default async function handler(req, res) {
   const auth = await requireUser(req);
   if (!auth) return json(res, 401, { error: "unauthorized" });
 
-  const { plan } = req.body || {};
+  const { plan, return: returnTo = "web" } = req.body || {};
   if (!PRICE[plan]) return json(res, 400, { error: "unknown_plan" });
+  if (!RETURNS[returnTo]) return json(res, 400, { error: "unknown_return" });
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   const db = asUser(auth.jwt);
@@ -46,8 +70,9 @@ export default async function handler(req, res) {
     mode: "subscription",
     customer: customerId,
     line_items: [{ price: PRICE[plan], quantity: 1 }],
-    success_url: `${process.env.PUBLIC_URL}/?upgraded=1`,
-    cancel_url: `${process.env.PUBLIC_URL}/?upgrade=cancelled`,
+    ...(({ ok, no }) => ({ success_url: ok, cancel_url: no }))(
+      RETURNS[returnTo](process.env.PUBLIC_URL || ""),
+    ),
     // Carried onto the subscription so the webhook can attribute it without a
     // second lookup.
     subscription_data: { metadata: { supabase_user_id: auth.user.id, plan } },

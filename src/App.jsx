@@ -114,10 +114,28 @@ export default function App() {
     if (!configured) { setPlanTier("studio"); return; }
 
     let live = true;
-    fetchUsage()
-      .then((u) => { if (live) setPlanTier(u?.plan ?? "free"); })
-      .catch(() => { if (live) setPlanTier("free"); });
-    return () => { live = false; };
+    const load = () =>
+      fetchUsage()
+        .then((u) => { if (live) setPlanTier(u?.plan ?? "free"); })
+        .catch(() => { if (live) setPlanTier("free"); });
+    load();
+
+    // Coming back from a checkout that happened somewhere else.
+    //
+    // On the web the redirect reloads the page and this effect runs anyway. In
+    // the native app it does not: the purchase happened in Safari, and the app
+    // was in the background the whole time. It is only told anything when it is
+    // brought forward again — so the return from a universal link, and any
+    // return to the foreground, re-reads the plan. Without this the customer
+    // pays and comes back to an app that still says Free.
+    const onWake = () => { if (!document.hidden) load(); };
+    addEventListener("visibilitychange", onWake);
+    addEventListener("squirrel:resumed", load);
+    return () => {
+      live = false;
+      removeEventListener("visibilitychange", onWake);
+      removeEventListener("squirrel:resumed", load);
+    };
   }, [state.settings?.email]);
 
   // The fallback is a socket in the assistant, and this is the only thing that

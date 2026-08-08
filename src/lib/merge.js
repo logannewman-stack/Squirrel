@@ -51,6 +51,14 @@ const FROM_DB = {
     endedAt: Date.parse(r.ended_at), updatedAt: Date.parse(r.updated_at),
     deletedAt: r.deleted_at ? Date.parse(r.deleted_at) : null,
   }),
+  // The assistant thread. Append-only: a message is never edited after it is
+  // written, so the generic last-write-wins rule degenerates to a union, which
+  // is exactly right for a conversation.
+  chat: (r) => ({
+    id: r.id, role: r.role, text: r.text ?? "", actions: r.actions ?? [],
+    at: Date.parse(r.created_at), updatedAt: Date.parse(r.updated_at),
+    deletedAt: r.deleted_at ? Date.parse(r.deleted_at) : null,
+  }),
 };
 
 const TO_DB = {
@@ -74,6 +82,14 @@ const TO_DB = {
     starts_at: fromLocal(r.start), ends_at: fromLocal(r.end),
     location: r.location ?? "", attendees: r.attendees ?? [], notes: r.notes ?? "",
     updated_at: new Date(r.updatedAt ?? Date.now()).toISOString(),
+    deleted_at: r.deletedAt ? new Date(r.deletedAt).toISOString() : null,
+  }),
+  chat: (r) => ({
+    id: r.id, role: r.role, text: r.text ?? "", actions: r.actions ?? [],
+    // `at` is when it was said; the server column is created_at. Sending it
+    // keeps the order right on a device that pulls the thread months later.
+    created_at: new Date(r.at ?? Date.now()).toISOString(),
+    updated_at: new Date(r.updatedAt ?? r.at ?? Date.now()).toISOString(),
     deleted_at: r.deletedAt ? new Date(r.deletedAt).toISOString() : null,
   }),
   sessions: (r) => ({

@@ -26,16 +26,38 @@ async function post(path, body) {
 }
 
 /**
+ * Is this the native shell rather than a browser tab?
+ *
+ * Set by the app at startup. It decides which way an upgrade goes, and it has
+ * to be explicit rather than sniffed: a user agent cannot reliably tell a Mac
+ * Catalyst build from Safari, and getting it wrong means either a rejected app
+ * or a checkout that never returns.
+ */
+export const inNativeApp = () => globalThis.__SQUIRREL_NATIVE__ === true;
+
+/**
  * Start a subscription.
  *
- * Web only. Apple requires In-App Purchase for digital subscriptions bought
- * inside an iOS or Mac app, and routing an in-app upgrade through Stripe is a
- * rejection — see the note in api/checkout.js.
+ * Two routes to the same Stripe session. From the web it is an ordinary
+ * redirect. From the native app it must open in the *system browser* and come
+ * back through a universal link: since the 2025 Epic ruling a US app may send
+ * someone out to an external checkout, but only by genuinely leaving the app —
+ * an in-app webview is still the app, and still a rejection under 3.1.1.
+ *
+ * The native shell is expected to expose `__SQUIRREL_OPEN_EXTERNAL__`. Falling
+ * back to `location.assign` would quietly turn a compliant link-out into a
+ * webview purchase, so the absence of it is an error rather than a default.
  */
 export async function startCheckout(plan) {
-  const { url } = await post("/api/checkout", { plan });
+  const native = inNativeApp();
+  const { url } = await post("/api/checkout", { plan, return: native ? "app" : "web" });
   if (!url) throw new Error("no checkout url");
-  location.assign(url);
+
+  if (!native) return location.assign(url);
+
+  const open = globalThis.__SQUIRREL_OPEN_EXTERNAL__;
+  if (typeof open !== "function") throw new Error("cannot open the browser from here");
+  open(url);
 }
 
 /** Manage an existing subscription: card, invoices, upgrade, cancel. */

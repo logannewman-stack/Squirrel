@@ -24,8 +24,11 @@ import { client, configured, deviceId, deviceName } from "./supabase.js";
 import { decode, encode, mergeCollection } from "./merge.js";
 import { getState, applyRemote, markSynced } from "./store.js";
 
-const KINDS = ["projects", "tasks", "events", "sessions"];
-const TABLE = { projects: "projects", tasks: "tasks", events: "events", sessions: "focus_sessions" };
+const KINDS = ["projects", "tasks", "events", "sessions", "chat"];
+const TABLE = {
+  projects: "projects", tasks: "tasks", events: "events",
+  sessions: "focus_sessions", chat: "chat_messages",
+};
 const CURSOR_KEY = "squirrel.cursor";
 
 let running = false;

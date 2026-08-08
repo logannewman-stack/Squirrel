@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.squirrel.app"],
+        "components": [
+          { "/": "/app/upgraded", "comment": "Return from an external checkout, paid." },
+          { "/": "/app/upgrade-cancelled", "comment": "Return from an external checkout, abandoned." },
+          { "/": "/app/*", "comment": "Anything else meant for the app rather than the site." }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["TEAMID.com.squirrel.app"]
+  }
+}
