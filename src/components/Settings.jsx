@@ -137,7 +137,7 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
         <p className="mb-4 max-w-prose text-sm text-[var(--muted)]">
           Talk to her, and have her talk back.
         </p>
-        <VoiceSettings state={state} />
+        <VoiceSettings state={state} onUpgrade={onUpgrade} />
       </section>
 
       <section className="mb-10">

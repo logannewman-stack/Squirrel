@@ -20,6 +20,10 @@
  * Without those two, both halves technically work and neither is usable.
  */
 
+// Cheap to import on purpose: the model library behind it is fetched only
+// when somebody turns the downloaded voice on.
+import { neuralReady, speakNeural, stopNeural } from "./neural.js";
+
 export const canSpeak = () =>
   typeof globalThis.speechSynthesis !== "undefined" && typeof globalThis.SpeechSynthesisUtterance !== "undefined";
 
@@ -602,14 +606,34 @@ let generation = 0;
  * @returns {() => void} stop
  */
 export function speak(text, options = {}) {
-  const { voiceURI, rate = 1, pitch = 1, persona, address = "", onStart, onEnd } = options;
-  if (!canSpeak()) return () => {};
+  const { voiceURI, rate = 1, pitch = 1, persona, address = "", neuralVoice, onStart, onEnd } = options;
+
   // Read for speech first, then given the persona's delivery. The order
   // matters: `toSpeech` turns a multi-line reply into sentences and "1h" into
   // "1 hour", and the character pass has to see the finished sentence to know
-  // where the tail of it is.
+  // where the tail of it is. Both engines get the same finished text — every
+  // date, duration and range fix belongs to what is *said*, not to who says it.
   const said = inCharacter(toSpeech(text), persona, address);
   if (!said) return () => {};
+
+  /**
+   * The downloaded voice, where somebody has one and has asked for it.
+   *
+   * Falling back rather than failing is the whole contract: if generation
+   * throws, or the model was evicted from the cache, or the audio context
+   * refuses to start, she finishes the sentence on the device voice instead of
+   * going quiet. Nobody should discover that a *better* voice was installed by
+   * the app becoming silent.
+   */
+  if (neuralVoice && neuralReady()) {
+    stopSpeaking();
+    speakNeural(said, { voice: neuralVoice, speed: rate, onStart, onEnd }).then((spoke) => {
+      if (!spoke) speak(text, { ...options, neuralVoice: null });
+    });
+    return stopSpeaking;
+  }
+
+  if (!canSpeak()) return () => {};
 
   stopSpeaking();
   const gen = generation;
@@ -676,6 +700,9 @@ export function speak(text, options = {}) {
 }
 
 export function stopSpeaking() {
+  // Both engines, always. Talking over her has to work whichever one is
+  // speaking, and the caller has no idea which that is.
+  stopNeural();
   if (!canSpeak()) return;
   // Bumped before the cancel, so the `onend` that some engines fire for the
   // utterance being cut off is recognised as belonging to a dead run.
@@ -843,6 +870,9 @@ export const voiceSettings = (settings = {}) => {
   return {
     speak: settings?.voice?.speak ?? native,
     handsFree: settings?.voice?.handsFree ?? false,
+    // The downloaded voice, if one was ever fetched and kept on. Null means the
+    // device's own, which is everybody until they choose otherwise.
+    neuralVoice: settings?.voice?.neuralVoice ?? null,
     // An explicitly chosen voice always wins; otherwise the persona picks.
     voiceURI: settings?.voice?.voiceURI ?? bestVoiceFor(persona.id)?.voiceURI ?? null,
     persona: persona.id,

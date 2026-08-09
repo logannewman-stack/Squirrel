@@ -5,6 +5,7 @@ import {
   PERSONAS, bestVoiceFor, isHiFi, activeVoice,
 } from "../lib/speech";
 import { addressOf } from "../lib/nlu/voice";
+import NeuralVoice from "./NeuralVoice";
 
 /**
  * Voice, on both sides.
@@ -19,7 +20,7 @@ import { addressOf } from "../lib/nlu/voice";
  * first call and fills it in asynchronously, so anything reading it at mount
  * concludes the device is mute.
  */
-export default function VoiceSettings({ state }) {
+export default function VoiceSettings({ state, onUpgrade }) {
   const [list, setList] = useState([]);
   const v = voiceSettings(state.settings);
   const hasVoice = canSpeak();
@@ -115,6 +116,17 @@ export default function VoiceSettings({ state }) {
                   })}
                 </div>
                 <HiFiHint list={list} settings={state.settings} />
+              </div>
+
+              {/* The way past the ceiling everything above it sits under. */}
+              <div>
+                <label className="label mb-2 block">Downloaded voice</label>
+                <NeuralVoice
+                  state={state}
+                  voice={v.neuralVoice}
+                  onChange={(id) => save({ neuralVoice: id })}
+                  onUpgrade={onUpgrade}
+                />
               </div>
 
               <div>

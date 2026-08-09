@@ -129,6 +129,9 @@ export default function Assistant({ state, onClose, metered = false }) {
         // it alone.
         persona: voice.persona,
         address: who,
+        // Used only if the model was downloaded and is still cached; `speak`
+        // falls back to the device voice on its own if it is not.
+        neuralVoice: voice.neuralVoice,
         onEnd: () => {
           setTalking(false);
           // Hands-free: reopen the microphone, but only where the turn is

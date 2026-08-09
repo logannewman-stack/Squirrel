@@ -11,6 +11,7 @@ import {
   toSpeech, fromSpeech, voiceSettings, bestVoiceFor, inCharacter, temper,
   intoSentences, contourFor, speak, stopSpeaking,
 } from "../src/lib/speech.js";
+import { neuralReady, neuralSupported, neuralStatus } from "../src/lib/neural.js";
 import { parse } from "../src/lib/nlu/parse.js";
 
 let pass = 0, fail = 0;
@@ -599,6 +600,54 @@ for (const [heard, contains, time] of HEARD) {
   speak("Booked an hour.", { voiceURI: "guse", persona: "natural", onEnd: () => ends2++ });
   spoken[0].onerror();
   t("with nothing to fall back to, it gives up rather than hanging", ends2 === 1, ends2);
+
+  delete globalThis.speechSynthesis;
+  delete globalThis.SpeechSynthesisUtterance;
+}
+
+/* ------------------------------------------------------- the downloaded voice
+   An optional model that has to be fetched before it can say anything, which
+   makes "what happens when it hasn't been, or has stopped working" the only
+   part of it worth defending in a unit test. The answer is always the same:
+   the device voice speaks instead. Nobody should discover that a *better*
+   voice was installed by the app going silent. */
+{
+  t("nothing is downloaded until somebody asks", neuralReady() === false);
+  t("and a plain Node process is not somewhere it can run",
+    neuralSupported() === false, neuralSupported());
+  t("its status starts idle rather than failed",
+    neuralStatus().state === "idle", JSON.stringify(neuralStatus()));
+
+  t("the setting defaults to the device voice", voiceSettings({}).neuralVoice === null);
+  t("and carries a chosen one through",
+    voiceSettings({ voice: { neuralVoice: "af_heart" } }).neuralVoice === "af_heart");
+
+  // The fallback, which is the whole contract.
+  const queue = [];
+  globalThis.SpeechSynthesisUtterance = function (text) { this.text = text; };
+  globalThis.speechSynthesis = {
+    speaking: false, pending: false,
+    getVoices: () => [{ name: "Samantha", lang: "en-US", voiceURI: "sam", localService: true }],
+    speak(u) { queue.push(u); },
+    cancel() { queue.length = 0; },
+  };
+
+  let ends = 0;
+  speak("Booked an hour with Ronnie.", {
+    voiceURI: "sam", neuralVoice: "af_heart", onEnd: () => ends++,
+  });
+  t("asking for a voice that was never downloaded still speaks",
+    queue.length === 1, queue.length);
+  t("on the device voice", queue[0]?.voice?.voiceURI === "sam", queue[0]?.voice?.name);
+  t("saying the same thing", /Ronnie/.test(queue[0]?.text || ""), queue[0]?.text);
+  queue[0].onend?.();
+  t("and finishing normally", ends === 1, ends);
+
+  // Stopping has to reach both engines, since the caller has no idea which one
+  // is speaking.
+  stopSpeaking();
+  t("stopping clears the device queue", queue.length === 0, queue.length);
+  t("and leaves the model in a usable state", neuralStatus().state === "idle");
 
   delete globalThis.speechSynthesis;
   delete globalThis.SpeechSynthesisUtterance;
