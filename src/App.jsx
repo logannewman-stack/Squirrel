@@ -26,6 +26,7 @@ import {
 import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
 import { clearResolver } from "./lib/nlu/fallback";
+import { takeRequest, onRequest } from "./lib/intent";
 import { distribute } from "./lib/schedule";
 import { planOpts } from "./lib/hours";
 // Aliased: `pending` is already the task waiting for a focus length in this
@@ -63,11 +64,37 @@ export default function App() {
   // is the reason to lead with, because "Upgrade to Pro" answers a question
   // nobody asked and "You've used today's free turns" answers the one they hold.
   const [upgrade, setUpgrade] = useState(null);
+  // A sentence handed over from outside — Siri, a Shortcut, a widget, a link.
+  const [request, setRequest] = useState(null);
   const [, force] = useState(0);
   const desktop = useIsDesktop();
 
   const active = state.active;
   const remaining = remainingOf(active);
+
+  /**
+   * Sentences handed over from outside the app.
+   *
+   * Two arrivals, one handler. On the web it is in the URL at load — a
+   * bookmark, a Shortcut's "Open URL", a link somebody sent themselves. In the
+   * native app it is an event: iOS brings the app forward rather than reloading
+   * it, so a URL read only at startup would be read exactly once and never
+   * again.
+   *
+   * Each gets an id, because the sheet must run the same words twice if they
+   * are asked twice. "Move it back" is precisely the sentence somebody says
+   * again ten seconds later.
+   */
+  useEffect(() => {
+    let n = 0;
+    const accept = (req) => {
+      if (!req) return;
+      setRequest({ ...req, id: `${Date.now()}-${n++}` });
+      setAssistantOpen(true);
+    };
+    accept(takeRequest());
+    return onRequest(accept);
+  }, []);
 
   // Re-render on a fixed cadence so the countdown moves. The timestamp in the
   // store is the source of truth — this only drives repaints, so a throttled
@@ -422,7 +449,8 @@ export default function App() {
           care which layout is underneath. */}
       <AssistantSheet
         open={assistantOpen}
-        onClose={() => setAssistantOpen(false)}
+        onClose={() => { setAssistantOpen(false); setRequest(null); }}
+        request={request}
         state={state}
         onUpgrade={(reason) => setUpgrade(reason ?? null)}
       />

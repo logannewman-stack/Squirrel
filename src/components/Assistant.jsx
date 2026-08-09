@@ -17,7 +17,7 @@ import Squirrel from "./Squirrel";
  */
 const THINK_MS = { calendar: 900, pen: 650 };
 
-export default function Assistant({ state, onClose, metered = false }) {
+export default function Assistant({ state, onClose, metered = false, request = null }) {
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(null);
   const [pendingChoice, setPendingChoice] = useState(null);
@@ -176,6 +176,22 @@ export default function Assistant({ state, onClose, metered = false }) {
   // the first render's `run`, sending every dictated command against stale state.
   const runRef = useRef(run);
   runRef.current = run;
+
+  /**
+   * A sentence that arrived from outside the app — Siri, a Shortcut, a widget,
+   * a link.
+   *
+   * Keyed by the request's own id rather than by its text, so asking the same
+   * thing twice in a row runs twice. Anything keyed on the words would silently
+   * drop the second "move it back", which is exactly the sentence somebody
+   * repeats.
+   */
+  const ranRequest = useRef(null);
+  useEffect(() => {
+    if (!request || ranRequest.current === request.id) return;
+    ranRequest.current = request.id;
+    runRef.current(request.text);
+  }, [request]);
 
   function pick(option) {
     const choice = pendingChoice;

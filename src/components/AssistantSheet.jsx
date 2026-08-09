@@ -21,7 +21,7 @@ import { assistsToday } from "../lib/store";
  * out — at which point it is asking somebody to pay for something they have
  * just felt working, which is the only version of this that converts.
  */
-export default function AssistantSheet({ open, onClose, state, onUpgrade }) {
+export default function AssistantSheet({ open, onClose, state, onUpgrade, request = null }) {
   const entitled = can(state.plan, "assistant");
   const used = assistsToday();
   const left = Math.max(0, FREE_ASSISTS_PER_DAY - used);
@@ -64,7 +64,7 @@ export default function AssistantSheet({ open, onClose, state, onUpgrade }) {
                 </button>
               </div>
             )}
-            <Assistant state={state} onClose={onClose} metered={!entitled} />
+            <Assistant state={state} onClose={onClose} metered={!entitled} request={request} />
           </>
         )}
       </div>

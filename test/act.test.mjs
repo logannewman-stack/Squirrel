@@ -654,4 +654,65 @@ for (const q of COMPOUNDS) {
   t("and still runs to the end of the week", /Thursday review/.test(mid.text), mid.text);
 }
 
+/**
+ * Handing work over, said the way people say it.
+ *
+ * The person had to be capitalised, which quietly broke the whole feature for
+ * anybody who *talks* to her: a recogniser returns "delegate the sow to bob" in
+ * lower case every time, so a dictated hand-off classified correctly, found no
+ * person, and asked "delegate it to whom?" of somebody who had just said whom.
+ * It does not look like a bug from outside — she just seems not to be
+ * listening.
+ */
+{
+  const seed = () => {
+    reset({ confirm: false });
+    store.addTask({ title: "Draft the SOW", due: "2026-08-14", estimateMins: 90 });
+    store.addEvent({ title: "Board call", start: iso(2026, 8, 13, 15), end: iso(2026, 8, 13, 16) });
+  };
+  const NOW2 = new Date(2026, 7, 12, 10, 0);
+  // `||` rather than `??`: an undelegated task carries an empty string, not
+  // undefined, so a nullish check would call "" a person.
+  const who = () => S().tasks.find((x) => x.title === "Draft the SOW")?.delegatedTo || null;
+
+  for (const phrase of [
+    "delegate draft the sow to bob",
+    "hand the sow to bob",
+    "give the sow to bob",
+    "assign the sow to bob",
+  ]) {
+    seed();
+    ask(phrase, S(), { now: NOW2 });
+    t(`"${phrase}" reaches Bob`, who() === "Bob", who());
+  }
+
+  seed();
+  ask("delegate the sow to Priya", S(), { now: NOW2 });
+  t("a capital still works, obviously", who() === "Priya", who());
+
+  seed();
+  ask("delegate the sow to bob smith", S(), { now: NOW2 });
+  t("and a surname survives without one", /^Bob/.test(who() || ""), who());
+
+  // The guards, which are the reason this could not simply drop the capital:
+  // "to" is followed by a time far more often than by a person.
+  seed();
+  const moved = ask("move the board call to friday", S(), { now: NOW2 });
+  t("a day after “to” is still a day", /Moved/.test(moved.text), moved.text);
+  t("and nothing was delegated to anybody called Friday", who() === null, who());
+
+  seed();
+  ask("move the board call to 4pm", S(), { now: NOW2 });
+  t("nor to anybody called 4pm", who() === null, who());
+
+  seed();
+  const mine = ask("delegate the sow to me", S(), { now: NOW2 });
+  t("“to me” is not a hand-off", who() === null, mine.text);
+
+  seed();
+  ask("book lunch with bob", S(), { now: NOW2 });
+  t("and booking a meeting with somebody does not delegate to them",
+    who() === null, who());
+}
+
 report("Assistant actions");

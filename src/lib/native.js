@@ -119,9 +119,17 @@ export async function startNative() {
     App.addListener("appStateChange", ({ isActive }) => {
       if (isActive) dispatchEvent(new Event("squirrel:resumed"));
     });
-    // A universal link opened us. The path decides what to do; the plan is
-    // re-read either way, because the commonest reason to arrive this way is
-    // having just paid.
-    App.addListener("appUrlOpen", () => dispatchEvent(new Event("squirrel:resumed")));
+    // A universal link or a custom-scheme URL opened us. The plan is re-read
+    // either way, because the commonest reason to arrive this way is having
+    // just paid — and the URL is passed on, because the second commonest is
+    // Siri handing over a sentence to run.
+    //
+    // The app is usually already running when this fires: iOS brings it
+    // forward rather than reloading it, so anything that only reads the URL at
+    // startup would never see it.
+    App.addListener("appUrlOpen", ({ url }) => {
+      dispatchEvent(new Event("squirrel:resumed"));
+      if (url) dispatchEvent(new CustomEvent("squirrel:url", { detail: { url } }));
+    });
   } catch { /* not available */ }
 }

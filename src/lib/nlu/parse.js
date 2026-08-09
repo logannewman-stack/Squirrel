@@ -814,6 +814,47 @@ const NOT_A_NAME = new Set([
   "i", "we", "he", "she", "they", "nobody", "everybody",
 ]);
 
+/**
+ * Who a task is being handed to: "delegate the deck to bob".
+ *
+ * The capital used to be required here, which quietly broke the whole feature
+ * for anybody who *talks* to her. A speech recogniser returns "delegate the sow
+ * to bob" in lower case, every time — so a dictated hand-off was classified
+ * correctly, found no person, and asked "delegate it to whom?" of somebody who
+ * had just said whom. Typing it on a phone with autocorrect off fails
+ * identically, and neither failure looks like a bug from the outside; she just
+ * seems not to be listening.
+ *
+ * A capital is evidence now rather than a requirement. Without one the word has
+ * to survive two guards, and both exist because of what actually follows "to"
+ * in a calendar app: `NOT_A_NAME` stops "move it to lunch" handing a task to
+ * somebody called Lunch, and the date check stops "push it to Friday" doing the
+ * same. A capitalised word skips the stop-list — somebody who wrote "Friday"
+ * with a capital in the middle of a sentence about delegation is more likely to
+ * have a colleague called Friday than to be naming the day.
+ *
+ * @returns {[string, string] | null} a match-shaped pair, so callers read [1]
+ */
+function handoffTarget(body) {
+  // The surname may be lower case too — somebody dictating gets no capitals at
+  // all, so requiring one on the second word only moved the failure along by a
+  // word. "next friday" is caught by the date check below rather than here.
+  const m = body.match(/\b(?:to|with|for)\s+([A-Za-z][\w'’-]*(?:\s+[A-Za-z][\w'’-]+)?)\s*$/);
+  if (!m) return null;
+
+  const name = m[1].trim();
+  const capitalised = /^[A-Z]/.test(name);
+  if (!capitalised) {
+    const first = name.split(/\s+/)[0].toLowerCase();
+    if (NOT_A_NAME.has(first)) return null;
+    // A day, a month, "tomorrow", "noon" — the sentence is about when, not who.
+    if (parseDate(name, new Date()) || parseTime(name)) return null;
+    // A single letter is a typo or an initial, never a person to hand work to.
+    if (first.length < 2) return null;
+  }
+  return [m[0], name.replace(/^\w/, (c) => c.toUpperCase())];
+}
+
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -1289,8 +1330,8 @@ export function parse(text, now = new Date()) {
     }
   }
 
-  // "delegate X to Anders" / "assign X to Priya"
-  const toPerson = body.match(/\b(?:to|with|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/);
+  // "delegate X to Anders" / "assign X to priya" — see `handoffTarget`.
+  const toPerson = handoffTarget(body);
   // With an anchor present, everything descriptive is read from the half of
   // the sentence that isn't the anchor. Otherwise "put a debrief right after
   // the board call" is titled "Debrief right after the board call", and the
