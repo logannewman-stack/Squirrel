@@ -121,19 +121,33 @@ export const PERSONAS = {
     prefer: { lang: null, names: [] },
     rate: 1,
     pitch: 1,
+    breath: false,
+    openers: [],
   },
   butler: {
     id: "butler",
     name: "The butler",
-    blurb: "English, unhurried, faintly amused. Calls you by name.",
+    blurb: "English, unhurried, understated. Acknowledges before it reports.",
     // Daniel is the long-standing en-GB male voice on Apple platforms; Arthur
-    // and Oliver are the newer ones. Named rather than guessed at, because
-    // "pick a male voice" is not something the API will answer.
-    prefer: { lang: "en-GB", names: ["daniel", "arthur", "oliver", "graham", "jamie"] },
-    // Slower and lower. The measured delivery is most of the impression — the
-    // same words at 1.0 and default pitch sound like a train announcement.
-    rate: 0.94,
-    pitch: 0.9,
+    // and Oliver are the newer ones, Google UK English Male the Chrome one.
+    // Named rather than guessed at, because "pick a male voice" is not
+    // something the API will answer.
+    prefer: {
+      lang: "en-GB",
+      names: ["daniel", "arthur", "oliver", "graham", "jamie", "george", "uk english male"],
+    },
+    // Lower, and only a little slower. Dragging the rate down further is the
+    // obvious move and the wrong one — a uniformly slowed voice sounds sedated,
+    // not considered. The measured quality comes from `breath` below, which
+    // puts the pauses where a person would take them and leaves the words
+    // themselves at close to ordinary speed.
+    rate: 0.95,
+    pitch: 0.85,
+    breath: true,
+    // Said before the report, the way somebody who has already done the thing
+    // answers. Rotated by content rather than at random so a given reply always
+    // sounds the same, and two different replies rarely open alike.
+    openers: ["Very good", "Done", "There we are", "Of course"],
   },
   brisk: {
     id: "brisk",
@@ -142,8 +156,91 @@ export const PERSONAS = {
     prefer: { lang: null, names: [] },
     rate: 1.15,
     pitch: 1,
+    breath: false,
+    openers: [],
   },
 };
+
+/**
+ * Voices that exist to be jokes.
+ *
+ * macOS ships a shelf of them — Albert, Bubbles, Jester, Zarvox — and they are
+ * ordinary local voices as far as the API is concerned, so a scoring pass that
+ * rewards "installed on this device" will cheerfully hand somebody Bad News to
+ * read their calendar in. Named rather than detected, because there is no flag
+ * for "this one is a gag".
+ */
+const NOVELTY = /albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|jester|junior|kathy|organ|princess|ralph|superstar|trinoids|whisper|wobble|zarvox|hysterical|bruce|fred\b/i;
+
+/** Engines worth reaching for when a device has more than one tier installed. */
+const PREMIUM = /premium|enhanced|neural|siri|natural/i;
+
+/**
+ * Where a measured speaker would take a breath.
+ *
+ * This is the whole of "pace" that the browser actually gives us. A
+ * `SpeechSynthesisUtterance` has one rate for the entire sentence — there is no
+ * SSML, no per-word timing, no pause tag — so the only way to make delivery
+ * uneven, which is what makes it sound like speech rather than a readout, is to
+ * put the pauses into the text as punctuation. Every engine honours a comma.
+ *
+ * One comma, before the first time reference in the tail. "Booked one hour with
+ * Ronnie tomorrow at 11 AM" runs together at any rate; "…with Ronnie, tomorrow
+ * at 11 AM" is how somebody says it out loud. Inserting one before *every*
+ * temporal word instead chops the sentence into a list and sounds worse than
+ * the run-on did.
+ */
+const breathe = (text) =>
+  text.replace(/(\w)\s+((?:tomorrow|today|tonight)\b|at \d{1,2}(?::\d{2})?\b)/i, "$1, $2");
+
+/**
+ * Which opener this reply gets, or none.
+ *
+ * Chosen from the text rather than at random, so a given reply always sounds
+ * the same — a voice that says something different each time you ask the same
+ * question sounds broken rather than lively.
+ *
+ * The extra slot is silence, and it is the important one. Four openers rotating
+ * is variety within a sentence and still a drumbeat across a session: three
+ * commands in a row would each be answered "Very good, Mr. Newman. …". Somebody
+ * who has already acknowledged you twice does not do it a third time.
+ */
+const pickOpener = (openers, text) => {
+  if (!openers.length) return null;
+  let n = 0;
+  for (let i = 0; i < text.length; i++) n = (n * 31 + text.charCodeAt(i)) >>> 0;
+  const slot = n % (openers.length + 1);
+  return slot < openers.length ? openers[slot] : null;
+};
+
+/**
+ * Replies that are reports of something already done, and so can be
+ * acknowledged before they are read. A question or a list cannot: "Very good.
+ * What does Friday look like" is nonsense, and prefixing an answer with a
+ * confirmation is the kind of tic that gets a voice turned off in a week.
+ */
+const REPORTS_AN_ACTION =
+  /^(booked|added|moved|cancelled|canceled|cleared|marked|removed|rescheduled|shortened|extended|handed|put|scheduled|set|updated|delegated|renamed)\b/i;
+
+/**
+ * A reply, in this persona's voice.
+ *
+ * Spoken only. The text on screen is unchanged, deliberately: the persona is a
+ * choice about how she sounds, and rewriting the visible reply to match would
+ * make a voice setting quietly edit the app.
+ */
+export function inCharacter(text, personaId, address = "") {
+  const persona = PERSONAS[personaId] ?? PERSONAS.natural;
+  let out = String(text ?? "");
+  if (!out) return out;
+
+  if (persona.breath) out = breathe(out);
+
+  const opener = REPORTS_AN_ACTION.test(out) ? pickOpener(persona.openers, out) : null;
+  if (opener) out = `${opener}${address ? `, ${address}` : ""}. ${out}`;
+
+  return out;
+}
 
 /**
  * The best available voice for a persona, or null to let the device decide.
@@ -164,14 +261,19 @@ export function bestVoiceFor(personaId) {
   if (!all.length) return null;
 
   const score = (v) => {
+    // A gag voice is never the answer, however well it scores otherwise. Zero
+    // rather than a penalty: nothing should be able to add it back up.
+    if (NOVELTY.test(v.name)) return 0;
+
     let n = 0;
     const name = v.name.toLowerCase();
     if (persona.prefer.names.some((w) => name.includes(w))) n += 100;
     if (persona.prefer.lang && v.lang === persona.prefer.lang) n += 40;
     else if (persona.prefer.lang && v.lang.startsWith(persona.prefer.lang.slice(0, 2))) n += 10;
-    // Apple ships "Enhanced" and "Premium" variants that sound markedly better
-    // and are worth preferring wherever the person has downloaded one.
-    if (/premium|enhanced/i.test(v.name)) n += 25;
+    // The higher-quality engines. Apple's "Enhanced" and "Premium" downloads
+    // and Google's "Neural" voices are a different class from the compact ones
+    // that ship by default, and are worth preferring wherever one is installed.
+    if (PREMIUM.test(v.name)) n += 25;
     if (v.localService) n += 5;
     return n;
   };
@@ -186,9 +288,13 @@ export function bestVoiceFor(personaId) {
  * Say something.
  * @returns {() => void} stop
  */
-export function speak(text, { voiceURI, rate = 1, pitch = 1, onStart, onEnd } = {}) {
+export function speak(text, { voiceURI, rate = 1, pitch = 1, persona, address = "", onStart, onEnd } = {}) {
   if (!canSpeak()) return () => {};
-  const said = toSpeech(text);
+  // Read for speech first, then given the persona's delivery. The order
+  // matters: `toSpeech` turns a multi-line reply into sentences and "1h" into
+  // "1 hour", and the character pass has to see the finished sentence to know
+  // where the tail of it is.
+  const said = inCharacter(toSpeech(text), persona, address);
   if (!said) return () => {};
 
   stopSpeaking();

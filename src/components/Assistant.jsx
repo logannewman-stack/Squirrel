@@ -123,6 +123,12 @@ export default function Assistant({ state, onClose, metered = false }) {
         // Without this the persona's lower register is dropped and the butler
         // sounds exactly like the default voice, only slower.
         pitch: voice.pitch,
+        // Delivery, not only timbre: where the pauses fall, and whether she
+        // acknowledges before she reports. `who` is the form of address they
+        // chose for themselves, so the butler can use it and the others leave
+        // it alone.
+        persona: voice.persona,
+        address: who,
         onEnd: () => {
           setTalking(false);
           // Hands-free: reopen the microphone, but only where the turn is

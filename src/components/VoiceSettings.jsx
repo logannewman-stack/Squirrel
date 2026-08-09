@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { setSetting } from "../lib/store";
 import { canSpeak, canListen, onVoicesReady, speak, stopSpeaking, voiceSettings, PERSONAS, bestVoiceFor } from "../lib/speech";
+import { addressOf } from "../lib/nlu/voice";
 
 /**
  * Voice, on both sides.
@@ -26,12 +27,18 @@ export default function VoiceSettings({ state }) {
 
   const save = (patch) => setSetting("voice", { ...(state.settings?.voice || {}), ...patch });
 
+  // A line that exercises everything a persona changes: an action to
+  // acknowledge, a name to use, and a time in the tail for the pause to land
+  // in front of. The old preview was a greeting and a count, which sounded
+  // identical in all three.
   const preview = (over = {}) => {
     const next = { ...v, ...over };
-    speak("Good morning. You have three meetings on Friday, and two hours of work planned.", {
+    speak("Booked 1h with Priya tomorrow at 2:00 PM. That leaves you three clear hours.", {
       voiceURI: next.voiceURI,
       rate: next.rate,
       pitch: next.pitch,
+      persona: next.persona,
+      address: addressOf(state.settings?.identity || {}),
     });
   };
 

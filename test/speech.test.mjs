@@ -7,7 +7,7 @@
  * arrives in a shape the parser already understands. Both were the difference
  * between "the microphone works" and "I can book a meeting by talking".
  */
-import { toSpeech, fromSpeech, voiceSettings, bestVoiceFor } from "../src/lib/speech.js";
+import { toSpeech, fromSpeech, voiceSettings, bestVoiceFor, inCharacter } from "../src/lib/speech.js";
 import { parse } from "../src/lib/nlu/parse.js";
 
 let pass = 0, fail = 0;
@@ -179,6 +179,71 @@ for (const [heard, contains, time] of HEARD) {
   delete globalThis.SpeechSynthesisUtterance;
   t("with no engine at all there is still a settings object",
     voiceSettings({}).voiceURI === null && voiceSettings({}).speak === false);
+}
+
+/* ----------------------------------------------------------------- delivery
+   The only part of "pace" the browser actually exposes. An utterance has one
+   rate for the whole sentence — no SSML, no pause tag — so the pauses have to
+   be written into the text as punctuation, and that makes them testable. */
+{
+  const said = (t, p = "butler", who = "Mr. Newman") => inCharacter(toSpeech(t), p, who);
+
+  const booked = said("Booked 1h with Ronnie tomorrow at 11:00 AM.");
+  t("the butler acknowledges before reporting", /^Very good|^Done|^There we are|^Of course/.test(booked), booked);
+  t("using the name they chose", /Mr\. Newman/.test(booked), booked);
+  t("and takes a breath before the time",
+    /Ronnie, tomorrow/.test(booked), booked);
+  t("without chopping it into a list",
+    (booked.match(/,/g) || []).length <= 2, booked);
+
+  // A question cannot be acknowledged — "Very good. What does Friday look
+  // like" is nonsense, and it is the tic that gets a voice switched off.
+  const asked = said("What does Friday look like?");
+  t("a question gets no acknowledgement", !/^Very good|^Done|^There we are|^Of course/.test(asked), asked);
+  const listed = said("You have three meetings on Friday.");
+  t("nor does an answer", !/^Very good|^Done|^There we are|^Of course/.test(listed), listed);
+
+  t("the same reply always opens the same way",
+    said("Moved the standup to 10:00 AM.") === said("Moved the standup to 10:00 AM."));
+  t("but two different ones usually do not",
+    new Set(["Booked a call.", "Added the deck.", "Moved the standup.", "Cleared Friday."]
+      .map((x) => said(x).split(",")[0])).size > 1);
+
+  // The other two characters leave the words alone: the persona is a choice
+  // about how she sounds, not a licence to rewrite what she says.
+  for (const p of ["natural", "brisk"]) {
+    t(`${p} does not add an opener`,
+      said("Booked 1h with Ronnie tomorrow at 11:00 AM.", p) === toSpeech("Booked 1h with Ronnie tomorrow at 11:00 AM."),
+      said("Booked 1h with Ronnie tomorrow at 11:00 AM.", p));
+  }
+
+  t("no name, no comma left dangling",
+    !/^\w+, \./.test(said("Booked a call tomorrow at 2:00 PM.", "butler", "")),
+    said("Booked a call tomorrow at 2:00 PM.", "butler", ""));
+  t("empty in, empty out", inCharacter("", "butler", "Mr. Newman") === "");
+  t("an unknown persona is inert, not broken",
+    inCharacter("Booked a call.", "jarvis", "sir") === "Booked a call.");
+
+  // A gag voice is never the answer, however local it is.
+  globalThis.speechSynthesis = {
+    getVoices: () => [
+      { name: "Albert", lang: "en-GB", voiceURI: "albert", localService: true },
+      { name: "Zarvox", lang: "en-GB", voiceURI: "zarvox", localService: true },
+      { name: "Google UK English Male", lang: "en-GB", voiceURI: "guk", localService: false },
+    ],
+  };
+  globalThis.SpeechSynthesisUtterance = function () {};
+  t("novelty voices are not offered a calendar to read",
+    bestVoiceFor("butler")?.voiceURI === "guk", bestVoiceFor("butler")?.name);
+
+  globalThis.speechSynthesis = {
+    getVoices: () => [{ name: "Albert", lang: "en-GB", voiceURI: "albert", localService: true }],
+  };
+  t("and if a gag is all there is, the device decides instead",
+    bestVoiceFor("butler") === null, bestVoiceFor("butler")?.name);
+
+  delete globalThis.speechSynthesis;
+  delete globalThis.SpeechSynthesisUtterance;
 }
 
 console.log(`\nSpeech: ${pass} passed, ${fail} failed`);
