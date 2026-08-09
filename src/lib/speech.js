@@ -29,6 +29,28 @@ export const canListen = () => Boolean(Recognition());
 
 /* ------------------------------------------------------------------ speaking */
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * A length of time, said the way somebody says it about their own week.
+ *
+ * Rounded to the nearest half hour, because that is the resolution people
+ * think in — "two and a half hours before the deadline", never "2.3 hours".
+ * The halves get idioms and everything else gets the plain count.
+ */
+function sayHours(value) {
+  const half = Math.round(value * 2) / 2;
+  if (half === 0) return "no time";
+  if (half === 0.5) return "half an hour";
+  if (half === 1) return "an hour";
+  if (half === 1.5) return "an hour and a half";
+  const whole = Math.floor(half);
+  return half - whole === 0.5 ? `${whole} and a half hours` : `${whole} hours`;
+}
+
 const DAY_NAMES = {
   Mon: "Monday", Tue: "Tuesday", Tues: "Tuesday", Wed: "Wednesday", Weds: "Wednesday",
   Thu: "Thursday", Thur: "Thursday", Thurs: "Thursday", Fri: "Friday",
@@ -78,6 +100,19 @@ const SAY = [
   [/\b1h\s*30m\b/g, "an hour and a half"],
   [/\b(\d+)h\s*30m\b/g, "$1 and a half hours"],
   [/\b30m\b/g, "half an hour"],
+  // A decimal hour is a spreadsheet talking. "2.3 hours" is read "two point
+  // three hours", which is a precision nobody uses out loud about their own
+  // week — and these numbers are approximations before they are spoken
+  // anyway. Rounded to the nearest half, which is the resolution people
+  // actually think in.
+  [/\b(\d+\.\d+)h\b/g, (_, v) => sayHours(Number(v))],
+
+  /* An ISO date is unspeakable: "due 2026-08-14" comes out "two thousand
+     twenty six dash zero eight dash fourteen". It is the right format to store
+     and to sort and the wrong one to say. The year is dropped — a deadline
+     being discussed is always near enough that naming it is noise. */
+  [/\b(\d{4})-(\d{2})-(\d{2})\b/g, (m, y, mo, d) =>
+    (MONTH_NAMES[Number(mo) - 1] ? `${MONTH_NAMES[Number(mo) - 1]} ${Number(d)}` : m)],
 
   // Durations. "1h 30m" is compact to read and unpronounceable.
   [/\b(\d+)h\s*(\d+)m\b/g, (_, h, m) => `${h} ${plural(h, "hour")} ${m} minutes`],

@@ -403,6 +403,29 @@ for (const [heard, contains, time] of HEARD) {
     /no meetings and no planned work/.test(say("0m of meetings and 0m of planned work")),
     say("0m of meetings and 0m of planned work"));
   t("an hour is still singular", /\b1 hour\b/.test(say("1h")), say("1h"));
+
+  // A decimal hour is a spreadsheet talking. Nobody says "two point three
+  // hours" about their own week, and the number was an estimate before it was
+  // spoken — so it is rounded to the resolution people actually think in.
+  t("a decimal hour is rounded to a half",
+    /2 and a half hours/.test(say("2.3h of work")), say("2.3h of work"));
+  t("and to a whole where that is nearer",
+    /13 hours/.test(say("12.8h to spare")), say("12.8h to spare"));
+  t("a half hour said as a decimal is still half an hour",
+    /half an hour/.test(say("0.5h left")), say("0.5h left"));
+  t("and one and a half keeps its idiom",
+    /an hour and a half/.test(say("1.5h laid in")), say("1.5h laid in"));
+  t("a whole number of hours is left exactly as it is",
+    /25 hours a week/.test(say("25h a week")), say("25h a week"));
+
+  // The right format to store and to sort, and unspeakable: "due 2026-08-14"
+  // reads "two thousand twenty six dash zero eight dash fourteen".
+  t("an ISO date is said as a date", /due August 14/.test(say("due 2026-08-14")), say("due 2026-08-14"));
+  t("in any month", /December 1/.test(say("Due 2026-12-01.")), say("Due 2026-12-01."));
+  t("with the year left off, because a deadline is always near",
+    !/2026/.test(say("due 2026-08-14")), say("due 2026-08-14"));
+  t("and a number that only looks like a date is left alone",
+    /1234-99-99/.test(say("Code 1234-99-99")), say("Code 1234-99-99"));
 }
 
 /* ------------------------------------------------------------- long a day
