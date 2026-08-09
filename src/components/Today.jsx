@@ -37,6 +37,22 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
   const free = findFreeSlots(day, state.events, {
     start: work.workStart, end: work.workEnd, breaks: work.breaks, after: now,
   }).reduce((s, x) => s + x.mins, 0);
+
+  /**
+   * The room between the commitments, which is the part of a day people
+   * actually make decisions about.
+   *
+   * A list of two meetings says almost nothing: the useful fact is that there
+   * are five clear hours between them. Measured against planned work as well
+   * as meetings, or it would offer time the planner has already spent — and
+   * half-hours and under are left out, because a gap you cannot do anything
+   * with is not worth a row.
+   */
+  const gaps = findFreeSlots(
+    day,
+    [...state.events, ...blocks.filter((b) => b.start).map((b) => ({ start: b.start, end: b.end }))],
+    { start: work.workStart, end: work.workEnd, breaks: work.breaks, after: now, minMins: 45 },
+  );
   const meetingMins = events.reduce((s, e) => s + (new Date(e.end) - new Date(e.start)) / 60000, 0);
   const focusedToday = state.sessions
     .filter((s) => dayKey(new Date(s.endedAt)) === day)
@@ -107,10 +123,23 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
       kind: "work", at: new Date(b.start), end: new Date(b.end), title: b.task.title,
       note: b.task.due ? `due ${b.task.due}` : "", id: `${b.taskId}-${b.start}`, task: b.task,
     })),
+    ...gaps.map((g) => ({
+      kind: "gap", at: g.start, end: g.end, mins: g.mins, id: `gap-${g.start.getTime()}`,
+    })),
   ].sort((a, b) => a.at - b.at);
 
+  // The gaps are context, not commitments — a day of nothing but free time is
+  // still an empty day and should say so rather than list its own emptiness.
+  const committed = timeline.filter((x) => x.kind !== "gap");
+
   return (
-    <div className="mx-auto w-full max-w-7xl px-6 py-8">
+    /* Fills the frame rather than floating at the top of it. On a desktop this
+       screen was about 500px of content in a 1050px window, and because the
+       page and the panels were both white the remaining half read as a page
+       that had failed to load rather than as a quiet day. The ground is
+       `--sunken` now and the columns below are cards on it, so the space
+       between them is canvas and the space inside them belongs to something. */
+    <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col px-5 py-7 sm:px-6 sm:py-8">
       <header className="mb-6 flex items-end justify-between gap-4">
         <div>
           <p className="label">
@@ -164,17 +193,21 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
         </div>
       )}
 
-      <div className="grid gap-8 lg:grid-cols-2 xl:grid-cols-[1.15fr_1fr_0.8fr] xl:gap-10">
-        <section>
+      {/* `items-start` rather than stretch. Making three panels fill a tall
+          window drew a large box around each piece of emptiness, which is a
+          worse answer than the emptiness was — the page ground carries the
+          space now, and each card is only as tall as it has something to say. */}
+      <div className="grid flex-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-[1.15fr_1fr_0.8fr]">
+        <section className="card flex flex-col px-5 py-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="label">The day</h2>
-            {timeline.length > 0 && (
+            {committed.length > 0 && (
               <span className="num text-xs text-[var(--muted)]">
                 {duration((meetingMins + plannedMins) * 60000)} committed
               </span>
             )}
           </div>
-          {timeline.length === 0 ? (
+          {committed.length === 0 ? (
             <div className="py-4">
               <p className="text-sm text-[var(--muted)]">
                 Nothing on the calendar and nothing to work on.
@@ -193,6 +226,20 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
             <ul className="divide-y divide-[var(--hairline)]">
               {timeline.map((item) => {
                 const past = item.end < now;
+                // The room between the commitments. Drawn as a rule with the
+                // length written on it rather than as another row, so it reads
+                // as the space it is instead of a third kind of appointment.
+                if (item.kind === "gap") {
+                  return (
+                    <li key={item.id} className="flex items-center gap-3 py-2.5 pl-16">
+                      <span aria-hidden className="h-px flex-1 bg-[var(--hairline)]" />
+                      <span className="num shrink-0 text-[11px] text-[var(--faint)]">
+                        {duration(item.mins * 60000)} free
+                      </span>
+                      <span aria-hidden className="h-px flex-1 bg-[var(--hairline)]" />
+                    </li>
+                  );
+                }
                 return (
                   <li key={item.id} className={`flex gap-4 py-3 ${past ? "opacity-40" : ""}`}>
                     <span className="num w-16 shrink-0 pt-0.5 text-xs text-[var(--muted)]">
@@ -246,7 +293,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
           )}
         </section>
 
-        <section>
+        <section className="card flex flex-col px-5 py-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="label">On your plate</h2>
             {focusedToday > 0 && (
@@ -295,7 +342,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
             this hour: work that is somebody else's move, and how each project
             is actually going. Both were visible nowhere on the screen people
             open every morning. */}
-        <section className="lg:col-span-2 xl:col-span-1">
+        <section className="card flex flex-col px-5 py-4 lg:col-span-2 xl:col-span-1">
           {waiting.length > 0 && (
             <div className="mb-8">
               <h2 className="label mb-3">Waiting on</h2>

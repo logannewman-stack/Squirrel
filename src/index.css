@@ -43,8 +43,16 @@
   --brand-edge: transparent;
 }
 
+/* ------------------------------------------------------------------ dark
+   Three states, not two. Somebody who has never touched the setting follows
+   their system; somebody who has chosen gets what they chose, on a machine
+   set to either. That needs the dark values written twice — once behind the
+   media query for the people who never chose, guarded so an explicit "light"
+   still wins on a dark system, and once behind the attribute for the people
+   who did. Defining them only inside the media query makes the toggle work in
+   one direction and silently fail in the other. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #08080a;
     --raised: #101013;
     --sunken: #0d0d10;
@@ -69,10 +77,32 @@
   }
 }
 
+:root[data-theme="dark"] {
+  --paper: #08080a;
+  --raised: #101013;
+  --sunken: #0d0d10;
+  --ink: #fafafa;
+  --muted: #9a9aa3;
+  --faint: #5f5f68;
+  --line: #24242a;
+  --hairline: #17171b;
+  --hover: #16161a;
+  --alert: #f0a04b;
+  --alert-bg: #201607;
+  --lift: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --float: 0 16px 40px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --brand: #16161a;
+  --brand-edge: rgba(255, 255, 255, 0.07);
+}
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
-  background: var(--paper);
+  /* The ground, not the paper. Cards are `--paper` and sit *on* this — with
+     both white, a screen with little on it read as a broken page rather than
+     as a quiet one, because there was nothing to tell the eye where the
+     content stopped and the canvas began. */
+  background: var(--sunken);
   color: var(--ink);
   font-feature-settings: "cv02", "cv03", "cv04", "tnum";
   -webkit-font-smoothing: antialiased;

@@ -521,6 +521,9 @@ await p.waitForTimeout(300);
 ui.push(["the sheet closes on Escape", (await p.getByRole("dialog").count()) === 0]);
 
 await p.getByRole("button", { name: "Settings" }).click();
+// Settings is grouped now — thirteen sections in one column was three and a
+// half screens of scroll — and the miss log lives under Assistant.
+await p.getByRole("button", { name: "Assistant", exact: true }).click();
 const panel = p.locator("section").filter({ hasText: "What she missed" }).first();
 await panel.waitFor({ state: "visible", timeout: 4000 });
 const panelText = await panel.textContent();
