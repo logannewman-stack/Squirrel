@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { setSetting } from "../lib/store";
-import { canSpeak, canListen, onVoicesReady, speak, stopSpeaking, voiceSettings, PERSONAS, bestVoiceFor } from "../lib/speech";
+import {
+  canSpeak, canListen, onVoicesReady, speak, stopSpeaking, voiceSettings,
+  PERSONAS, bestVoiceFor, isHiFi, activeVoice,
+} from "../lib/speech";
 import { addressOf } from "../lib/nlu/voice";
 
 /**
@@ -102,11 +105,7 @@ export default function VoiceSettings({ state }) {
                     );
                   })}
                 </div>
-                <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">
-                  Characters use the voices already on your device. On iPhone and
-                  Mac, Settings → Accessibility → Spoken Content → Voices has more
-                  of them, including higher-quality English ones worth the download.
-                </p>
+                <HiFiHint list={list} settings={state.settings} />
               </div>
 
               <div>
@@ -187,6 +186,77 @@ export default function VoiceSettings({ state }) {
       <p className="text-xs text-[var(--muted)]">
         Both run on this device. Nothing you say is sent anywhere, and there is no per-message cost —
         the same reason chats are unlimited on every plan.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Whether the voice doing the talking is one of the good ones — and if not,
+ * the one-minute fix, which is not ours.
+ *
+ * Everything in this app runs on the device, so the ceiling on how she sounds
+ * is set by which engine the operating system has installed. The compact voices
+ * that ship by default are the ones people mean when they say an assistant
+ * sounds robotic, and no amount of rate and pitch work here gets close to
+ * simply downloading the better one. Saying so plainly is worth more than
+ * quietly compensating: this is the single largest improvement available and it
+ * belongs to the person, not the app.
+ *
+ * Shown as a fact, not an error. A device with a compact voice is not broken.
+ */
+function HiFiHint({ list, settings }) {
+  const current = activeVoice(settings);
+  const better = list.filter((v) => isHiFi(v));
+  // Apple's are downloads; Chrome's better voices arrive over the network and
+  // are already in the list. The instruction has to match the platform or it is
+  // just noise pointing at a menu that does not exist.
+  const apple = /Mac|iPhone|iPad|iPod/.test(globalThis.navigator?.platform || "") ||
+    /Mac|iPhone|iPad/.test(globalThis.navigator?.userAgent || "");
+
+  if (isHiFi(current)) {
+    return (
+      <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">
+        Using <span className="font-medium text-[var(--ink)]">{current.name}</span> — one of the
+        high-quality voices. This is as good as it gets without sending your words to a server,
+        which this app does not do.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--sunken)] px-4 py-3">
+      <p className="text-xs font-medium">
+        {better.length
+          ? "There's a better voice installed than the one in use."
+          : "This device is using its compact voice."}
+      </p>
+      <p className="mt-1.5 text-xs leading-relaxed text-[var(--muted)]">
+        {better.length ? (
+          <>
+            Pick <span className="font-medium text-[var(--ink)]">{better[0].name}</span> below.
+            The compact voices that ship with an operating system are the ones that sound
+            synthetic; the downloaded ones are a different class entirely.
+          </>
+        ) : apple ? (
+          <>
+            The biggest improvement available is a free download, and it isn't ours:
+            <span className="text-[var(--ink)]"> Settings → Accessibility → Spoken Content →
+            Voices → English</span>, then take an <span className="text-[var(--ink)]">Enhanced</span> or
+            <span className="text-[var(--ink)]"> Premium</span> voice — Daniel or Arthur for the
+            butler. It takes about a minute and does more than anything this panel can.
+          </>
+        ) : (
+          <>
+            Chrome's higher-quality voices appear here once they've loaded — they are marked
+            "online" in the list below. Everything else runs on the device.
+          </>
+        )}
+      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-[var(--faint)]">
+        Until then she speaks a little flatter on purpose: a compact voice warbles when it is
+        pitched down, so the character is eased off rather than allowed to make her harder to
+        follow.
       </p>
     </div>
   );

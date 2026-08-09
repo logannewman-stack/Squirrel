@@ -7,7 +7,7 @@
  * arrives in a shape the parser already understands. Both were the difference
  * between "the microphone works" and "I can book a meeting by talking".
  */
-import { toSpeech, fromSpeech, voiceSettings, bestVoiceFor, inCharacter } from "../src/lib/speech.js";
+import { toSpeech, fromSpeech, voiceSettings, bestVoiceFor, inCharacter, temper } from "../src/lib/speech.js";
 import { parse } from "../src/lib/nlu/parse.js";
 
 let pass = 0, fail = 0;
@@ -244,6 +244,80 @@ for (const [heard, contains, time] of HEARD) {
 
   delete globalThis.speechSynthesis;
   delete globalThis.SpeechSynthesisUtterance;
+}
+
+/* ------------------------------------------------------- clarity out loud
+   The two complaints that matter — "robotic" and "choppy" — are both things
+   that can be measured on the text before it ever reaches an engine. */
+{
+  const say = (t) => toSpeech(t);
+
+  // The single worst thing a synthesiser did to this app: every confirmation
+  // she gave contained a time, and every time was read "eleven colon zero
+  // zero A M".
+  t("o'clock times lose the zeroes", say("Booked at 11:00 AM.") === "Booked at 11 AM.", say("Booked at 11:00 AM."));
+  t("and so do the afternoon ones", say("Moved to 3:00 PM.") === "Moved to 3 PM.", say("Moved to 3:00 PM."));
+  t("half past keeps its digits", /12:30 PM/.test(say("Lunch at 12:30 PM.")), say("Lunch at 12:30 PM."));
+  t("a bare hour with no meridiem is still said",
+    /10 o'clock/.test(say("Starts at 10:00.")), say("Starts at 10:00."));
+  t("and a one to one is not mistaken for a time",
+    /one to one/.test(say("1:1 with Dana")), say("1:1 with Dana"));
+
+  // A label colon is silent in some engines and a full stop in others.
+  t("a label colon becomes the pause it meant",
+    /Thursday, 2 PM/.test(say("Thursday: 2:00 PM Call with Priya.")),
+    say("Thursday: 2:00 PM Call with Priya."));
+
+  /**
+   * Choppiness, measured. The first attempt at "measured delivery" inserted a
+   * breath into sentences that were already punctuated, and turned a
+   * confirmation into seven pauses in sixteen words — a stammer, not a butler.
+   */
+  const pauses = (s) => (s.match(/[,;:]/g) || []).length;
+  const confirm = inCharacter(
+    say("Okay, Mr. Newman — just to confirm: a 1h call with Priya, Thursday at 2:00 PM?"),
+    "butler", "Mr. Newman",
+  );
+  t("an already-punctuated sentence gets no extra breath",
+    pauses(confirm) <= 4, `${pauses(confirm)} — ${confirm}`);
+  t("but a run-on still gets one",
+    /Ronnie, tomorrow/.test(inCharacter(say("Booked 1h with Ronnie tomorrow at 11:00 AM."), "butler", "")),
+    inCharacter(say("Booked 1h with Ronnie tomorrow at 11:00 AM."), "butler", ""));
+
+  // No reply should be pausing more often than every three words or so.
+  for (const line of [
+    "Booked 1h with Ronnie tomorrow at 11:00 AM.",
+    "Moved “Exec staff” to 10:00 AM · 1h.",
+    "Cleared Friday afternoon — 3 meetings removed.",
+    "You have three meetings on Friday.\n\nAt 9:00 AM you have Exec staff.\nAt 3:00 PM you're meeting with Bob.",
+  ]) {
+    const s = inCharacter(say(line), "butler", "Mr. Newman");
+    const words = s.split(/\s+/).length;
+    t(`“${line.split("\n")[0].slice(0, 28)}…” is not a stammer`,
+      pauses(s) * 3 <= words, `${pauses(s)} pauses / ${words} words — ${s}`);
+  }
+}
+
+/* ----------------------------------------------------------------- temper
+   A pitch shift is not free. The good engines resynthesise; the compact ones
+   that ship by default resample, and warble. */
+{
+  const good = { name: "Daniel (Enhanced)" };
+  const compact = { name: "Daniel" };
+
+  t("a high-quality voice gets the persona as written",
+    temper({ rate: 0.95, pitch: 0.9 }, good).pitch === 0.9);
+  t("a compact one gets half the shift",
+    temper({ rate: 0.95, pitch: 0.9 }, compact).pitch === 0.95,
+    temper({ rate: 0.95, pitch: 0.9 }, compact).pitch);
+  t("and the rate is eased with it",
+    temper({ rate: 0.95, pitch: 0.9 }, compact).rate === 0.975);
+  t("the system default, which cannot be inspected, is treated as compact",
+    temper({ rate: 0.95, pitch: 0.9 }, null).pitch === 0.95);
+  t("neutral stays neutral whatever the voice",
+    temper({ rate: 1, pitch: 1 }, compact).pitch === 1 && temper({ rate: 1, pitch: 1 }, compact).rate === 1);
+  t("a hand-cranked pitch is still eased rather than ignored",
+    temper({ rate: 1.6, pitch: 1 }, compact).rate === 1.3);
 }
 
 console.log(`\nSpeech: ${pass} passed, ${fail} failed`);

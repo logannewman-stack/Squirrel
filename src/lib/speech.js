@@ -50,6 +50,23 @@ const SAY = [
   [/\b(\d+)\s*mins?\b/gi, (_, m) => `${m} ${plural(m, "minute")}`],
   // A trailing colon introduces a list; a pause reads better than the word.
   [/:\s*\n/g, ". "],
+
+  /* ---------------------------------------------------------------- o'clock
+     The single worst thing a synthesiser does to this app. "11:00 AM" is read
+     "eleven colon zero zero A M" or "eleven hundred hours" depending on the
+     engine, and every confirmation she gives contains one — which is most of
+     what made her sound like a machine reading a table. Nobody says the
+     zeroes. Half past is fine as digits: engines say "2:30" as "two thirty".
+     Done after the durations, so "1h" has already stopped looking like an
+     hour on a clock. */
+  [/\b(\d{1,2}):00(?=\s*(?:AM|PM|am|pm)\b)/g, "$1"],
+  [/\b(\d{1,2}):00\b(?!\s*(?:AM|PM|am|pm))/g, "$1 o'clock"],
+
+  /* A colon between a label and its contents — "Thursday: 2 PM Call with
+     Priya" — is silent in some engines and a long stop in others. A comma is
+     the pause that was meant. Times are already safe: they have no space after
+     the colon, and the ones that did have just lost it above. */
+  [/:\s+/g, ", "],
 ];
 
 const plural = (n, word) => (Number(n) === 1 ? word : `${word}s`);
@@ -141,8 +158,11 @@ export const PERSONAS = {
     // not considered. The measured quality comes from `breath` below, which
     // puts the pauses where a person would take them and leaves the words
     // themselves at close to ordinary speed.
+    //
+    // The pitch is a request, not a promise: `temper` below pulls it back on a
+    // voice that cannot take the shift without warbling.
     rate: 0.95,
-    pitch: 0.85,
+    pitch: 0.9,
     breath: true,
     // Said before the report, the way somebody who has already done the thing
     // answers. Rotated by content rather than at random so a given reply always
@@ -179,19 +199,23 @@ const PREMIUM = /premium|enhanced|neural|siri|natural/i;
  * Where a measured speaker would take a breath.
  *
  * This is the whole of "pace" that the browser actually gives us. A
- * `SpeechSynthesisUtterance` has one rate for the entire sentence — there is no
- * SSML, no per-word timing, no pause tag — so the only way to make delivery
- * uneven, which is what makes it sound like speech rather than a readout, is to
- * put the pauses into the text as punctuation. Every engine honours a comma.
+ * `SpeechSynthesisUtterance` has one rate for the entire sentence — no SSML, no
+ * per-word timing, no pause tag — so the only way to make delivery uneven,
+ * which is what makes it sound like speech rather than a readout, is to put the
+ * pauses into the text as punctuation. Every engine honours a comma.
  *
- * One comma, before the first time reference in the tail. "Booked one hour with
- * Ronnie tomorrow at 11 AM" runs together at any rate; "…with Ronnie, tomorrow
- * at 11 AM" is how somebody says it out loud. Inserting one before *every*
- * temporal word instead chops the sentence into a list and sounds worse than
- * the run-on did.
+ * One comma, before the first time reference in the tail, and **only in a
+ * sentence that has none of its own**. That guard is the entire lesson from the
+ * first attempt at this: without it, "a 1 hour call with Priya, Thursday at 2
+ * PM" — already punctuated — became "…with Priya, Thursday, at 2 PM", and a
+ * confirmation ended up with seven pauses in sixteen words. That is not
+ * measured, it is a stammer. A sentence that already has commas already has
+ * somewhere to breathe; this exists for the run-ons that do not.
  */
 const breathe = (text) =>
-  text.replace(/(\w)\s+((?:tomorrow|today|tonight)\b|at \d{1,2}(?::\d{2})?\b)/i, "$1, $2");
+  text.includes(",")
+    ? text
+    : text.replace(/(\w)\s+((?:tomorrow|today|tonight)\b|at \d{1,2}(?::\d{2})?\b)/i, "$1, $2");
 
 /**
  * Which opener this reply gets, or none.
@@ -285,6 +309,59 @@ export function bestVoiceFor(personaId) {
 }
 
 /**
+ * How much of the persona's delivery this particular voice can actually carry.
+ *
+ * A pitch shift is not free. The high-quality engines — Apple's Enhanced and
+ * Premium downloads, Google's Neural voices — resynthesise and stay natural a
+ * long way from 1.0. The compact voices that ship by default do something
+ * closer to resampling, and at 0.85 they get the metallic warble that everybody
+ * recognises instantly as a robot. Which meant the persona intended to sound
+ * like a person was, on the most common devices, the one that sounded least
+ * like one.
+ *
+ * So the persona asks and this decides. On a voice known to be good, it gets
+ * what it asked for; on anything else — including the system default, which
+ * cannot be inspected at all — the shift is halved back toward neutral. Being
+ * unremarkable is a much smaller loss than being unlistenable.
+ */
+/**
+ * Is this voice one of the good ones?
+ *
+ * There is no quality field on a `SpeechSynthesisVoice`, so this reads the
+ * name, which is the only signal there is. Apple labels its downloads
+ * "Enhanced" and "Premium", Google labels its good ones "Neural"; everything
+ * else is the compact engine that ships with the operating system, and the
+ * difference between the two is not subtle — it is most of the distance
+ * between "an assistant" and "a robot reading a table".
+ *
+ * Worth surfacing rather than silently working around, because the fix belongs
+ * to the person and takes them a minute: the better voices are a free download
+ * sitting in their own settings, and nothing this app can do to a compact
+ * voice comes close to it.
+ */
+export const isHiFi = (voice) => Boolean(voice && PREMIUM.test(voice.name));
+
+/**
+ * Which voice will actually be used, given a settings blob.
+ *
+ * The picker shows a chosen voice or "system default", and the second of those
+ * is not inspectable — so "are you on a good voice" cannot be answered from
+ * the setting alone.
+ */
+export function activeVoice(settings = {}) {
+  if (!canSpeak()) return null;
+  const v = voiceSettings(settings);
+  if (!v.voiceURI) return null;
+  return speechSynthesis.getVoices().find((x) => x.voiceURI === v.voiceURI) ?? null;
+}
+
+export function temper({ rate = 1, pitch = 1 }, voice) {
+  if (isHiFi(voice)) return { rate, pitch };
+  const half = (n) => Number((1 + (n - 1) / 2).toFixed(3));
+  return { rate: half(rate), pitch: half(pitch) };
+}
+
+/**
  * Say something.
  * @returns {() => void} stop
  */
@@ -299,10 +376,16 @@ export function speak(text, { voiceURI, rate = 1, pitch = 1, persona, address = 
 
   stopSpeaking();
   const u = new SpeechSynthesisUtterance(said);
-  const pick = voiceURI && voices().find((v) => v.voiceURI === voiceURI);
+  // Looked up in the whole catalogue rather than in `voices()`, which is
+  // filtered to the page's language for the picker. A persona reaches for an
+  // en-GB voice; on a browser set to anything but English that filter dropped
+  // it, and the choice silently became the system default.
+  const pick = voiceURI && speechSynthesis.getVoices().find((v) => v.voiceURI === voiceURI);
   if (pick) u.voice = pick;
-  u.rate = rate;
-  u.pitch = pitch;
+  // What this voice can carry, which is not always what the persona asked for.
+  const delivery = temper({ rate, pitch }, pick || null);
+  u.rate = delivery.rate;
+  u.pitch = delivery.pitch;
   u.onstart = () => onStart?.();
   u.onend = () => {
     current = null;
