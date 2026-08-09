@@ -149,8 +149,40 @@ for (const [heard, contains, time] of HEARD) {
     bestVoiceFor("butler")?.name);
 
   globalThis.speechSynthesis = { getVoices: () => CATALOGUE };
-  t("a persona with no preference defers to the device", bestVoiceFor("natural") === null,
+  // The house voice. Samantha is the standard everywhere she exists, which is
+  // every Apple device — the rest of the list is for the ones that have never
+  // heard of her.
+  t("the standard character is Samantha", bestVoiceFor("natural")?.voiceURI === "samantha",
     bestVoiceFor("natural")?.name);
+  t("and brisk is the same voice in a hurry",
+    bestVoiceFor("brisk")?.voiceURI === "samantha", bestVoiceFor("brisk")?.name);
+
+  // Ordered, not a set: with both installed, the first name wins.
+  globalThis.speechSynthesis = {
+    getVoices: () => [
+      { name: "Ava", lang: "en-US", voiceURI: "ava", localService: true },
+      { name: "Samantha", lang: "en-US", voiceURI: "samantha", localService: true },
+    ],
+  };
+  t("Samantha outranks the other US voices whatever order the device lists them in",
+    bestVoiceFor("natural")?.voiceURI === "samantha", bestVoiceFor("natural")?.name);
+  // …but the engine matters more than the name.
+  globalThis.speechSynthesis = {
+    getVoices: () => [
+      { name: "Ava (Premium)", lang: "en-US", voiceURI: "ava-p", localService: true },
+      { name: "Samantha", lang: "en-US", voiceURI: "samantha", localService: true },
+    ],
+  };
+  t("except where the alternative is a far better engine",
+    bestVoiceFor("natural")?.voiceURI === "ava-p", bestVoiceFor("natural")?.name);
+
+  globalThis.speechSynthesis = {
+    getVoices: () => [{ name: "Anna", lang: "de-DE", voiceURI: "anna", localService: true }],
+  };
+  t("a device with nothing close defers to its own default",
+    bestVoiceFor("natural") === null, bestVoiceFor("natural")?.name);
+
+  globalThis.speechSynthesis = { getVoices: () => CATALOGUE };
   t("an unknown persona does not throw", bestVoiceFor("jarvis") === null);
 
   // Defaults.
@@ -212,13 +244,21 @@ for (const [heard, contains, time] of HEARD) {
     new Set(["Booked a call.", "Added the deck.", "Moved the standup.", "Cleared Friday."]
       .map((x) => said(x).split(",")[0])).size > 1);
 
-  // The other two characters leave the words alone: the persona is a choice
-  // about how she sounds, not a licence to rewrite what she says.
+  // Only the butler performs. The other two say exactly what is on screen —
+  // the character picker chooses a voice and a pace, not a script.
   for (const p of ["natural", "brisk"]) {
-    t(`${p} does not add an opener`,
-      said("Booked 1h with Ronnie tomorrow at 11:00 AM.", p) === toSpeech("Booked 1h with Ronnie tomorrow at 11:00 AM."),
+    t(`${p} does not acknowledge before reporting`,
+      !/^(Very good|Done|There we are|Of course)/.test(said("Booked 1h with Ronnie tomorrow at 11:00 AM.", p)),
       said("Booked 1h with Ronnie tomorrow at 11:00 AM.", p));
   }
+  // The breath is not an affectation, so the standard voice gets it too: it is
+  // one comma, and only in a sentence with no punctuation of its own.
+  t("but the standard voice still breathes before a time",
+    /Ronnie, tomorrow/.test(said("Booked 1h with Ronnie tomorrow at 11:00 AM.", "natural")),
+    said("Booked 1h with Ronnie tomorrow at 11:00 AM.", "natural"));
+  t("and brisk, which is meant to get out of the way, does not",
+    !/Ronnie, tomorrow/.test(said("Booked 1h with Ronnie tomorrow at 11:00 AM.", "brisk")),
+    said("Booked 1h with Ronnie tomorrow at 11:00 AM.", "brisk"));
 
   t("no name, no comma left dangling",
     !/^\w+, \./.test(said("Booked a call tomorrow at 2:00 PM.", "butler", "")),
@@ -313,14 +353,21 @@ for (const [heard, contains, time] of HEARD) {
   t("a compact one gets half the shift",
     temper({ rate: 0.95, pitch: 0.9 }, compact).pitch === 0.95,
     temper({ rate: 0.95, pitch: 0.9 }, compact).pitch);
-  t("and the rate is eased with it",
-    temper({ rate: 0.95, pitch: 0.9 }, compact).rate === 0.975);
+  // Only the pitch. Rate and pitch fail differently on a compact engine:
+  // playing back faster is what these voices are built for, resampling to a
+  // different pitch is where the warble comes from. Easing both meant a
+  // persona tuned to 0.97 arrived as 0.985 and did nothing at all.
+  t("the rate is left alone, because rate is safe",
+    temper({ rate: 0.95, pitch: 0.9 }, compact).rate === 0.95,
+    temper({ rate: 0.95, pitch: 0.9 }, compact).rate);
+  t("even a hard one", temper({ rate: 1.6, pitch: 1 }, compact).rate === 1.6);
   t("the system default, which cannot be inspected, is treated as compact",
     temper({ rate: 0.95, pitch: 0.9 }, null).pitch === 0.95);
   t("neutral stays neutral whatever the voice",
     temper({ rate: 1, pitch: 1 }, compact).pitch === 1 && temper({ rate: 1, pitch: 1 }, compact).rate === 1);
-  t("a hand-cranked pitch is still eased rather than ignored",
-    temper({ rate: 1.6, pitch: 1 }, compact).rate === 1.3);
+  t("the standard voice asks for no pitch shift, so nothing is eased away",
+    temper({ rate: 0.97, pitch: 1 }, compact).rate === 0.97 &&
+      temper({ rate: 0.97, pitch: 1 }, compact).pitch === 1);
 }
 
 /* ------------------------------------------------------------------ ranges

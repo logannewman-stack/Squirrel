@@ -159,15 +159,50 @@ export function onVoicesReady(fn) {
    manner, and diction and manner are ours to write.
    ------------------------------------------------------------------------ */
 
+/**
+ * The house voice, in order of preference.
+ *
+ * Samantha is the default US English voice on every Apple device and the one
+ * most people already associate with a machine that talks — which is exactly
+ * why she is the right standard here: she is familiar rather than novel, and
+ * an assistant is not the place to be surprising. Everything after her is a
+ * fallback for devices that have never heard of her; the list is ordered, and
+ * `bestVoiceFor` weights it that way, so Samantha wins wherever she exists.
+ *
+ * Ava and Allison are Apple's other US women, Zoe the newer one. Jenny and
+ * Aria are Microsoft's, and "Google US English" is Chrome's. None of them is a
+ * substitute for Samantha so much as the next best thing present.
+ */
+const HOUSE_VOICE = {
+  lang: "en-US",
+  names: ["samantha", "ava", "allison", "zoe", "susan", "jenny", "aria", "google us english"],
+};
+
 export const PERSONAS = {
+  // The id stays "natural" even though the name no longer is: it is written
+  // into the settings of everybody already using the app, and renaming it
+  // would quietly drop them back to the default.
   natural: {
     id: "natural",
-    name: "Natural",
-    blurb: "Whatever your device does best.",
-    prefer: { lang: null, names: [] },
-    rate: 1,
+    name: "Standard",
+    // Deliberately does not name Samantha. She is the first choice and the one
+    // almost everybody will get, but the voice actually resolved is printed
+    // beside this line — and a blurb promising Samantha on a device that has
+    // never had her is a small lie in the one place that should be plain.
+    blurb: "Clear and even, a touch slower than the default.",
+    prefer: HOUSE_VOICE,
+    // Just under ordinary speed. Samantha at 1.0 is a little clipped — the
+    // ends of words run into the beginnings of the next — and 0.97 is enough
+    // to open that out without anybody noticing they are being read to slowly.
+    rate: 0.97,
+    // Left alone. Samantha is already pitched where she sounds best, and the
+    // compact build of her is the one most people have; shifting it is how a
+    // warm voice starts to sound processed.
     pitch: 1,
-    breath: false,
+    // On, even without a character to perform. The comma this inserts is a
+    // comprehension fix before it is a stylistic one — it only ever fires in a
+    // sentence that has no punctuation of its own to breathe at.
+    breath: true,
     openers: [],
   },
   butler: {
@@ -201,8 +236,11 @@ export const PERSONAS = {
   brisk: {
     id: "brisk",
     name: "Brisk",
-    blurb: "Quick and out of the way.",
-    prefer: { lang: null, names: [] },
+    // The same voice, in a hurry. Changing who is speaking as well as how fast
+    // would make this a different assistant rather than the same one moving —
+    // the character picker is about pace and manner, not about identity.
+    blurb: "The same voice, quicker and out of the way.",
+    prefer: HOUSE_VOICE,
     rate: 1.15,
     pitch: 1,
     breath: false,
@@ -320,9 +358,29 @@ export function bestVoiceFor(personaId) {
 
     let n = 0;
     const name = v.name.toLowerCase();
-    if (persona.prefer.names.some((w) => name.includes(w))) n += 100;
-    if (persona.prefer.lang && v.lang === persona.prefer.lang) n += 40;
-    else if (persona.prefer.lang && v.lang.startsWith(persona.prefer.lang.slice(0, 2))) n += 10;
+    // Ordered, not a set. Every preferred name used to score the same, so which
+    // one a device got came down to catalogue order — on a Mac with both
+    // Samantha and Ava installed, the house voice was whichever Apple happened
+    // to list first. The gap is small enough that a *premium* Ava still beats a
+    // compact Samantha, which is the right answer: the engine matters more than
+    // the name.
+    const rank = persona.prefer.names.findIndex((w) => name.includes(w));
+    const sameLang = Boolean(persona.prefer.lang) && v.lang === persona.prefer.lang;
+    const sameTongue =
+      Boolean(persona.prefer.lang) && v.lang.startsWith(persona.prefer.lang.slice(0, 2));
+
+    // A name or a language, or it is not a candidate. The bonuses below are
+    // tie-breakers and must never be able to qualify a voice on their own:
+    // being installed locally was worth five points, which was greater than
+    // zero, so on a machine whose only voice was German the house voice became
+    // Anna — reading English replies in German phonemes. The device's own
+    // default is chosen by the operating system to match the page, and is a far
+    // better answer than the wrong language confidently selected.
+    if (rank < 0 && !sameTongue) return 0;
+
+    if (rank >= 0) n += 100 - rank * 3;
+    if (sameLang) n += 40;
+    else if (sameTongue) n += 10;
     // The higher-quality engines. Apple's "Enhanced" and "Premium" downloads
     // and Google's "Neural" voices are a different class from the compact ones
     // that ship by default, and are worth preferring wherever one is installed.
@@ -386,8 +444,14 @@ export function activeVoice(settings = {}) {
 
 export function temper({ rate = 1, pitch = 1 }, voice) {
   if (isHiFi(voice)) return { rate, pitch };
-  const half = (n) => Number((1 + (n - 1) / 2).toFixed(3));
-  return { rate: half(rate), pitch: half(pitch) };
+  // Only the pitch. Easing both was over-correction: rate and pitch fail in
+  // completely different ways on a compact engine. Playing back faster or
+  // slower is what these voices are built for — screen-reader users run them
+  // at two and three times speed all day without artefacts — while a pitch
+  // shift is resampling, and resampling is where the metallic warble comes
+  // from. Halving the rate change as well meant a persona tuned to 0.97
+  // arrived as 0.985 and did nothing at all.
+  return { rate, pitch: Number((1 + (pitch - 1) / 2).toFixed(3)) };
 }
 
 /**

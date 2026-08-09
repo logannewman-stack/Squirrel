@@ -99,7 +99,16 @@ export default function VoiceSettings({ state }) {
                           on ? "border-[var(--ink)] bg-[var(--hover)]" : "border-[var(--line)] hover:border-[var(--ink)]"
                         }`}
                       >
-                        <span className="block text-sm font-medium">{persona.name}</span>
+                        <span className="flex items-baseline gap-2">
+                          <span className="text-sm font-medium">{persona.name}</span>
+                          {/* Which voice this actually resolves to on *this*
+                              device. A character is a promise about a voice
+                              the device may not have, and naming it is the
+                              difference between choosing and guessing. */}
+                          <span className="truncate text-[11px] text-[var(--faint)]">
+                            {bestVoiceFor(persona.id)?.name ?? "system default"}
+                          </span>
+                        </span>
                         <span className="mt-0.5 block text-xs text-[var(--muted)]">{persona.blurb}</span>
                       </button>
                     );
