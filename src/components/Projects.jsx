@@ -2,6 +2,9 @@ import { useState } from "react";
 import { addProject, dayKey } from "../lib/store";
 import { Button, Input } from "./ui";
 import { usage } from "../lib/plans";
+import { TEMPLATES, scheduleFor } from "../lib/templates";
+import { addTask } from "../lib/store";
+import { hoursOf } from "../lib/hours";
 import { duration, money } from "../lib/format";
 
 /**
@@ -115,6 +118,17 @@ export default function Projects({ state, onOpen, onUpgrade }) {
               {capped ? "Upgrade" : "Create"}
             </Button>
           </form>
+          {!capped && (
+            <Templates
+              onUse={(tpl) => {
+                const project = addProject({ name: tpl.name });
+                for (const task of scheduleFor(tpl, new Date(), hoursOf(state.settings).days)) {
+                  addTask({ projectId: project.id, ...task });
+                }
+                onOpen(project.id);
+              }}
+            />
+          )}
           {capped && (
             <p className="mt-1.5 text-right text-xs text-[var(--muted)]">
               <span className="num alert font-semibold">{room.used}/{room.cap}</span>{" "}
@@ -190,6 +204,63 @@ export default function Projects({ state, onOpen, onUpgrade }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * A project you have run before.
+ *
+ * Agencies do the same eight things every time somebody signs, and re-type them
+ * every time — the dullest ten minutes of the week and the place things get
+ * forgotten. These are real shapes rather than demonstrations, so the first use
+ * is a useful one, and what lands is an ordinary project: editable, deletable,
+ * nothing special about it afterwards.
+ *
+ * Collapsed by default. Somebody who came here to type a name should not have
+ * to read a menu first.
+ */
+function Templates({ onUse }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-1.5 text-right text-xs text-[var(--muted)] underline-offset-4
+                   hover:text-[var(--ink)] hover:underline sm:w-full"
+      >
+        or start from a template
+      </button>
+    );
+  }
+  return (
+    <div className="mt-2 w-full sm:w-[22rem]">
+      <ul className="flex flex-col gap-1.5">
+        {TEMPLATES.map((tpl) => (
+          <li key={tpl.id}>
+            <button
+              onClick={() => onUse(tpl)}
+              className="w-full rounded-lg border border-[var(--line)] px-3.5 py-2.5 text-left
+                         transition-colors hover:border-[var(--ink)]"
+            >
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-medium">{tpl.name}</span>
+                <span className="num shrink-0 text-[11px] text-[var(--faint)]">
+                  {tpl.tasks.length} tasks
+                </span>
+              </span>
+              <span className="mt-0.5 block text-xs text-[var(--muted)]">{tpl.blurb}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        onClick={() => setOpen(false)}
+        className="mt-2 text-xs text-[var(--muted)] underline-offset-4 hover:underline"
+      >
+        Never mind
+      </button>
     </div>
   );
 }

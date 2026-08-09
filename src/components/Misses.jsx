@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { summary, count, clear, exportText, labelFor } from "../lib/misses";
+import { parse } from "../lib/nlu/parse";
 
 /**
  * What she didn't understand, shown to the person who can do something about it.
@@ -10,6 +11,14 @@ import { summary, count, clear, exportText, labelFor } from "../lib/misses";
  * that eventually worked underneath where there is one.
  *
  * It never leaves the device on its own. Copy is a button somebody presses.
+ *
+ * ## Teaching her
+ *
+ * A diagnostic tells you what broke. This lets you do something about it: type
+ * what you *meant* against any pattern she missed, and she says immediately
+ * whether she would get it now. That turns the worst moments in the app — the
+ * ones where she did not understand — into the only place a person can improve
+ * her, and it turns a wall of failures into a list of things to try.
  */
 export default function Misses() {
   const [rows, setRows] = useState([]);
@@ -79,6 +88,8 @@ export default function Misses() {
               </ul>
             )}
 
+            <Teach shape={g.shape} />
+
             {/* The valuable half: what the person said next that did work. */}
             {g.resolvedAs.length > 0 && (
               <p className="mt-2 text-xs">
@@ -127,5 +138,71 @@ export default function Misses() {
         Nothing is sent anywhere unless you copy it out.
       </p>
     </div>
+  );
+}
+
+
+/**
+ * "Say it another way."
+ *
+ * Runs the rephrasing through the same parser the assistant uses and reports
+ * what it would do with it — not a guess, the real classification. Somebody who
+ * finds a phrasing that works has learned something about how to talk to her,
+ * which is worth more than the log entry that sent them here.
+ *
+ * Nothing is written. This is a rehearsal: it says whether she would understand,
+ * and the person can then go and say it to her for real.
+ */
+function Teach({ shape }) {
+  const [text, setText] = useState("");
+  const [verdict, setVerdict] = useState(null);
+
+  function tryIt(e) {
+    e.preventDefault();
+    const said = text.trim();
+    if (!said) return;
+    const p = parse(said, new Date());
+    setVerdict(
+      p.intent && p.intent !== "unknown"
+        ? { ok: true, intent: p.intent.replace(/_/g, " ") }
+        : { ok: false },
+    );
+  }
+
+  return (
+    <form onSubmit={tryIt} className="mt-3 border-t border-[var(--hairline)] pt-3">
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => { setText(e.target.value); setVerdict(null); }}
+          placeholder="Say it another way…"
+          aria-label={`Try another phrasing for ${shape}`}
+          className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-transparent px-3 py-1.5
+                     text-xs outline-none placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+        />
+        <button
+          type="submit"
+          disabled={!text.trim()}
+          className="shrink-0 rounded-md border border-[var(--line)] px-3 py-1.5 text-xs
+                     transition-colors hover:border-[var(--ink)] disabled:opacity-30"
+        >
+          Try it
+        </button>
+      </div>
+      {verdict && (
+        <p className="mt-2 text-xs">
+          {verdict.ok ? (
+            <>
+              <span className="font-medium">She'd get that</span>
+              <span className="text-[var(--muted)]"> — reads it as “{verdict.intent}”. Say it to her that way.</span>
+            </>
+          ) : (
+            <span className="text-[var(--muted)]">
+              Still not one she knows. Try naming the thing and the time outright — “move the board call to Thursday at 2”.
+            </span>
+          )}
+        </p>
+      )}
+    </form>
   );
 }

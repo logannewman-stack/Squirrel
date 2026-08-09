@@ -4,6 +4,8 @@ import { planOpts, sayMins } from "../lib/hours";
 import { projectLoad } from "../lib/schedule";
 import { duration } from "../lib/format";
 import TaskRow from "./TaskRow";
+import Review from "./Review";
+import { shouldReview } from "../lib/review";
 
 /**
  * The day, from the one plan.
@@ -197,6 +199,10 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
           window drew a large box around each piece of emptiness, which is a
           worse answer than the emptiness was — the page ground carries the
           space now, and each card is only as tall as it has something to say. */}
+      {/* The one moment the app speaks first, on a screen already open, once
+          the working day is over — and once. */}
+      {shouldReview(state, now) && <Review state={state} onDone={() => {}} />}
+
       <div className="grid flex-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-[1.15fr_1fr_0.8fr]">
         <section className="card flex flex-col px-5 py-4">
           <div className="mb-3 flex items-baseline justify-between">

@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { search, whenLabel } from "../lib/search";
 
 /**
- * ⌘K palette. Jumps between views, opens any project, or starts a focus session
- * on any open task without leaving the keyboard.
+ * ⌘K: the way to anything.
+ *
+ * It was a jump list — the first forty *open* tasks, matched by substring —
+ * which looks like search and is not. It could not find a finished task, a past
+ * meeting, a note or anybody's name, and those are most of what somebody is
+ * looking for when they go looking: the thing you half-remember doing is by
+ * definition already done. A planner people leave is usually one where they
+ * could not find something they knew was in there.
+ *
+ * The destinations and actions stay, because with an empty box this is still
+ * the fastest way around the app. The moment anything is typed it becomes
+ * search over everything.
  */
 export default function CommandPalette({ state, onClose, onNavigate, onFocusTask, onNewEvent }) {
   const [q, setQ] = useState("");
@@ -35,9 +46,29 @@ export default function CommandPalette({ state, onClose, onNavigate, onFocusTask
           run: () => onFocusTask(t),
         })),
     ];
-    const needle = q.trim().toLowerCase();
+    const needle = q.trim();
     if (!needle) return base.slice(0, 12);
-    return base.filter((x) => x.label.toLowerCase().includes(needle)).slice(0, 12);
+
+    // Anything typed searches everything — done work, past meetings, notes,
+    // attendees — rather than filtering the jump list. The commands stay
+    // reachable by name because "new event" is a thing people type here.
+    const commands = base
+      .filter((x) => x.label.toLowerCase().includes(needle.toLowerCase()))
+      .slice(0, 4);
+    const found = search(needle, state, { limit: 12 }).map((r) => ({
+      id: `s-${r.kind}-${r.id}`,
+      label: r.title,
+      hint: [r.hint, whenLabel(r.when)].filter(Boolean).join(" · "),
+      dim: r.done,
+      run: () =>
+        r.kind === "project" ? onNavigate({ name: "project", id: r.id })
+        : r.kind === "event" ? onNavigate({ name: "calendar" })
+        : r.projectId ? onNavigate({ name: "project", id: r.projectId })
+        : onNavigate({ name: "today" }),
+    }));
+    // Commands first when they matched the words outright; results otherwise.
+    const seen = new Set(commands.map((x) => x.label.toLowerCase()));
+    return [...commands, ...found.filter((x) => !seen.has(x.label.toLowerCase()))].slice(0, 12);
   }, [q, state, onNavigate, onFocusTask, onNewEvent]);
 
   useEffect(() => setI(0), [q]);
@@ -69,7 +100,7 @@ export default function CommandPalette({ state, onClose, onNavigate, onFocusTask
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKey}
-          placeholder="Jump to, or search tasks…"
+          placeholder="Search everything, or jump to…"
           className="w-full border-b border-[var(--line)] bg-transparent px-4 py-3.5 text-sm outline-none
                      placeholder:text-[var(--faint)]"
         />
@@ -89,7 +120,11 @@ export default function CommandPalette({ state, onClose, onNavigate, onFocusTask
                   n === i ? "bg-[var(--hover)]" : ""
                 }`}
               >
-                <span className="truncate">{x.label}</span>
+                {/* Finished work and past meetings are dimmed rather than
+                    hidden: worth finding, rarely what was meant. */}
+                <span className={`truncate ${x.dim ? "text-[var(--muted)] line-through" : ""}`}>
+                  {x.label}
+                </span>
                 <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--faint)]">
                   {x.hint}
                 </span>
