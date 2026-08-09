@@ -1918,18 +1918,43 @@ export function ask(text, state, opts = {}) {
         : mine;
 
       const focused = scoped.reduce((n, x) => n + (x.focusedMs || 0), 0);
-      const doneTasks = state.tasks.filter(
-        (t) => t.done && t.doneAt && new Date(t.doneAt) >= since && new Date(t.doneAt) < until).length;
+      const inProject = (t) =>
+        !project.length || !isConfident(project) || t.projectId === project[0].item.id;
+      const finished = state.tasks.filter(
+        (t) => t.done && t.doneAt && inProject(t) &&
+          new Date(t.doneAt) >= since && new Date(t.doneAt) < until)
+        .sort((a, b) => new Date(b.doneAt) - new Date(a.doneAt));
       const label = project.length && isConfident(project) ? ` on ${project[0].item.name}` : "";
 
-      if (!scoped.length && !doneTasks) {
+      if (!scoped.length && !finished.length) {
         return reply(`Nothing logged${label} in that stretch.`);
       }
-      return reply(
-        `${duration(focused)} of focused work${label} across ${scoped.length} ` +
-        `${scoped.length === 1 ? "session" : "sessions"}` +
-        (doneTasks ? `, and ${doneTasks} ${doneTasks === 1 ? "task" : "tasks"} finished` : "") + ".",
-      );
+
+      /**
+       * Named, not counted.
+       *
+       * "Three tasks finished" is a number; "you finished the SOW, the board
+       * deck and the invoices" is the week. This is the only question in the
+       * app whose entire job is to make somebody feel they got somewhere, and a
+       * count does not do that — it is the difference between a receipt and an
+       * answer. Capped at four, because past that it stops being a sentence
+       * and starts being the list they can already see.
+       */
+      const bits = [];
+      if (finished.length) {
+        const named = finished.slice(0, 4).map((t) => t.title);
+        const rest = finished.length - named.length;
+        bits.push(
+          `You finished ${joinNames(named)}${rest ? `, and ${rest} more` : ""}`,
+        );
+      }
+      if (scoped.length) {
+        bits.push(
+          `${bits.length ? "with " : ""}${duration(focused)} of focused work${bits.length ? "" : label} ` +
+          `across ${scoped.length} ${scoped.length === 1 ? "session" : "sessions"}`,
+        );
+      }
+      return reply(`${bits.join(", ")}${label && bits.length === 1 && finished.length ? label : ""}.`);
     }
 
     // ------------------------------------------------------ the working day

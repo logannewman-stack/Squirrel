@@ -715,4 +715,81 @@ for (const q of COMPOUNDS) {
     who() === null, who());
 }
 
+/**
+ * "What did I finish this week?"
+ *
+ * Two faults in one sentence. COMPLETE_TASK owns the word "finish", so this was
+ * read as an instruction — she went looking for an open task called "this week"
+ * and reported she could not find one. A past-tense question about what got
+ * done is the opposite of a command to get something done, and the two are one
+ * auxiliary verb apart.
+ *
+ * And the answer was a count. This is the only question in the app whose whole
+ * job is to make somebody feel they got somewhere, and "three tasks finished"
+ * does not do that: it is a receipt where an answer was wanted.
+ */
+{
+  const NOW3 = new Date(2026, 7, 12, 17, 0);
+  reset({ confirm: false });
+  const proj = store.addProject({ name: "Q3 Launch" });
+  const done = (title, at) => {
+    const task = store.addTask({ projectId: proj.id, title, estimateMins: 60 });
+    if (at) store.updateTask(task.id, { done: true, doneAt: at });
+    return task;
+  };
+  done("Draft the SOW", new Date(2026, 7, 12, 11).toISOString());
+  done("Review numbers", new Date(2026, 7, 12, 14).toISOString());
+  done("Send invoices", new Date(2026, 7, 10, 9).toISOString());
+  done("Board deck");
+
+  const week = ask("what did i finish this week", S(), { now: NOW3 });
+  t("a past-tense question is a question, not an instruction",
+    !/couldn'?t find/i.test(week.text), week.text);
+  t("and the things finished are named rather than counted",
+    /Draft the SOW/.test(week.text) && /Send invoices/.test(week.text), week.text);
+  t("nothing was marked done by asking",
+    S().tasks.filter((x) => x.done).length === 3, S().tasks.filter((x) => x.done).length);
+
+  const today = ask("what did i get done today", S(), { now: NOW3 });
+  t("today means today", /Draft the SOW/.test(today.text), today.text);
+  t("and leaves out what was finished on Monday",
+    !/Send invoices/.test(today.text), today.text);
+
+  t("“what have I finished” is the same question",
+    /Draft the SOW/.test(ask("what have i finished", S(), { now: NOW3 }).text));
+
+  // The commands must not have been dragged along with it.
+  reset({ confirm: false });
+  store.addTask({ title: "Draft the SOW", estimateMins: 60 });
+  ask("finish the sow", S(), { now: NOW3 });
+  t("“finish the sow” still finishes the SOW",
+    S().tasks[0]?.done === true, S().tasks[0]?.done);
+
+  reset({ confirm: false });
+  store.addTask({ title: "Draft the SOW", estimateMins: 60 });
+  ask("the sow is done", S(), { now: NOW3 });
+  t("and so does “the sow is done”", S().tasks[0]?.done === true);
+}
+
+/**
+ * "What's left on Q3 Launch?" was answered about *today's calendar* — the
+ * project named in the question ignored entirely. Confidently answering a
+ * different question than the one asked is worse than a miss, because nothing
+ * looks wrong.
+ */
+{
+  const NOW4 = new Date(2026, 7, 12, 10, 0);
+  reset({ confirm: false });
+  const proj = store.addProject({ name: "Q3 Launch" });
+  store.addTask({ projectId: proj.id, title: "Board deck", estimateMins: 120, due: "2026-08-14" });
+  store.addEvent({ title: "Standup", start: iso(2026, 8, 12, 9), end: iso(2026, 8, 12, 9, 30) });
+
+  const r = ask("whats left on q3 launch", S(), { now: NOW4 });
+  t("a question about a project is answered about the work",
+    /Board deck/i.test(r.text), r.text);
+  t("and not about this morning's meetings", !/Standup/.test(r.text), r.text);
+  t("“how much is left on” names the project outright",
+    /Q3 Launch/.test(ask("how much is left on q3 launch", S(), { now: NOW4 }).text));
+}
+
 report("Assistant actions");

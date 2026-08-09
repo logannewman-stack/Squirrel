@@ -696,6 +696,17 @@ const RULES = [
   // whichever rule matched first.
   [INTENTS.CREATE_TASK,
     /^\s*(?:please\s+)?(?:can you\s+|could you\s+)?(?:add|create|make)\s+(?:a|an|another)?\s*(?:new\s+)?(?:task|todo|to-?do|reminder)\b|^\s*remind me to\b/i],
+  /**
+   * "What did I finish this week?"
+   *
+   * Ahead of COMPLETE_TASK, which owns the word "finish" and was reading this
+   * as an instruction — going off to look for an open task called "this week"
+   * and reporting that it could not find one. A past-tense question about what
+   * got done is the opposite of a command to get something done, and the two
+   * are one auxiliary verb apart.
+   */
+  [INTENTS.QUERY_PROGRESS,
+    /\bwhat (?:did|have|'?ve) (?:i|we) (?:do|done|finish|finished|complete|completed|get|got|accomplish\w*|achieve\w*)\b|\bhow much (?:did|have) (?:i|we)\b|\bwhat'?s (?:been )?(?:done|finished|completed)\b/],
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b|\b(?:is|are|'s) (?:done|finished|complete|sorted|handled|out of the way)\b|\bi'?ve (?:done|finished|completed|sorted)\b|\ball done\b|\bwrapped up\b/],
   // `give (?!me)`: "give me something to do" is someone asking for work, not
   // handing it over, and it was being answered with "delegate it to whom?".
@@ -728,7 +739,7 @@ const RULES = [
     MENTIONS_PROJECT.test(body) &&
     /\bhow(?:'?s| is| are| am i doing)\b|\bprogress\b|\bwhere (?:are|is) (?:we|it|that)\b/i.test(body) &&
     Boolean(projectPhrase(body))],
-  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
+  [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|what'?s?(?: is)? left (?:on|for|in|of)\b|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|gaps?|any time|when can i|spare (?:time|hour|minutes?))\b/],
   [INTENTS.QUERY_DAY, /\b(what(?:'?s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double ?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
   // A series, not a booking. Checked before create, or only the first one of
