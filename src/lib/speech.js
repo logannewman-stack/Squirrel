@@ -68,6 +68,17 @@ const SAY = [
   [/\bCOB\b/gi, "close of business"],
   [/\bASAP\b/gi, "as soon as possible"],
   [/\bQBR\b/gi, "Q B R"],
+
+  /* ------------------------------------------------------------- half hours
+     Nobody says "five hours thirty minutes"; that is a stopwatch reading. The
+     half is the one fraction English has a word for, and these three phrasings
+     cover almost every duration this app produces. Before the general rules
+     below, which would otherwise claim the same digits. */
+  [/\b0m of /g, "no "],
+  [/\b1h\s*30m\b/g, "an hour and a half"],
+  [/\b(\d+)h\s*30m\b/g, "$1 and a half hours"],
+  [/\b30m\b/g, "half an hour"],
+
   // Durations. "1h 30m" is compact to read and unpronounceable.
   [/\b(\d+)h\s*(\d+)m\b/g, (_, h, m) => `${h} ${plural(h, "hour")} ${m} minutes`],
   [/\b(\d+(?:\.\d+)?)h\b/g, (_, h) => `${h} ${plural(h, "hour")}`],
@@ -101,6 +112,22 @@ const SAY = [
 const plural = (n, word) => (Number(n) === 1 ? word : `${word}s`);
 
 /**
+ * How many items of a list are worth hearing.
+ *
+ * A screen and an ear are not the same instrument. Eight meetings is a list you
+ * scan in two seconds and pick the one you wanted out of; read aloud it is
+ * three quarters of a minute of undifferentiated times, and by the fourth you
+ * have forgotten the first. There is nothing to skim back to, because it is
+ * already gone.
+ *
+ * So a long day is summarised out loud and complete on screen — she says how
+ * many are left rather than pretending there were only six. Six is generous on
+ * purpose: most days fit under it and are read in full, and the cut only
+ * happens on the days where hearing all of it would have been useless anyway.
+ */
+const LISTEN_MAX = 6;
+
+/**
  * A reply, as it should sound.
  *
  * Line breaks become sentence ends rather than pauses, because a synthesiser
@@ -110,10 +137,16 @@ const plural = (n, word) => (Number(n) === 1 ? word : `${word}s`);
 export function toSpeech(text) {
   let out = String(text ?? "");
   for (const [re, to] of SAY) out = out.replace(re, to);
-  return out
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
+
+  const lines = out.split("\n").map((line) => line.trim()).filter(Boolean);
+  // The opening line is a headline rather than an item — "You have eight
+  // meetings on Friday" — so it is kept on top of the allowance, not out of it.
+  const spoken =
+    lines.length > LISTEN_MAX + 1
+      ? [...lines.slice(0, LISTEN_MAX + 1), `And ${lines.length - LISTEN_MAX - 1} more.`]
+      : lines;
+
+  return spoken
     .map((line) => (/[.!?]$/.test(line) ? line : `${line}.`))
     .join(" ")
     .replace(/\s{2,}/g, " ")
@@ -162,20 +195,26 @@ export function onVoicesReady(fn) {
 /**
  * The house voice, in order of preference.
  *
- * Samantha is the default US English voice on every Apple device and the one
- * most people already associate with a machine that talks — which is exactly
- * why she is the right standard here: she is familiar rather than novel, and
- * an assistant is not the place to be surprising. Everything after her is a
- * fallback for devices that have never heard of her; the list is ordered, and
- * `bestVoiceFor` weights it that way, so Samantha wins wherever she exists.
+ * Google's US English is first because it is the best-sounding thing available
+ * for free in a browser — a proper neural voice rather than the compact engine
+ * that ships with an operating system, and the difference is not subtle.
  *
- * Ava and Allison are Apple's other US women, Zoe the newer one. Jenny and
- * Aria are Microsoft's, and "Google US English" is Chrome's. None of them is a
- * substitute for Samantha so much as the next best thing present.
+ * It is also the one voice here that is *not* on the device. Chrome synthesises
+ * it on Google's servers, which means it needs a connection and it means the
+ * text of her replies leaves the machine to be spoken. Both facts are handled
+ * rather than hidden: `speak` falls back to a local voice the moment a network
+ * one fails, so going offline costs quality and never silence, and the settings
+ * panel says plainly which voices leave the device.
+ *
+ * Samantha is second and is the standard everywhere Google's voice is absent —
+ * every Apple device, which is most phones this app will run on. She is the
+ * one people already associate with a machine that talks, and an assistant is
+ * not the place to be surprising. Ava, Allison and Zoe are Apple's other US
+ * women; Jenny and Aria are Microsoft's.
  */
 const HOUSE_VOICE = {
   lang: "en-US",
-  names: ["samantha", "ava", "allison", "zoe", "susan", "jenny", "aria", "google us english"],
+  names: ["google us english", "samantha", "ava", "allison", "zoe", "susan", "jenny", "aria"],
 };
 
 export const PERSONAS = {
@@ -259,8 +298,15 @@ export const PERSONAS = {
  */
 const NOVELTY = /albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|jester|junior|kathy|organ|princess|ralph|superstar|trinoids|whisper|wobble|zarvox|hysterical|bruce|fred\b/i;
 
-/** Engines worth reaching for when a device has more than one tier installed. */
-const PREMIUM = /premium|enhanced|neural|siri|natural/i;
+/**
+ * Engines worth reaching for when a device has more than one tier installed.
+ *
+ * Google's are in here because they are network-synthesised neural voices
+ * rather than the compact engine bundled with an operating system — the same
+ * class as Apple's Enhanced downloads, and they take a rate or pitch shift just
+ * as cleanly, which is what `temper` reads this for.
+ */
+const PREMIUM = /premium|enhanced|neural|siri|natural|google/i;
 
 /**
  * Where a measured speaker would take a breath.
@@ -340,7 +386,7 @@ export function inCharacter(text, personaId, address = "") {
  * and an exact name that is missing should degrade to something close instead
  * of to silence.
  */
-export function bestVoiceFor(personaId) {
+export function bestVoiceFor(personaId, { localOnly = false } = {}) {
   const persona = PERSONAS[personaId];
   if (!persona || !canSpeak()) return null;
   // A persona with no preferences means "whatever this device does best",
@@ -348,7 +394,9 @@ export function bestVoiceFor(personaId) {
   // opens with novelty voices on macOS.
   if (!persona.prefer.lang && !persona.prefer.names.length) return null;
 
-  const all = speechSynthesis.getVoices();
+  // `localOnly` is the offline fallback: the best voice that does not need a
+  // connection, for when the one that does has just failed to get one.
+  const all = speechSynthesis.getVoices().filter((v) => !localOnly || v.localService);
   if (!all.length) return null;
 
   const score = (v) => {
@@ -361,9 +409,10 @@ export function bestVoiceFor(personaId) {
     // Ordered, not a set. Every preferred name used to score the same, so which
     // one a device got came down to catalogue order — on a Mac with both
     // Samantha and Ava installed, the house voice was whichever Apple happened
-    // to list first. The gap is small enough that a *premium* Ava still beats a
-    // compact Samantha, which is the right answer: the engine matters more than
-    // the name.
+    // to list first. The step is wide enough that first choice really is first
+    // choice, and narrow enough that a much better engine further down the list
+    // can still win: a premium Ava beats a compact Samantha, because which
+    // engine is speaking matters more than whose name is on it.
     const rank = persona.prefer.names.findIndex((w) => name.includes(w));
     const sameLang = Boolean(persona.prefer.lang) && v.lang === persona.prefer.lang;
     const sameTongue =
@@ -378,7 +427,7 @@ export function bestVoiceFor(personaId) {
     // better answer than the wrong language confidently selected.
     if (rank < 0 && !sameTongue) return 0;
 
-    if (rank >= 0) n += 100 - rank * 3;
+    if (rank >= 0) n += 100 - rank * 8;
     if (sameLang) n += 40;
     else if (sameTongue) n += 10;
     // The higher-quality engines. Apple's "Enhanced" and "Premium" downloads
@@ -517,7 +566,8 @@ let generation = 0;
  *
  * @returns {() => void} stop
  */
-export function speak(text, { voiceURI, rate = 1, pitch = 1, persona, address = "", onStart, onEnd } = {}) {
+export function speak(text, options = {}) {
+  const { voiceURI, rate = 1, pitch = 1, persona, address = "", onStart, onEnd } = options;
   if (!canSpeak()) return () => {};
   // Read for speech first, then given the persona's delivery. The order
   // matters: `toSpeech` turns a multi-line reply into sentences and "1h" into
@@ -561,6 +611,25 @@ export function speak(text, { voiceURI, rate = 1, pitch = 1, persona, address = 
     u.onerror = () => {
       if (gen !== generation) return;
       speechSynthesis.cancel();
+      /**
+       * The house voice is synthesised on Google's servers, so the ordinary
+       * reason it fails is that there is no connection — a train, a lift, a
+       * dead café wifi. Going quiet at exactly that moment is the worst
+       * possible reading of "works offline": the app carries on doing
+       * everything else without a network and only the talking stops, with no
+       * indication why.
+       *
+       * So a network voice that fails is retried once on something local.
+       * Quality is the thing that degrades, never the answer. The retry cannot
+       * loop: the fallback is local by construction, so it never reaches here.
+       */
+      if (pick && !pick.localService) {
+        const local = bestVoiceFor(persona, { localOnly: true });
+        if (local && local.voiceURI !== pick.voiceURI) {
+          speak(text, { ...options, voiceURI: local.voiceURI });
+          return;
+        }
+      }
       finish();
     };
     return u;

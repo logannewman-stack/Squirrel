@@ -26,8 +26,8 @@ const t = (name, ok, detail) => {
   const said = toSpeech("Booked 1h with Ronnie tomorrow at 11:00 AM.");
   t("a duration is spoken, not spelled", /1 hour/.test(said), said);
 
-  t("half an hour reads as minutes",
-    /30 minutes/.test(toSpeech("Booked 30m with Bob.")), toSpeech("Booked 30m with Bob."));
+  t("half an hour is said as one, not as thirty minutes",
+    /half an hour/.test(toSpeech("Booked 30m with Bob.")), toSpeech("Booked 30m with Bob."));
   t("an hour and a half too",
     /2 hours 15 minutes/.test(toSpeech("2h 15m of work")), toSpeech("2h 15m of work"));
   t("one hour is singular", /\b1 hour\b/.test(toSpeech("1h")) , toSpeech("1h"));
@@ -149,13 +149,28 @@ for (const [heard, contains, time] of HEARD) {
     bestVoiceFor("butler")?.name);
 
   globalThis.speechSynthesis = { getVoices: () => CATALOGUE };
-  // The house voice. Samantha is the standard everywhere she exists, which is
-  // every Apple device — the rest of the list is for the ones that have never
-  // heard of her.
-  t("the standard character is Samantha", bestVoiceFor("natural")?.voiceURI === "samantha",
-    bestVoiceFor("natural")?.name);
+  // The house voice. Google's US English first — a neural voice rather than the
+  // compact engine an operating system ships with — and Samantha everywhere it
+  // is absent, which is every Apple device.
+  t("the standard character is Samantha where Google's voice is absent",
+    bestVoiceFor("natural")?.voiceURI === "samantha", bestVoiceFor("natural")?.name);
   t("and brisk is the same voice in a hurry",
     bestVoiceFor("brisk")?.voiceURI === "samantha", bestVoiceFor("brisk")?.name);
+
+  const withGoogle = [
+    { name: "Samantha", lang: "en-US", voiceURI: "samantha", localService: true },
+    { name: "Samantha (Enhanced)", lang: "en-US", voiceURI: "samantha-x", localService: true },
+    { name: "Google US English", lang: "en-US", voiceURI: "guse", localService: false },
+  ];
+  globalThis.speechSynthesis = { getVoices: () => withGoogle };
+  t("but Google's is the standard wherever it exists",
+    bestVoiceFor("natural")?.voiceURI === "guse", bestVoiceFor("natural")?.name);
+  t("even against a downloaded Enhanced voice",
+    bestVoiceFor("natural")?.name === "Google US English", bestVoiceFor("natural")?.name);
+  // The whole point of the fallback: the best thing that needs no connection.
+  t("and the offline fallback is the best local one, not silence",
+    bestVoiceFor("natural", { localOnly: true })?.voiceURI === "samantha-x",
+    bestVoiceFor("natural", { localOnly: true })?.name);
 
   // Ordered, not a set: with both installed, the first name wins.
   globalThis.speechSynthesis = {
@@ -370,6 +385,50 @@ for (const [heard, contains, time] of HEARD) {
       temper({ rate: 0.97, pitch: 1 }, compact).pitch === 1);
 }
 
+/* --------------------------------------------------------------- durations
+   A screen can carry "5h 30m". An ear hears a stopwatch reading. The half is
+   the one fraction English has a word for, and it covers nearly everything
+   this app produces. */
+{
+  const say = (t) => toSpeech(t);
+  t("half hours are said the way people say them",
+    say("5h 30m of focus time") === "5 and a half hours of focus time.", say("5h 30m of focus time"));
+  t("and one and a half is an idiom of its own",
+    /an hour and a half/.test(say("Board deck needs 1h 30m")), say("Board deck needs 1h 30m"));
+  t("a bare half hour too", /half an hour/.test(say("30m with Bob")), say("30m with Bob"));
+  t("but a length with no idiom is left alone",
+    /2 hours 15 minutes/.test(say("2h 15m of work")), say("2h 15m of work"));
+  t("and so is a plain count of minutes", /45 minutes/.test(say("45m free")), say("45m free"));
+  t("nothing is said as nothing, not as zero minutes",
+    /no meetings and no planned work/.test(say("0m of meetings and 0m of planned work")),
+    say("0m of meetings and 0m of planned work"));
+  t("an hour is still singular", /\b1 hour\b/.test(say("1h")), say("1h"));
+}
+
+/* ------------------------------------------------------------- long a day
+   A screen and an ear are not the same instrument: eight meetings is a list
+   you scan, and three quarters of a minute of times you cannot skim back
+   through. */
+{
+  const day = (n) =>
+    ["You have some meetings on Friday.", ""]
+      .concat(Array.from({ length: n }, (_, i) => `Item ${i + 1} at ${i + 1} PM.`))
+      .join("\n");
+
+  const six = toSpeech(day(6));
+  t("a day that fits is read in full", /Item 6/.test(six), six);
+  t("with nothing tacked on the end", !/more\.$/.test(six), six);
+
+  const nine = toSpeech(day(9));
+  t("a day that does not is cut", !/Item 7/.test(nine), nine);
+  t("after a generous number of them", /Item 6/.test(nine), nine);
+  t("and says how many are left rather than pretending", /And 3 more\.$/.test(nine), nine);
+  t("the headline is never counted as an item", /You have some meetings/.test(nine), nine);
+
+  t("a short reply is untouched by any of it",
+    toSpeech("Booked an hour.") === "Booked an hour.");
+}
+
 /* ------------------------------------------------------------------ ranges
    A dash is a pause in an aside and a word in a range, and reading the second
    as the first turned the list of free slots into disconnected times with no
@@ -387,7 +446,7 @@ for (const [heard, contains, time] of HEARD) {
   t("a lone weekday abbreviation is said as the day",
     /Saturday/.test(say("Nothing on Sat.")), say("Nothing on Sat."));
   t("an em-dash aside is still a pause",
-    /Wide open, 0 minutes/.test(say("Wide open — 0m of meetings")), say("Wide open — 0m of meetings"));
+    /Wide open, no meetings/.test(say("Wide open — 0m of meetings")), say("Wide open — 0m of meetings"));
 }
 
 /* --------------------------------------------------------------- delivery II
@@ -462,6 +521,61 @@ for (const [heard, contains, time] of HEARD) {
   stopSpeaking();
   live.at(-1).onend?.();
   t("a cancelled reply never reports finishing", ends2 === 0, ends2);
+
+  delete globalThis.speechSynthesis;
+  delete globalThis.SpeechSynthesisUtterance;
+}
+
+/* ------------------------------------------------------------ losing the wifi
+   The house voice is synthesised on Google's servers, so the ordinary reason it
+   fails is a train or a lift. Going quiet at exactly that moment is the worst
+   possible reading of "works offline": everything else in the app carries on
+   without a network and only the talking stops, with no indication why. */
+{
+  const spoken = [];
+  globalThis.SpeechSynthesisUtterance = function (text) { this.text = text; };
+  globalThis.speechSynthesis = {
+    speaking: false, pending: false,
+    getVoices: () => [
+      { name: "Google US English", lang: "en-US", voiceURI: "guse", localService: false },
+      { name: "Samantha", lang: "en-US", voiceURI: "samantha", localService: true },
+    ],
+    speak(u) { spoken.push(u); },
+    cancel() { spoken.length = 0; },
+  };
+
+  let ends = 0;
+  speak("Booked an hour with Ronnie.", {
+    voiceURI: "guse", persona: "natural", onEnd: () => ends++,
+  });
+  t("she starts on the network voice", spoken[0]?.voice?.voiceURI === "guse",
+    spoken[0]?.voice?.name);
+
+  // The connection drops.
+  spoken[0].onerror();
+  t("a network failure is retried rather than swallowed", spoken.length === 1, spoken.length);
+  t("on a voice that needs no connection",
+    spoken[0]?.voice?.localService === true, spoken[0]?.voice?.name);
+  t("saying the same thing", /Ronnie/.test(spoken[0]?.text || ""), spoken[0]?.text);
+  t("and the caller has not been told it finished", ends === 0, ends);
+
+  spoken[0].onend?.();
+  t("only once the fallback has actually finished", ends === 1, ends);
+
+  // The fallback is local, so a failure there is the end of it — no loop.
+  const before = spoken.length;
+  spoken[0].onerror?.();
+  t("a local voice failing does not retry for ever", spoken.length <= before, spoken.length);
+
+  // With nothing local to fall back to, it still has to release the caller or
+  // hands-free waits for a voice that already failed.
+  globalThis.speechSynthesis.getVoices = () => [
+    { name: "Google US English", lang: "en-US", voiceURI: "guse", localService: false },
+  ];
+  let ends2 = 0;
+  speak("Booked an hour.", { voiceURI: "guse", persona: "natural", onEnd: () => ends2++ });
+  spoken[0].onerror();
+  t("with nothing to fall back to, it gives up rather than hanging", ends2 === 1, ends2);
 
   delete globalThis.speechSynthesis;
   delete globalThis.SpeechSynthesisUtterance;

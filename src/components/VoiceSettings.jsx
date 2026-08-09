@@ -192,9 +192,20 @@ export default function VoiceSettings({ state }) {
         </p>
       )}
 
-      <p className="text-xs text-[var(--muted)]">
-        Both run on this device. Nothing you say is sent anywhere, and there is no per-message cost —
-        the same reason chats are unlimited on every plan.
+      {/* This paragraph used to say nothing left the device, which was not
+          true even before the house voice became a network one: Chrome's
+          dictation has always sent audio to Google to be transcribed. A
+          privacy claim is the last place to be approximately right. */}
+      <p className="text-xs leading-relaxed text-[var(--muted)]">
+        Neither costs anything per message — the same reason chats are unlimited on every plan.
+        Voices marked <span className="text-[var(--ink)]">online</span> are spoken by Google rather
+        than by your device, so the text of her replies is sent there to be read; every other voice
+        is synthesised here and sends nothing. Dictation in Chrome sends audio to Google too, which
+        is how that browser's microphone works — Safari's is on-device.
+      </p>
+      <p className="text-xs leading-relaxed text-[var(--muted)]">
+        Your calendar, tasks and projects are never part of any of that. She works out what to say
+        on this device; a voice only ever receives the finished sentence.
       </p>
     </div>
   );
@@ -227,8 +238,10 @@ function HiFiHint({ list, settings }) {
     return (
       <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">
         Using <span className="font-medium text-[var(--ink)]">{current.name}</span> — one of the
-        high-quality voices. This is as good as it gets without sending your words to a server,
-        which this app does not do.
+        high-quality voices.{" "}
+        {current.localService
+          ? "It runs on this device, so it works with no connection and sends nothing anywhere."
+          : "Google speaks this one, so it needs a connection and her replies are sent there to be read. With no signal she falls back to a voice on this device rather than going quiet."}
       </p>
     );
   }
