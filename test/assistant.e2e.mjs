@@ -5,6 +5,7 @@
  * confirm the underlying data changed.
  */
 import { chromium } from "playwright";
+import { skipOnboarding } from "./onboard.mjs";
 
 const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 // Deliberately not UTC. Every date the app stores is a local wall-clock string,
@@ -441,12 +442,7 @@ const confirms = await p.evaluate(async () => {
 await p.evaluate(() => localStorage.removeItem("squirrel.v2"));
 await p.reload({ waitUntil: "networkidle" });
 
-await p.getByRole("button", { name: "Mr." }).click();
-await p.getByPlaceholder("Surname").fill("Newman");
-await p.getByRole("button", { name: "Continue" }).click();
-// Onboarding is three steps now: name, working hours, then a send-off.
-await p.getByRole("button", { name: "Continue" }).click();
-await p.getByRole("button", { name: "Open Squirrel" }).click();
+await skipOnboarding(p);
 
 await p.getByRole("button", { name: "New event" }).click();
 await p.getByPlaceholder("Title").fill("Partner sync");

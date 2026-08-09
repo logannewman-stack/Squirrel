@@ -9,6 +9,7 @@
  * Needs the dev server on :5173.
  */
 import { chromium } from "playwright";
+import { skipOnboarding } from "./onboard.mjs";
 const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const p = await b.newPage({ viewport: { width: 1200, height: 900 }, timezoneId: "America/New_York" });
 const errs = []; p.on("pageerror", (e) => errs.push(e.message));
@@ -16,12 +17,7 @@ await p.goto("http://localhost:5173/", { waitUntil: "networkidle" });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: "networkidle" });
 
-await p.getByRole("button", { name: "Mr." }).click();
-await p.getByPlaceholder("Surname").fill("Newman");
-await p.getByRole("button", { name: "Continue" }).click();
-// Onboarding is three steps now: name, working hours, then a send-off.
-await p.getByRole("button", { name: "Continue" }).click();
-await p.getByRole("button", { name: "Open Squirrel" }).click();
+await skipOnboarding(p);
 
 // Seed a meeting today so the day grid has something to tap.
 await p.evaluate(async () => {
@@ -73,12 +69,7 @@ t("and then removes it", (await p.evaluate(async () => (await import("/src/lib/s
 await p.setViewportSize({ width: 390, height: 844 });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: "networkidle" });
-await p.getByRole("button", { name: "Mr." }).click();
-await p.getByPlaceholder("Surname").fill("Newman");
-await p.getByRole("button", { name: "Continue" }).click();
-// Onboarding is three steps now: name, working hours, then a send-off.
-await p.getByRole("button", { name: "Continue" }).click();
-await p.getByRole("button", { name: "Open Squirrel" }).click();
+await skipOnboarding(p);
 await p.evaluate(async () => {
   const s = await import("/src/lib/store.js");
   const base = new Date(); base.setHours(0, 0, 0, 0);

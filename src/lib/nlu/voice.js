@@ -170,6 +170,41 @@ export function describeDay(dayLabel, events, dueTasks = []) {
 }
 
 /**
+ * Full answer to "what does my week look like?".
+ *
+ * A week is not a day with more in it. Read out as one flat list, seven days of
+ * meetings is forty seconds of undifferentiated times, and the shape — which is
+ * the entire reason anybody asks about a week — is exactly what gets lost. So
+ * it is grouped by day, empty days are dropped rather than each reported clear,
+ * and the count leads so the answer has a headline before it has detail.
+ *
+ * @param {string} spanLabel  "this week", "next week", "Monday through Friday"
+ * @param {{label: string, events: object[], due: object[]}[]} days  in order
+ */
+export function describeSpan(spanLabel, days) {
+  const busy = days.filter((d) => d.events.length || d.due.length);
+  const events = busy.reduce((n, d) => n + d.events.length, 0);
+  const due = busy.reduce((n, d) => n + d.due.length, 0);
+
+  const titled = spanLabel[0].toUpperCase() + spanLabel.slice(1);
+  if (!busy.length) return `${titled} is clear — nothing scheduled and nothing due.`;
+
+  const counts = [];
+  if (events) counts.push(`${spell(events)} ${events === 1 ? "meeting" : "meetings"}`);
+  if (due) counts.push(`${spell(due)} ${due === 1 ? "task" : "tasks"} due`);
+
+  const lines = [`You have ${joinNames(counts)} ${spanLabel}.`, ""];
+  for (const d of busy) {
+    const bits = [
+      ...d.events.map((e) => `${timeOf(e.start)} ${e.title}`),
+      ...d.due.map((t) => `${t.title} due`),
+    ];
+    lines.push(`${d.label}: ${bits.join(", ")}.`);
+  }
+  return lines.join("\n");
+}
+
+/**
  * The line that goes out before anything is written.
  *
  * Reads back the whole proposal, not just the part that was inferred — the

@@ -329,6 +329,27 @@ const mondayOf = (d, weeksOut = 0) => {
   x.setDate(x.getDate() - ((x.getDay() + 6) % 7) + weeksOut * 7);
   return x;
 };
+
+/**
+ * Whether "this week" should mean the working week that starts on Monday.
+ *
+ * Weeks here run Monday to Sunday, which puts the weekend at the *end* of the
+ * week it belongs to. Taken literally that made "what does my week look like"
+ * on a Saturday evening report the day and a half remaining — so somebody who
+ * had just booked a meeting for Thursday was told their week was clear — and
+ * "clear this week" would have cleared only those two days.
+ *
+ * Nobody asking a work planner about "my week" from a weekend means the tail of
+ * the one that is ending. They mean the one that starts on Monday, which on the
+ * default settings is also the only part of it with any working hours in it at
+ * all.
+ *
+ * "This weekend" is matched earlier and is unaffected: asked on a Saturday, it
+ * still means the two days in hand.
+ *
+ * @returns {0|1} weeks to shift a "this week" / "next week" reading by
+ */
+const weekendLooksForward = (now) => (now.getDay() === 0 || now.getDay() === 6 ? 1 : 0);
 const at = (d, h) => {
   const x = atLocal(d, 0);
   x.setMinutes(Math.round(h * 60));
@@ -424,7 +445,12 @@ export function parseRange(text, now = new Date(), opts = {}) {
   if (rest) {
     const unit = rest[1];
     if (unit === "week") {
-      return { from: now, to: nextDay(mondayOf(now, 1), 0), label: "the rest of this week", scope: "week" };
+      return {
+        from: now,
+        to: nextDay(mondayOf(now, 1 + weekendLooksForward(now)), 0),
+        label: "the rest of this week",
+        scope: "week",
+      };
     }
     if (unit === "month") {
       const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -469,11 +495,12 @@ export function parseRange(text, now = new Date(), opts = {}) {
 
   // Whole weeks and months. "this week" is Monday to Sunday here, deliberately
   // unlike the deadline reading.
+  const ahead = weekendLooksForward(now);
   if (/\bnext week\b/.test(s)) {
-    return { from: mondayOf(now, 1), to: mondayOf(now, 2), label: "next week", scope: "week" };
+    return { from: mondayOf(now, 1 + ahead), to: mondayOf(now, 2 + ahead), label: "next week", scope: "week" };
   }
   if (/\b(?:this|the|my|current)\s+(?:whole\s+|entire\s+|full\s+)?week\b/.test(s)) {
-    return clamp({ from: mondayOf(now), to: mondayOf(now, 1), label: "this week", scope: "week" });
+    return clamp({ from: mondayOf(now, ahead), to: mondayOf(now, 1 + ahead), label: "this week", scope: "week" });
   }
   if (/\bnext month\b/.test(s)) {
     return {

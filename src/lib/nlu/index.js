@@ -15,7 +15,7 @@ import { parse, INTENTS, placeIn } from "./parse.js";
 import { classify as smallTalk, answer as smallAnswer } from "./smalltalk.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
 import { describe, toLocalIso, dayKey, atLocal, parseDate, parseRange, dayRange, fixDateWords } from "./datetime.js";
-import { acknowledge, describeDay, addressOf, confirmLine, composeTitle, joinNames } from "./voice.js";
+import { acknowledge, describeDay, describeSpan, addressOf, confirmLine, composeTitle, joinNames } from "./voice.js";
 import {
   EMPTY_MEMORY, remember, carryable, lastTurn, focusOf, setOf, topicDay, inherit,
 } from "./context.js";
@@ -1569,6 +1569,47 @@ export function ask(text, state, opts = {}) {
 
     // ------------------------------------------------------------ query
     case INTENTS.QUERY_DAY: {
+      /**
+       * "What does my week look like?"
+       *
+       * A week is not a day, and this used to answer as though it were: the
+       * range was parsed correctly and then thrown away, and the reply
+       * described whatever single day fell out of `dateOnly` — today, or in
+       * "what does this week look like", the Friday that phrase also reads as
+       * a deadline. Confidently answering a different question than the one
+       * asked is worse than admitting a miss, because nothing looks wrong.
+       *
+       * Only genuine spans divert here. A named day already has a better
+       * answer below, and a part of a day ("Friday afternoon") is a slice of
+       * one, not a stretch of several.
+       */
+      const span = slots.range;
+      if (span && (span.scope === "week" || span.scope === "month" || span.scope === "span")) {
+        const days = [];
+        for (let d = new Date(span.from); d < span.to; d.setDate(d.getDate() + 1)) {
+          const key = dayKey(d);
+          days.push({
+            label: (() => {
+              const raw = describe(atLocal(new Date(d), 9), now).split(" at ")[0];
+              return raw[0].toUpperCase() + raw.slice(1);
+            })(),
+            events: state.events
+              .filter((e) => dayKey(new Date(e.start)) === key)
+              .sort((a, b) => new Date(a.start) - new Date(b.start)),
+            due: openTasks.filter((t) => t.due === key),
+          });
+        }
+        const listed = days.flatMap((d) => d.events);
+        return reply(describeSpan(span.label, days), [], {
+          // The span becomes the topic, so "clear it" or "cancel them" next has
+          // the whole stretch to point at rather than falling back to today.
+          day: dayKey(span.from),
+          set: listed.length
+            ? { kind: "event", ids: listed.map((e) => e.id), label: span.label }
+            : null,
+        });
+      }
+
       const day = dayKey(slots.dateOnly || now);
       const events = state.events
         .filter((e) => dayKey(new Date(e.start)) === day)

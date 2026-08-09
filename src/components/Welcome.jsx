@@ -1,7 +1,10 @@
 import { useState } from "react";
 import Identity from "./Identity";
 import Squirrel from "./Squirrel";
+import FirstAsk from "./FirstAsk";
+import JoinUp from "./JoinUp";
 import { setSetting } from "../lib/store";
+import { configured } from "../lib/supabase";
 
 /**
  * First run, as a short conversation rather than a form.
@@ -10,12 +13,21 @@ import { setSetting } from "../lib/store";
  * else — which on a Mac left a form marooned in the middle of a 27-inch display
  * and told a brand-new user nothing about what they had opened.
  *
- * It is three steps now, and the count matters in both directions. Fewer, and
- * the planner starts without knowing when the person works, which is the number
+ * Four steps now, and the count matters in both directions. Fewer, and the
+ * planner starts without knowing when the person works, which is the number
  * every deadline calculation in the app is measured against — it would be
  * guessing on day one. More, and it becomes a setup wizard, which is the thing
  * people abandon. Every step after the first can be skipped, so the floor is
  * one answer and about fifteen seconds.
+ *
+ * ## The shape of it
+ *
+ * Two questions, then the payoff, then the ask. That order is the whole design.
+ * The third step is the real assistant rather than a description of her, so by
+ * the time step four asks for an email the person has watched her book
+ * something and is holding a reason to keep it — which is the only moment
+ * anybody has ever given an email address to a planner. Asking first, as most
+ * of these flows do, is asking a stranger to pay a toll to see the thing.
  *
  * The left panel is the pitch and stays put; only the right side advances. That
  * is deliberate — a screen that reprints everything on each step feels like
@@ -51,7 +63,17 @@ const STARTS = [7, 8, 9, 10];
 const ENDS = [16, 17, 18, 19];
 const sayHour = (h) => `${((h + 11) % 12) + 1}${h < 12 ? "am" : "pm"}`;
 
-const STEPS = ["you", "hours", "ready"];
+const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
+
+/**
+ * Three steps, or four where there is an account to be had.
+ *
+ * On a build with no backend the sign-in step has nothing to offer, and a whole
+ * screen reading "you're set up" above a single button is a beat spent on
+ * nothing — worse than not having it, because the progress bar promised
+ * something was coming.
+ */
+const STEPS = configured ? ["you", "hours", "try", "keep"] : ["you", "hours", "try"];
 
 export default function Welcome({ onDone }) {
   const [step, setStep] = useState(0);
@@ -124,9 +146,9 @@ export default function Welcome({ onDone }) {
       {/* ------------------------------------------------------------ the ask */}
       <section className="flex items-center justify-center px-7 py-12 sm:px-12 lg:py-14">
         <div className="w-full max-w-[26rem]">
-          {/* Three ticks rather than "step 2 of 3". The end is visible either
-              way, and a bar that fills is easier to read at a glance than a
-              fraction that has to be parsed. */}
+          {/* Ticks rather than "step 2 of 4". The end is visible either way, and
+              a bar that fills is easier to read at a glance than a fraction
+              that has to be parsed. */}
           <div className="mb-7 flex items-center gap-1.5" role="presentation">
             {STEPS.map((s, i) => (
               <span
@@ -165,7 +187,13 @@ export default function Welcome({ onDone }) {
               </p>
 
               <div className="mt-7">
-                <p className="mb-2 text-xs font-medium text-[var(--muted)]">Start</p>
+                {/* The week, drawn. The sentence underneath says the same thing
+                    in numbers, but a shape you can see fill and empty as you
+                    press the buttons is the difference between answering a
+                    question and watching what the answer does. */}
+                <WeekBars start={starts} end={ends} weekend={weekend} />
+
+                <p className="mb-2 mt-6 text-xs font-medium text-[var(--muted)]">Start</p>
                 <div className="flex flex-wrap gap-1.5">
                   {STARTS.map((h) => (
                     <Pick key={h} on={starts === h} onClick={() => setStarts(h)}>{sayHour(h)}</Pick>
@@ -218,47 +246,59 @@ export default function Welcome({ onDone }) {
             </div>
           )}
 
-          {step === 2 && (
-            <div key="ready" className="sq-step">
-              <p className="label">That's everything</p>
-              <h2 className="mt-2 text-[26px] font-semibold leading-tight tracking-[-0.025em]">
-                Try asking her something.
-              </h2>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">
-                She is the squirrel at the bottom of the screen. Anything you
-                would say to a person works — these are just to start.
-              </p>
+          {/* The payoff. Real assistant, real data, kept. */}
+          {step === 2 && <FirstAsk key="try" onDone={configured ? next : finish} />}
 
-              <ul className="mt-6 flex flex-col gap-2">
-                {[
-                  "Book a call with Priya Thursday at 2",
-                  "The board deck will take 8 hours, due Friday",
-                  "What does my week look like?",
-                ].map((line) => (
-                  <li
-                    key={line}
-                    className="rounded-lg border border-[var(--line)] px-4 py-3 text-sm text-[var(--muted)]"
-                  >
-                    “{line}”
-                  </li>
-                ))}
-              </ul>
-
-              <button
-                onClick={finish}
-                className="mt-7 w-full rounded-lg bg-[var(--ink)] py-3 text-sm font-medium
-                           text-[var(--paper)] transition-opacity hover:opacity-90"
-              >
-                Open Squirrel
-              </button>
-            </div>
-          )}
+          {/* And only now, the ask — with something already worth keeping. */}
+          {step === 3 && <JoinUp key="keep" onDone={finish} />}
 
           <p className="mt-6 text-xs leading-relaxed text-[var(--muted)] lg:hidden">
             Works offline. Your day stays on your device unless you sign in.
           </p>
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * The working week as seven columns, each shaded across the hours claimed.
+ *
+ * Drawn against a fixed 6am–10pm frame rather than against the chosen hours, so
+ * the bars actually grow and shrink when the buttons are pressed. Scaled to the
+ * selection, every choice would look identical and the picture would say
+ * nothing.
+ */
+function WeekBars({ start, end, weekend }) {
+  const DAY_START = 6;
+  const DAY_END = 22;
+  const span = DAY_END - DAY_START;
+  const top = ((start - DAY_START) / span) * 100;
+  const height = (Math.max(0, end - start) / span) * 100;
+
+  return (
+    <div className="flex items-end gap-1.5" aria-hidden>
+      {DAYS.map((d, i) => {
+        const on = weekend || i < 5;
+        return (
+          <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
+            <span className="relative h-20 w-full overflow-hidden rounded-md bg-[var(--hairline)]">
+              <span
+                className="absolute inset-x-0 rounded-md transition-all duration-300 ease-out"
+                style={{
+                  top: `${top}%`,
+                  height: `${on ? height : 0}%`,
+                  background: "var(--ink)",
+                  opacity: on ? 1 : 0,
+                }}
+              />
+            </span>
+            <span className={`text-[10px] font-medium ${on ? "text-[var(--muted)]" : "text-[var(--faint)]"}`}>
+              {d}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

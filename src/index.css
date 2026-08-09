@@ -334,8 +334,18 @@ input[type="date"], input[type="time"] { color-scheme: light; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* The caret at the end of a suggestion typing itself in. Borrowed from a
+   terminal on purpose: it is the one mark that reads unmistakably as "words
+   are being entered here", which is all the animation is trying to say. */
+.sq-caret {
+  border-right: 1.5px solid currentColor;
+  animation: sq-caret 900ms steps(1) infinite;
+}
+@keyframes sq-caret { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   .sq-step { animation: none; }
+  .sq-caret { animation: none; }
 }
 
 /* ==========================================================================

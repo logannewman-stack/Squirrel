@@ -567,4 +567,91 @@ for (const q of COMPOUNDS) {
   t("naming the focus budget too", /1h a day/.test(r.text), r.text);
 }
 
+/**
+ * A week is not a day with more in it.
+ *
+ * The range was parsed correctly and then thrown away: "what does my week look
+ * like" reported today, and "what does this week look like" reported the Friday
+ * that phrase also reads as a deadline. Both answered confidently, which is the
+ * failure worth a test — a miss announces itself and a wrong answer does not.
+ */
+{
+  seed();
+  store.addTask({ title: "Board deck", due: "2026-08-07", estimateMins: 120 });
+
+  const week = say("what does my week look like");
+  t("a question about the week is answered about the week",
+    /this week/.test(week.text), week.text);
+  t("grouped by day rather than read as one list", /Friday:/.test(week.text), week.text);
+  t("with the deadline in it", /Board deck due/.test(week.text), week.text);
+  t("and next week's QBR left out of this week", !/QBR/.test(week.text), week.text);
+  t("empty days are not each reported clear", !/Sunday/.test(week.text), week.text);
+
+  t("“this week” is read as the span, not as the Friday deadline",
+    /Friday:/.test(say("what does this week look like").text),
+    say("what does this week look like").text);
+
+  const nextWeek = say("what does next week look like");
+  t("next week is its own week", /QBR/.test(nextWeek.text), nextWeek.text);
+  t("and does not leak this one in", !/Standup/.test(nextWeek.text), nextWeek.text);
+
+  // The narrower questions must keep their old, better answers.
+  const day = say("what does friday look like");
+  t("a named day still answers as a day", /on Friday/.test(day.text), day.text);
+  t("in the fuller sentence form", /At 9:00 AM/.test(day.text), day.text);
+  t("and part of a day is not treated as a span",
+    !/Friday:/.test(say("what does friday afternoon look like").text));
+
+  // The set the answer just listed is what a pronoun points at next.
+  seed();
+  say("what does my week look like");
+  const gone = say("cancel them");
+  t("“cancel them” after a week answer means that week",
+    count() < 8, `${count()} left: ${titles().join(" · ")}`);
+  t("and leaves next week alone", titles().includes("QBR"), titles().join(" · "));
+  t("saying what it did", !/didn't catch/i.test(gone.text), gone.text);
+}
+
+/**
+ * "My week", asked from a weekend.
+ *
+ * Weeks run Monday to Sunday, which puts the weekend at the end of the week it
+ * belongs to. Read literally, somebody who booked a meeting for Thursday on a
+ * Saturday evening and then asked what their week looked like was told it was
+ * clear: the range covered the day and a half left of the week that was ending.
+ * Found by the onboarding demo doing exactly that, on a Saturday.
+ */
+{
+  const SAT = new Date(2026, 7, 8, 20, 0);   // Saturday evening
+  const SUN = new Date(2026, 7, 9, 12, 0);   // Sunday lunchtime
+
+  reset();
+  store.addEvent({ title: "Board call", start: iso(2026, 8, 13, 14), end: iso(2026, 8, 13, 15) });
+  store.addTask({ title: "Board deck", due: "2026-08-14" });
+
+  for (const [name, now] of [["Saturday", SAT], ["Sunday", SUN]]) {
+    const r = ask("what does my week look like", S(), { now });
+    t(`on ${name}, "my week" means the working week ahead`, /Thursday:/.test(r.text), r.text);
+    t(`  carrying the deadline with it`, /Board deck due/.test(r.text), r.text);
+  }
+
+  // And it must not swallow next week along with it.
+  const nx = ask("what does next week look like", S(), { now: SAT });
+  t("next week still means the one after that", !/Board call/.test(nx.text), nx.text);
+
+  // "This weekend" is a different question and keeps its own answer.
+  const wknd = ask("what does this weekend look like", S(), { now: SAT });
+  t("and the weekend in hand is not redirected to Monday",
+    !/Thursday:/.test(wknd.text), wknd.text);
+
+  // Midweek is unchanged: days already spent are not reported back.
+  reset();
+  store.addEvent({ title: "Monday standup", start: iso(2026, 8, 10, 9), end: iso(2026, 8, 10, 9, 30) });
+  store.addEvent({ title: "Thursday review", start: iso(2026, 8, 13, 14), end: iso(2026, 8, 13, 15) });
+  const mid = ask("what does my week look like", S(), { now: new Date(2026, 7, 12, 10) });
+  t("midweek still starts from today, not from Monday",
+    !/Monday standup/.test(mid.text), mid.text);
+  t("and still runs to the end of the week", /Thursday review/.test(mid.text), mid.text);
+}
+
 report("Assistant actions");

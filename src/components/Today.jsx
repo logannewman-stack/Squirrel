@@ -75,6 +75,26 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
     ...plannedTasks.map((task) => ({ task, why: "planned" })),
   ].filter(({ task }) => (seen.has(task.id) ? false : seen.add(task.id)));
 
+  /**
+   * The next thing, for a day with nothing on it.
+   *
+   * "Nothing on the calendar and nothing to work on" is true and useless — the
+   * same sentence on a genuinely free Tuesday as on the first morning of a new
+   * account, and in both cases what a person wants is what *is* coming. It
+   * matters most on day one: somebody who has just watched her book a meeting
+   * for Thursday should not then land on a screen telling them there is
+   * nothing.
+   */
+  const upcoming =
+    [
+      ...state.events
+        .filter((e) => new Date(e.start) > now)
+        .map((e) => ({ at: new Date(e.start), title: e.title, kind: "meeting" })),
+      ...state.tasks
+        .filter((t) => !t.done && !t.delegatedTo && t.due && t.due > day)
+        .map((t) => ({ at: new Date(`${t.due}T23:59:59`), title: t.title, kind: "due" })),
+    ].sort((a, b) => a.at - b.at)[0] ?? null;
+
   // Meetings and planned work in one column, in the order they happen. Two
   // lists side by side made the day look emptier than it is and hid every
   // collision between the two kinds of commitment.
@@ -155,9 +175,20 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
             )}
           </div>
           {timeline.length === 0 ? (
-            <p className="py-4 text-sm text-[var(--muted)]">
-              Nothing on the calendar and nothing to work on.
-            </p>
+            <div className="py-4">
+              <p className="text-sm text-[var(--muted)]">
+                Nothing on the calendar and nothing to work on.
+              </p>
+              {upcoming && (
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  Next up —{" "}
+                  <span className="font-medium text-[var(--ink)]">{upcoming.title}</span>
+                  {upcoming.kind === "due"
+                    ? `, due ${sayWhen(upcoming.at, now)}.`
+                    : `, ${sayWhen(upcoming.at, now)} at ${fmtTime(upcoming.at)}.`}
+                </p>
+              )}
+            </div>
           ) : (
             <ul className="divide-y divide-[var(--hairline)]">
               {timeline.map((item) => {
@@ -394,6 +425,24 @@ function NoEstimate({ list }) {
       </ul>
     </div>
   );
+}
+
+/**
+ * When something is, said the way a person would say it.
+ *
+ * Near days get words and far ones get a date: "in 47 days" is arithmetic
+ * nobody asked for, and "tomorrow" is the answer to a question "Aug 14" only
+ * implies.
+ */
+function sayWhen(at, now) {
+  const days = Math.round(
+    (new Date(at.getFullYear(), at.getMonth(), at.getDate()) -
+      new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000,
+  );
+  if (days <= 0) return "later today";
+  if (days === 1) return "tomorrow";
+  if (days <= 6) return at.toLocaleDateString([], { weekday: "long" });
+  return at.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function Stat({ label, value, sub, alert }) {
