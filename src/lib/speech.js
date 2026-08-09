@@ -29,13 +29,38 @@ export const canListen = () => Boolean(Recognition());
 
 /* ------------------------------------------------------------------ speaking */
 
+const DAY_NAMES = {
+  Mon: "Monday", Tue: "Tuesday", Tues: "Tuesday", Wed: "Wednesday", Weds: "Wednesday",
+  Thu: "Thursday", Thur: "Thursday", Thurs: "Thursday", Fri: "Friday",
+  Sat: "Saturday", Sun: "Sunday",
+};
+
 /** Symbols and shorthand that are read aloud badly, or not at all. */
 const SAY = [
   [/[\u201C\u201D]/g, ""],
   [/[\u2018\u2019]/g, "'"],
   [/^[•·]\s*/gm, ""],
+
+  /* ------------------------------------------------------------- dashes that
+     are not pauses. The generic rule below turns a dash into a comma, which is
+     right for an aside and catastrophic for a range: "8:00 AM–9:00 AM" was
+     being read "eight AM, nine AM", and a list of free slots came out as a
+     string of disconnected times with no way to tell a start from an end.
+     Ranges are matched first and get the word a person would actually say. */
+  [/(\d(?:[:.]\d{2})?\s*(?:AM|PM|am|pm))\s*[–—-]\s*(\d(?:[:.]\d{2})?\s*(?:AM|PM|am|pm))/g, "$1 to $2"],
+  [/\b(Mon|Tue|Tues|Wed|Weds|Thu|Thur|Thurs|Fri|Sat|Sun)\s*[–—-]\s*(Mon|Tue|Tues|Wed|Weds|Thu|Thur|Thurs|Fri|Sat|Sun)\b/g,
+    (_, a, b) => `${DAY_NAMES[a]} to ${DAY_NAMES[b]}`],
+  // A parenthesised length is an aside, not a bracket to be announced. Some
+  // engines say "open paren"; the rest give it no pause at all and run it into
+  // the time it belongs to.
+  [/\s*\(([^)]{1,24})\)/g, ", $1"],
+
   [/\s*[—–]\s*/g, ", "],
   [/\s*·\s*/g, ", "],
+  // A weekday said as three letters is read as a word: "Mon" rhymes with "on",
+  // "Sat" is a thing you did yesterday. Done after the ranges above so
+  // "Mon–Fri" has already become a phrase.
+  [/\b(Mon|Tues?|Weds?|Thur?s?|Fri|Sat|Sun)\b\.?/g, (m, d) => DAY_NAMES[d] ?? m],
   [/⚠\s*/g, "Careful. "],
   [/\b1:1\b/gi, "one to one"],
   [/\bQ(\d)\b/g, "quarter $1"],
@@ -61,6 +86,10 @@ const SAY = [
      hour on a clock. */
   [/\b(\d{1,2}):00(?=\s*(?:AM|PM|am|pm)\b)/g, "$1"],
   [/\b(\d{1,2}):00\b(?!\s*(?:AM|PM|am|pm))/g, "$1 o'clock"],
+  // Nobody says "twelve PM". Done after the zeroes come off, so both "12:00
+  // PM" and a bare "12 PM" land here.
+  [/\b12 ?PM\b/gi, "noon"],
+  [/\b12 ?AM\b/gi, "midnight"],
 
   /* A colon between a label and its contents — "Thursday: 2 PM Call with
      Priya" — is silent in some engines and a long stop in others. A comma is
@@ -362,7 +391,66 @@ export function temper({ rate = 1, pitch = 1 }, voice) {
 }
 
 /**
+ * A reply, cut where a speaker would actually stop.
+ *
+ * Abbreviations are the whole difficulty. Splitting on a full stop turns "Very
+ * good, Mr. Newman. Booked an hour" into "Very good, Mr." and "Newman. Booked
+ * an hour" — the name torn in half, spoken as two utterances with a gap down
+ * the middle of it. So fragments that end on a known abbreviation are glued
+ * back onto what follows.
+ */
+const ABBREVIATION = /\b(?:Mr|Mrs|Ms|Mx|Dr|Prof|Sr|Jr|St|vs|etc|approx|No)\.$/i;
+
+export function intoSentences(text) {
+  const out = [];
+  for (const piece of String(text ?? "").split(/(?<=[.!?])\s+/)) {
+    if (!piece) continue;
+    if (out.length && ABBREVIATION.test(out[out.length - 1])) out[out.length - 1] += ` ${piece}`;
+    else out.push(piece);
+  }
+  return out;
+}
+
+/**
+ * How the voice moves across a run of sentences.
+ *
+ * The flattest thing about browser speech is that an utterance has exactly one
+ * pitch and one rate, start to finish. A person reading five meetings out does
+ * not hold a single note for all five: the pitch drifts down as they work
+ * through the list, and they speed up slightly once the shape of it is
+ * established. That drift — declination — is one of the things the ear uses to
+ * decide whether it is listening to a person or a machine, and it is the last
+ * of it available without leaving the device.
+ *
+ * Deliberately small, and floored after a few sentences. A drift that keeps
+ * going lands a ten-item list somewhere under the floor and swaps one
+ * artificial sound for another.
+ */
+export function contourFor(index, { rate = 1, pitch = 1 }) {
+  const step = Math.min(index, 4);
+  return {
+    pitch: Number((pitch * (1 - step * 0.012)).toFixed(3)),
+    rate: Number((rate * (1 + step * 0.01)).toFixed(3)),
+  };
+}
+
+/**
+ * Every run gets a number. A callback from a run that has since been cancelled
+ * or superseded must not release the caller — otherwise interrupting her
+ * mid-sentence reopens the microphone in hands-free mode, on behalf of an
+ * answer nobody heard the end of.
+ */
+let generation = 0;
+
+/**
  * Say something.
+ *
+ * Spoken a sentence at a time rather than in one go. That buys the contour
+ * above, it gives the engine a real sentence boundary to pause at instead of
+ * a comma standing in for one, and it sidesteps Chrome's long-standing habit
+ * of truncating a single utterance after about fifteen seconds — which a
+ * five-meeting day comfortably exceeds.
+ *
  * @returns {() => void} stop
  */
 export function speak(text, { voiceURI, rate = 1, pitch = 1, persona, address = "", onStart, onEnd } = {}) {
@@ -375,35 +463,55 @@ export function speak(text, { voiceURI, rate = 1, pitch = 1, persona, address = 
   if (!said) return () => {};
 
   stopSpeaking();
-  const u = new SpeechSynthesisUtterance(said);
+  const gen = generation;
+
   // Looked up in the whole catalogue rather than in `voices()`, which is
   // filtered to the page's language for the picker. A persona reaches for an
   // en-GB voice; on a browser set to anything but English that filter dropped
   // it, and the choice silently became the system default.
-  const pick = voiceURI && speechSynthesis.getVoices().find((v) => v.voiceURI === voiceURI);
-  if (pick) u.voice = pick;
+  const pick = (voiceURI && speechSynthesis.getVoices().find((v) => v.voiceURI === voiceURI)) || null;
   // What this voice can carry, which is not always what the persona asked for.
-  const delivery = temper({ rate, pitch }, pick || null);
-  u.rate = delivery.rate;
-  u.pitch = delivery.pitch;
-  u.onstart = () => onStart?.();
-  u.onend = () => {
+  const base = temper({ rate, pitch }, pick);
+  const parts = intoSentences(said);
+
+  // Idempotent: the last sentence ending, an error anywhere, and a cancel can
+  // all reach this, and the caller must hear about it exactly once.
+  let settled = false;
+  const finish = () => {
+    if (settled || gen !== generation) return;
+    settled = true;
     current = null;
     onEnd?.();
   };
-  // A synthesis error must still release the caller, or hands-free mode waits
-  // forever for a voice that already failed.
-  u.onerror = () => {
-    current = null;
-    onEnd?.();
-  };
-  current = u;
-  speechSynthesis.speak(u);
+
+  const queued = parts.map((part, i) => {
+    const u = new SpeechSynthesisUtterance(part);
+    if (pick) u.voice = pick;
+    const c = contourFor(i, base);
+    u.rate = c.rate;
+    u.pitch = c.pitch;
+    if (i === 0) u.onstart = () => { if (gen === generation) onStart?.(); };
+    if (i === parts.length - 1) u.onend = finish;
+    // A failure part-way through leaves the rest of the queue playing into a
+    // caller that has already been told it finished, so the queue goes too.
+    u.onerror = () => {
+      if (gen !== generation) return;
+      speechSynthesis.cancel();
+      finish();
+    };
+    return u;
+  });
+
+  current = queued;
+  for (const u of queued) speechSynthesis.speak(u);
   return stopSpeaking;
 }
 
 export function stopSpeaking() {
   if (!canSpeak()) return;
+  // Bumped before the cancel, so the `onend` that some engines fire for the
+  // utterance being cut off is recognised as belonging to a dead run.
+  generation++;
   current = null;
   speechSynthesis.cancel();
 }

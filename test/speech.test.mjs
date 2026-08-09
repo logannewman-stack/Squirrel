@@ -7,7 +7,10 @@
  * arrives in a shape the parser already understands. Both were the difference
  * between "the microphone works" and "I can book a meeting by talking".
  */
-import { toSpeech, fromSpeech, voiceSettings, bestVoiceFor, inCharacter, temper } from "../src/lib/speech.js";
+import {
+  toSpeech, fromSpeech, voiceSettings, bestVoiceFor, inCharacter, temper,
+  intoSentences, contourFor, speak, stopSpeaking,
+} from "../src/lib/speech.js";
 import { parse } from "../src/lib/nlu/parse.js";
 
 let pass = 0, fail = 0;
@@ -318,6 +321,103 @@ for (const [heard, contains, time] of HEARD) {
     temper({ rate: 1, pitch: 1 }, compact).pitch === 1 && temper({ rate: 1, pitch: 1 }, compact).rate === 1);
   t("a hand-cranked pitch is still eased rather than ignored",
     temper({ rate: 1.6, pitch: 1 }, compact).rate === 1.3);
+}
+
+/* ------------------------------------------------------------------ ranges
+   A dash is a pause in an aside and a word in a range, and reading the second
+   as the first turned the list of free slots into disconnected times with no
+   way to tell a start from an end. */
+{
+  const say = (t) => toSpeech(t);
+  const open = say("Open time:\n8:00 AM–9:00 AM (1h)\n10:00 AM–2:00 PM (4h)");
+  t("a time range is spoken as a range", /8 AM to 9 AM/.test(open), open);
+  t("not as two separate times", !/8 AM, 9 AM/.test(open), open);
+  t("and the length beside it is an aside, not a bracket",
+    /9 AM, 1 hour/.test(open), open);
+
+  const hours = say("You work 8:00 AM to 7:00 PM, Mon–Fri, with 5h a day.");
+  t("a day range is spoken as one too", /Monday to Friday/.test(hours), hours);
+  t("a lone weekday abbreviation is said as the day",
+    /Saturday/.test(say("Nothing on Sat.")), say("Nothing on Sat."));
+  t("an em-dash aside is still a pause",
+    /Wide open, 0 minutes/.test(say("Wide open — 0m of meetings")), say("Wide open — 0m of meetings"));
+}
+
+/* --------------------------------------------------------------- delivery II
+   The flattest thing about browser speech is that an utterance carries one
+   pitch from start to finish. A reply is queued a sentence at a time so it can
+   move — which is only safe if the cuts land where a speaker would stop. */
+{
+  const parts = intoSentences("Very good, Mr. Newman. Booked an hour with Ronnie.");
+  t("a sentence split does not tear a name in half",
+    parts.length === 2 && parts[0] === "Very good, Mr. Newman.", JSON.stringify(parts));
+  t("nor a doctor", intoSentences("Ask Dr. Patel. Then call Bob.").length === 2,
+    JSON.stringify(intoSentences("Ask Dr. Patel. Then call Bob.")));
+  t("a question is its own sentence",
+    intoSentences("Move it to when? Give me a day.").length === 2);
+  t("one sentence stays one", intoSentences("Booked an hour.").length === 1);
+  t("nothing in, nothing out", intoSentences("").length === 0 && intoSentences(null).length === 0);
+
+  const base = { rate: 0.95, pitch: 0.9 };
+  t("the voice drifts down across a list", contourFor(3, base).pitch < contourFor(0, base).pitch);
+  t("and picks up a little speed", contourFor(3, base).rate > contourFor(0, base).rate);
+  t("the first sentence is the persona as written",
+    contourFor(0, base).pitch === 0.9 && contourFor(0, base).rate === 0.95);
+  t("and the drift is floored, not endless",
+    contourFor(40, base).pitch === contourFor(4, base).pitch, contourFor(40, base).pitch);
+  t("staying well inside a natural range",
+    contourFor(40, base).pitch > 0.85 && contourFor(40, base).rate < 1.05,
+    JSON.stringify(contourFor(40, base)));
+}
+
+/* -------------------------------------------------------- finishing exactly once
+   Hands-free reopens the microphone when she finishes. A reply queued as five
+   utterances must therefore report finishing once, at the end — and a reply
+   that was interrupted must not report finishing at all, or the microphone
+   opens on behalf of an answer nobody heard the end of. */
+{
+  const queue = [];
+  globalThis.SpeechSynthesisUtterance = function (text) { this.text = text; };
+  globalThis.speechSynthesis = {
+    speaking: false, pending: false,
+    getVoices: () => [{ name: "Daniel", lang: "en-GB", voiceURI: "daniel", localService: true }],
+    speak(u) { queue.push(u); },
+    cancel() { queue.length = 0; },
+  };
+
+  let ends = 0, starts = 0;
+  speak("You have three meetings on Friday.\nAt 9:00 AM you have Exec staff.\nAt 3:00 PM you have Board call.", {
+    voiceURI: "daniel", rate: 0.95, pitch: 0.9,
+    onStart: () => starts++, onEnd: () => ends++,
+  });
+  t("a multi-sentence reply is queued as several utterances", queue.length === 3, queue.length);
+  t("each with its own pitch", queue[0].pitch !== queue[2].pitch, `${queue[0].pitch} / ${queue[2].pitch}`);
+  t("all on the chosen voice", queue.every((u) => u.voice?.voiceURI === "daniel"));
+
+  queue[0].onstart?.();
+  t("it starts once, on the first", starts === 1, starts);
+  queue[0].onend?.();
+  queue[1].onend?.();
+  t("and does not report finishing part-way", ends === 0, ends);
+  queue[2].onend?.();
+  t("only at the end", ends === 1, ends);
+  queue[2].onend?.();
+  t("and only once, however often the engine says so", ends === 1, ends);
+
+  // Interrupted: she is cut off, and the caller must not be told she finished.
+  let ends2 = 0;
+  speak("A long answer. In several parts. Like this one.", {
+    voiceURI: "daniel", onEnd: () => ends2++,
+  });
+  t("a new reply replaces the last one rather than queueing behind it",
+    queue.every((u) => !/Exec staff/.test(u.text)), queue.map((u) => u.text).join(" | "));
+  const live = [...queue];
+  stopSpeaking();
+  live.at(-1).onend?.();
+  t("a cancelled reply never reports finishing", ends2 === 0, ends2);
+
+  delete globalThis.speechSynthesis;
+  delete globalThis.SpeechSynthesisUtterance;
 }
 
 console.log(`\nSpeech: ${pass} passed, ${fail} failed`);

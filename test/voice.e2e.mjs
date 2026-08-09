@@ -84,11 +84,18 @@ t("a dictated command books the meeting", ev?.title === "Meeting with Ronnie", e
 t("at the hour that was spoken", ev?.start.endsWith("T15:30:00"), ev?.start);
 
 // 3. She read the reply back.
+//
+// A reply is now queued one sentence at a time, so that the pitch can drift
+// across it the way a person's does and so Chrome cannot truncate a long day
+// at fifteen seconds. What must not change is *what* is said: the assertions
+// are on the whole of it rather than on a single utterance.
 const spoken = await p.evaluate(() => window.__spoken);
-t("and she reads the reply back", spoken.length === 1, JSON.stringify(spoken));
-t("once, not as a receipt and then an answer",
-  spoken[0] && !/Added .*\. Booked/.test(spoken[0]), spoken[0]);
-t("with the duration said as words", spoken[0]?.includes("1 hour"), spoken[0]);
+const heard = spoken.join(" ");
+t("and she reads the reply back", spoken.length >= 1, JSON.stringify(spoken));
+t("once, not as a receipt and then an answer", !/Added .*\. Booked/.test(heard), heard);
+t("with the duration said as words", heard.includes("1 hour"), heard);
+t("cut at sentence ends, never through a name",
+  !spoken.some((s) => /\b(?:Mr|Mrs|Ms|Mx|Dr)\.$/.test(s.trim())), JSON.stringify(spoken));
 
 // 4. Hands-free reopens the mic only when she asks something.
 const before = await p.evaluate(() => window.__recStarted);
