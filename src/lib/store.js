@@ -166,6 +166,49 @@ export const resetAll = () => {
 };
 
 /**
+ * A backup file, put back.
+ *
+ * Replace rather than merge. Merging two copies of the same week produces
+ * duplicates of everything that exists in both, and the person who reached for
+ * a backup wanted the state in the file — not the state in the file mixed with
+ * whatever was already here.
+ *
+ * Three things survive the replacement, because they describe *this device and
+ * this account* rather than the data in the file:
+ *
+ *   - the plan, which is a server fact and must not be settable by editing a
+ *     file in a text editor;
+ *   - the signed-in address, so restoring somebody's export does not rewrite
+ *     who is logged in;
+ *   - having been through the introduction, since you are demonstrably past it.
+ *
+ * Not undoable, and the caller says so before asking. Undo only covers the
+ * collections a normal edit touches, so an undoable restore would put four of
+ * them back and leave settings and the conversation from the file — which is
+ * worse than no undo, because it looks like it worked.
+ */
+export function restoreAll({ settings = {}, ...rows }) {
+  const s = read();
+  const at = Date.now();
+  // Dirty, so a signed-in device pushes the restored rows up rather than
+  // treating them as already-synced and letting the next pull delete them.
+  const restamp = (list) => (list || []).map((r) => ({ ...r, updatedAt: at, dirty: true }));
+  past = [];
+  commit(
+    toUuids({
+      ...EMPTY,
+      projects: restamp(rows.projects),
+      tasks: restamp(rows.tasks),
+      events: restamp(rows.events),
+      sessions: restamp(rows.sessions),
+      chat: rows.chat || [],
+      settings: { ...settings, email: s.settings?.email, onboarded: true },
+      plan: s.plan,
+    }),
+  );
+}
+
+/**
  * UUIDs, because Postgres holds these as `uuid` and a device that invents its
  * own key has to produce one the server will accept. Random enough that two
  * offline devices creating rows at the same moment cannot collide.

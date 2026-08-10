@@ -373,9 +373,22 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 }
 @keyframes sq-caret { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
 
+/* ------------------------------------------------------ arriving from search
+   Settings search opens a section and scrolls to the group you asked for, and
+   without this you arrive at a screen of near-identical cards with no idea
+   which one answered you. It fades on its own: the mark means "this one", and
+   a marker that stays is a marker somebody has to dismiss. Drawn as a ring
+   outside the card rather than a border, so nothing reflows as it goes. */
+.found > div { animation: sq-found 1.8s ease-out; }
+@keyframes sq-found {
+  0%, 35% { box-shadow: 0 0 0 3px var(--hover); }
+  100%    { box-shadow: 0 0 0 3px transparent; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sq-step { animation: none; }
   .sq-caret { animation: none; }
+  .found > div { animation: none; }
 }
 
 /* ==========================================================================

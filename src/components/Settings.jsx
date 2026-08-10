@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { setSetting, totals, resetAll } from "../lib/store";
 import Identity from "./Identity";
 import Account from "./Account";
@@ -12,7 +12,9 @@ import Calendars from "./Calendars";
 import SetupCheck from "./SetupCheck";
 import DeleteAccount from "./DeleteAccount";
 import Appearance from "./Appearance";
-import { Group, NavRow, SwitchRow, PanelRow } from "./ui";
+import Backup from "./Backup";
+import Shortcuts from "./Shortcuts";
+import { Group, NavRow, SwitchRow, ValueRow, PanelRow, groupId } from "./ui";
 import { configured as canSync } from "../lib/supabase";
 import { addressOf } from "../lib/nlu/voice";
 import { PLANS } from "../lib/plans";
@@ -20,6 +22,7 @@ import { voiceSettings } from "../lib/speech";
 import { readTheme } from "../lib/theme";
 import { duration } from "../lib/format";
 import { hoursOf, sayHour } from "../lib/hours";
+import { findSettings } from "../lib/settingsIndex";
 import { useIsDesktop } from "../hooks/useMediaQuery";
 
 /**
@@ -62,7 +65,31 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
   // Null is the index. A desktop never shows it — the rail is always there, so
   // there is nothing to go back to and no state to be in.
   const [open, setOpen] = useState(null);
+  const [query, setQuery] = useState("");
+  // Which group a search result asked for, so arriving somewhere is arriving at
+  // the thing rather than at the top of a section containing it.
+  const [found, setFound] = useState(null);
   const group = desktop ? (open ?? "account") : open;
+  const hits = findSettings(query);
+
+  /**
+   * Land on the group, not near it.
+   *
+   * The panel has to render before its groups exist to scroll to, so this runs
+   * after the commit that opened the section. The highlight fades on its own —
+   * it is there to say "this one", and a marker that stays is a marker that has
+   * to be dismissed.
+   */
+  useEffect(() => {
+    if (!found) return;
+    const el = document.getElementById(groupId(found));
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.classList.add("found");
+      setTimeout(() => el.classList.remove("found"), 1800);
+    }
+    setFound(null);
+  }, [found]);
 
   const confirms = state.settings?.confirm !== false;
   // Off unless explicitly turned on. It is the only setting in the app that can
@@ -74,13 +101,19 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
   const plan = PLANS[state.plan] ?? PLANS.free;
   const who = addressOf(state.settings?.identity || {});
   const theme = readTheme();
+  // Baked in by Vite. Absent under a bare `vite dev` of an older config, so it
+  // is read defensively rather than allowed to throw on a settings screen.
+  const version = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "—";
 
   /** The answer a row shows on its right, so the list reads without opening. */
   const summary = {
     account: state.settings?.email || "Not signed in",
     you: who || "No name",
     assistant: confirms ? "Confirms first" : "Acts straight away",
-    connections: canSync ? null : "Not available",
+    // Siri and reminders are here whether or not there is a backend, so the
+    // old "Not available" was answering for the whole section on behalf of one
+    // row in it.
+    connections: canSync ? "Calendars, Siri" : "Siri, reminders",
     data: `${state.projects.length + state.tasks.length + state.events.length} items`,
   };
 
@@ -177,6 +210,16 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
 
     connections: (
       <>
+        {/* First, because it is the one thing here iOS will never mention on
+            its own. The phrases are registered at install and surfaced by the
+            system nowhere, so an app either teaches them or ships a voice
+            feature nobody finds. */}
+        <Group
+          header="Siri & Shortcuts"
+          footer="Say any of these to Siri, or put them on the Action button. Anything that changes your calendar opens the app first, so you still see it read back."
+        >
+          <PanelRow><Shortcuts /></PanelRow>
+        </Group>
         <Group
           header="Calendars"
           footer={canSync
@@ -220,6 +263,16 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
           />
         </Group>
 
+        {/* The counterpart to erasing, and the answer to the one honest
+            objection to keeping everything on the device: what happens when
+            you get a new phone. */}
+        <Group
+          header="A copy of everything"
+          footer="One file with your projects, tasks, meetings, focus history and settings in it. Yours to keep — restore it on a new phone, or just hold on to it."
+        >
+          <PanelRow><Backup /></PanelRow>
+        </Group>
+
         {/* Erasing clears this device. Deleting removes the account itself,
             everywhere — a different thing, so it is said separately and asks
             for more than a tap. */}
@@ -228,6 +281,7 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
         </Group>
 
         <Group header="This build" footer="Only whether a key is set, never any part of its value.">
+          <ValueRow label="Version" value={version} />
           <PanelRow><SetupCheck /></PanelRow>
         </Group>
 
@@ -257,11 +311,61 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
         {!desktop && group ? "Settings" : "Back"}
       </button>
 
-      <h1 className="mb-6 mt-3 text-[34px] font-bold leading-tight tracking-[-0.02em]">
+      <h1 className="mb-4 mt-3 text-[34px] font-bold leading-tight tracking-[-0.02em]">
         {desktop ? "Settings" : title}
       </h1>
 
-      {desktop ? (
+      {/* Under the title, where iOS puts it. On a phone it belongs to the index
+          only — once you have pushed into a section there is one screen of
+          rows in front of you and nothing to search. A desktop keeps its rail
+          visible the whole time, so the field stays too. */}
+      {(desktop || !group) && (
+        <div className="relative mb-6">
+          <svg viewBox="0 0 24 24" aria-hidden
+               className="pointer-events-none absolute left-3.5 top-1/2 h-[17px] w-[17px] -translate-y-1/2
+                          fill-none stroke-[var(--faint)] stroke-[2.2]">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M16.5 16.5L21 21" strokeLinecap="round" />
+          </svg>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search settings"
+            aria-label="Search settings"
+            className="h-[38px] w-full rounded-xl border border-[var(--line)] bg-[var(--paper)] pl-10 pr-3
+                       text-[15px] outline-none transition-colors placeholder:text-[var(--faint)]
+                       focus:border-[var(--ink)]"
+          />
+        </div>
+      )}
+
+      {query.trim() ? (
+        /* Results stand in for the whole screen rather than sitting above it.
+           A list of matches with the untouched settings still below is two
+           things to read at the moment somebody has already told you exactly
+           what they were looking for. */
+        hits.length ? (
+          <Group footer="Tap one to go straight to it.">
+            {hits.map((h) => (
+              <NavRow
+                key={`${h.group}:${h.header}`}
+                label={h.title}
+                value={h.section}
+                onPress={() => {
+                  setOpen(h.group);
+                  setQuery("");
+                  setFound(h.header);
+                }}
+              />
+            ))}
+          </Group>
+        ) : (
+          <p className="px-4 py-8 text-center text-[15px] text-[var(--muted)]">
+            Nothing here matches “{query.trim()}”.
+          </p>
+        )
+      ) : desktop ? (
         <div className="grid grid-cols-[13rem_1fr] gap-8">
           <nav aria-label="Settings sections" className="flex flex-col gap-0.5">
             {GROUPS.map((g) => (
@@ -296,7 +400,7 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
       {/* A quiet standing summary under the index, the way iOS puts the account
           and the device at the top of its own. Only where there is nothing else
           on screen to read. */}
-      {!desktop && !group && (
+      {!desktop && !group && !query.trim() && (
         <Group className="mt-7" header="At a glance"
                footer="Tap any section above to change these.">
           <NavRow label="Plan" value={plan.name} onPress={() => setOpen("account")} />

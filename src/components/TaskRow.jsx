@@ -14,11 +14,19 @@ function dueLabel(due) {
   return new Date(due + "T00:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-export default function TaskRow({ task, project, onToggle, onFocus, onDelete, showProject }) {
+/**
+ * `note` is a word in the top-right corner saying why this row is on the screen
+ * it is on — "Overdue", "Due today". It belongs in here rather than in a
+ * wrapper around it: Today used to wrap this in a second `<li>` to position the
+ * badge, which put a list item inside a list item. Invalid HTML, and assistive
+ * technology announces the nesting.
+ */
+export default function TaskRow({ task, project, onToggle, onFocus, onDelete, showProject, note }) {
   const late = task.due && task.due < dayKey() && !task.done;
 
   return (
-    <li className="group flex items-center gap-3 py-2.5">
+    <li className="group relative flex items-center gap-3 py-2.5">
+      {note}
       <button
         onClick={onToggle}
         aria-label={task.done ? "Mark not done" : "Mark done"}

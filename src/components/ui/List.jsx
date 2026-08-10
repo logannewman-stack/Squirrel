@@ -28,9 +28,20 @@
  * `footer` is where the explaining goes. Anything long enough not to fit there
  * is a sign the setting needs a better name rather than a longer note.
  */
+/**
+ * A stable anchor for a group, derived from its heading.
+ *
+ * Settings search needs somewhere to land: finding "dark mode" and being
+ * dropped at the top of a section with six groups in it is barely better than
+ * not finding it. Only one panel is on screen at a time, so two groups sharing
+ * a heading in different sections cannot collide in the document.
+ */
+export const groupId = (header) =>
+  `g-${String(header).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+
 export function Group({ header, footer, children, className = "" }) {
   return (
-    <section className={className}>
+    <section className={className} id={header ? groupId(header) : undefined}>
       {header && (
         <h2 className="mb-1.5 px-4 text-[13px] font-medium text-[var(--muted)]">{header}</h2>
       )}

@@ -315,11 +315,17 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
           ) : (
             <ul className="divide-y divide-[var(--hairline)]">
               {plate.map(({ task, why }) => (
-                <li key={task.id} className="relative">
-                  {/* The reason it is here, said once and quietly. Without it a
-                      list of five tasks is five equal things, and the overdue
-                      one reads the same as the one merely planned. */}
-                  {why !== "planned" && (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  project={state.projects.find((x) => x.id === task.projectId)}
+                  showProject
+                  onToggle={() => toggleTask(task.id)}
+                  onFocus={() => onFocus(task)}
+                  /* The reason it is here, said once and quietly. Without it a
+                     list of five tasks is five equal things, and the overdue
+                     one reads the same as the one merely planned. */
+                  note={why !== "planned" && (
                     <span
                       className={`absolute right-0 top-3 text-[10px] font-semibold uppercase tracking-wider ${
                         why === "overdue" ? "alert" : "text-[var(--faint)]"
@@ -328,14 +334,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
                       {why === "overdue" ? "Overdue" : "Due today"}
                     </span>
                   )}
-                  <TaskRow
-                    task={task}
-                    project={state.projects.find((x) => x.id === task.projectId)}
-                    showProject
-                    onToggle={() => toggleTask(task.id)}
-                    onFocus={() => onFocus(task)}
-                  />
-                </li>
+                />
               ))}
             </ul>
           )}

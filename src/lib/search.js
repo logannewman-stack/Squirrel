@@ -27,7 +27,12 @@ import { dayKey } from "./store.js";
  */
 
 const WORD = /[a-z0-9]+/gi;
-const tokens = (s) => String(s ?? "").toLowerCase().match(WORD) ?? [];
+/**
+ * Exported, along with `score` below, because Settings searches too — and two
+ * search fields in one app that disagree about what "voice" matches is the
+ * kind of inconsistency nobody can name and everybody stops trusting.
+ */
+export const tokens = (s) => String(s ?? "").toLowerCase().match(WORD) ?? [];
 
 /**
  * How well one token matches one field. Zero means not at all, and one zero
@@ -46,7 +51,7 @@ function tokenScore(token, haystack) {
 }
 
 /** A row's score for the whole query, or 0 if any token is missing. */
-function score(query, fields) {
+export function score(query, fields) {
   let total = 0;
   for (const token of query) {
     let best = 0;
