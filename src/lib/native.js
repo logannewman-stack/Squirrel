@@ -119,6 +119,22 @@ export async function startNative() {
     App.addListener("appStateChange", ({ isActive }) => {
       if (isActive) dispatchEvent(new Event("squirrel:resumed"));
     });
+    /**
+     * The bridge the widget snapshot goes over.
+     *
+     * Installed as a global rather than imported, so `widget.js` stays a plain
+     * module the tests can run under Node — and so its absence on the web is
+     * the ordinary case rather than a missing dependency.
+     */
+    try {
+      const { registerPlugin } = await import("@capacitor/core");
+      const bridge = registerPlugin("SquirrelBridge");
+      const { available } = await bridge.widgetAvailable();
+      if (available) {
+        globalThis.__SQUIRREL_WRITE_WIDGET__ = (snapshot) => bridge.writeWidget(snapshot);
+      }
+    } catch { /* no plugin in this build; the app is unaffected */ }
+
     // A universal link or a custom-scheme URL opened us. The plan is re-read
     // either way, because the commonest reason to arrive this way is having
     // just paid — and the URL is passed on, because the second commonest is

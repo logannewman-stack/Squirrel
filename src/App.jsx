@@ -27,6 +27,7 @@ import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
 import { clearResolver } from "./lib/nlu/fallback";
 import { takeRequest, onRequest } from "./lib/intent";
+import { publishWidget } from "./lib/widget";
 import { distribute } from "./lib/schedule";
 import { planOpts } from "./lib/hours";
 // Aliased: `pending` is already the task waiting for a focus length in this
@@ -89,6 +90,10 @@ export default function App() {
     let n = 0;
     const accept = (req) => {
       if (!req) return;
+      // A screen to open, a sentence to run, or both. "squirrel://today" from
+      // the Action button carries no words and still means something.
+      if (req.route) setView({ name: req.route });
+      if (!req.text) return;
       setRequest({ ...req, id: `${Date.now()}-${n++}` });
       setAssistantOpen(true);
     };
@@ -149,6 +154,20 @@ export default function App() {
 
   // Any local write is worth sending; nudge coalesces the burst from typing.
   useEffect(() => nudge(), [state.projects, state.tasks, state.events]);
+
+  /**
+   * Keep the Home Screen and Siri honest.
+   *
+   * Both read a snapshot the web layer writes, because the planner lives here
+   * and a second one in Swift would disagree with it inside a month. Published
+   * whenever the plan or the day changes — which is also what makes "hey Siri,
+   * what's on today" answerable without launching anything.
+   *
+   * A no-op in a browser, where the bridge was never installed.
+   */
+  useEffect(() => {
+    publishWidget(state);
+  }, [state.blocks, state.events, state.tasks]);
 
   // Which tier this account is on, from the server rather than from anything
   // the browser could talk itself into. Re-read whenever the session changes,

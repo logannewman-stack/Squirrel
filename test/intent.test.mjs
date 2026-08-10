@@ -8,7 +8,7 @@
  * assistant that *changes your calendar* that is not cosmetic. Refresh the page
  * and the meeting is booked twice.
  */
-import { takeRequest, askUrl } from "../src/lib/intent.js";
+import { takeRequest, askUrl, takeRoute } from "../src/lib/intent.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -99,6 +99,30 @@ const at = (search, pathname = "/") => {
   );
   t("and reads back as what went in", round.text === "move my 3pm" && round.source === "widget",
     JSON.stringify(round));
+}
+
+// ------------------------------------------------------------------- routes
+/**
+ * "squirrel://today" from the Action button, and the widget's tap target. The
+ * app opens either way; without a route it opens on whatever screen it was
+ * left on, which for somebody who just asked for their day is the wrong one.
+ */
+{
+  t("a known screen is opened", takeRoute({ pathname: "/today" }) === "today");
+  t("and the others too",
+    ["calendar", "projects", "insights"].every((v) => takeRoute({ pathname: `/${v}` }) === v));
+
+  // A closed list rather than whatever the path says. These arrive from Siri,
+  // a widget, and anything at all somebody builds in Shortcuts.
+  t("an unknown screen is refused", takeRoute({ pathname: "/settings" }) === null);
+  t("so is a path that is trying something",
+    takeRoute({ pathname: "/../admin" }) === null && takeRoute({ pathname: "//evil" }) === null);
+  t("the root is not a route", takeRoute({ pathname: "/" }) === null);
+  t("and nothing does not throw", takeRoute(undefined) === null && takeRoute({}) === null);
+
+  // The host is never read: on the web it is the domain.
+  t("a domain is not mistaken for a screen",
+    takeRoute({ hostname: "today.example.com", pathname: "/" }) === null);
 }
 
 console.log(`\nIntent: ${pass} passed, ${fail} failed`);

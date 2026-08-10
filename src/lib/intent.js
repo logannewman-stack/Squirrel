@@ -27,6 +27,31 @@
 export const SOURCES = ["url", "siri", "shortcut", "widget"];
 
 /**
+ * Places an outside link is allowed to land.
+ *
+ * A closed list rather than "whatever the path says". These arrive from Siri,
+ * a widget and anything anybody builds in Shortcuts, and a view name taken on
+ * trust is a way for an outside caller to steer the app somewhere it has no
+ * business being.
+ */
+const ROUTES = { today: "today", calendar: "calendar", projects: "projects", insights: "insights" };
+
+/**
+ * Where a URL says to go, if it says anywhere.
+ *
+ * `squirrel://today` from the Action button, and the widget's tap target. The
+ * app opens either way; without this it opens on whatever screen it was left
+ * on, which for somebody who just asked for their day is the wrong one.
+ */
+export function takeRoute(loc = globalThis.location) {
+  // The path alone. In `squirrel://today` the word is the URL's *host*, but the
+  // scheme swap in `onRequest` moves it into the path before this sees it — and
+  // on the web the host is the domain, which must never be read as a route.
+  const raw = String(loc?.pathname || "").replace(/\//g, "").toLowerCase();
+  return ROUTES[raw] ?? null;
+}
+
+/**
  * Read a pending request out of the current URL, and remove it.
  *
  * @returns {{text: string, source: string, speak: boolean} | null}
@@ -96,7 +121,10 @@ export function onRequest(fn) {
       // Nothing to rewrite: this URL was never in the address bar.
       null,
     );
-    if (req) fn(req);
+    const route = takeRoute({ pathname: parsed.pathname });
+    // A sentence to run, a screen to open, or both. "squirrel://today" carries
+    // no words and still means something.
+    if (req || route) fn({ ...(req ?? { text: "", source: "url", speak: false }), route });
   };
   addEventListener("squirrel:url", handler);
   return () => removeEventListener("squirrel:url", handler);

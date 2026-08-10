@@ -155,8 +155,18 @@ t("a reload lands in the app, not back at the welcome",
 t("the meeting made during setup is still there", landed.events.length === 1, JSON.stringify(landed.events));
 t("and the task", landed.tasks.length === 1, JSON.stringify(landed.tasks));
 t("and the conversation came with them", landed.chat >= 4, landed.chat);
-t("the app is not empty on the first screen",
-  /Priya/.test(await p.locator("body").innerText()));
+/**
+ * Date-independent on purpose. Whether the Thursday meeting or the Friday task
+ * is the thing visible on Today depends on what day it is when this runs — and
+ * an assertion that only holds in one week of the year is a test that fails
+ * later for a reason nobody remembers. What must be true is that the screen is
+ * carrying what was made during setup, in one form or another.
+ */
+{
+  const landed = await p.locator("body").innerText();
+  t("the app is not empty on the first screen",
+    /Priya|board deck/i.test(landed), landed.replace(/\s+/g, " ").slice(0, 160));
+}
 
 t("no page errors", errs.length === 0, errs.join(" · "));
 
