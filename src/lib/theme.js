@@ -66,14 +66,38 @@ export function setTheme(choice) {
     globalThis.localStorage?.setItem(KEY, next);
   } catch { /* nothing to do; the page still changes for this session */ }
   applyTheme(next);
-  for (const fn of watchers) fn(next);
+  announce(next);
   return next;
 }
 
 const watchers = new Set();
+
+/**
+ * Told whenever the *appearance* changes — which is not the same as whenever
+ * the choice changes.
+ *
+ * On "system", a Mac flipping itself at sunset changes how the app looks
+ * without anybody choosing anything, and everything drawing itself from the
+ * resolved value has to hear about it. Before this, the panel that reads
+ * "Currently light, because that's what this device is set to" went on saying
+ * light after the machine had gone dark around it — the app was right and its
+ * own description of itself was wrong.
+ *
+ * The listener gets the choice; ask `resolveTheme()` for what that came out as.
+ */
 export function onThemeChange(fn) {
   watchers.add(fn);
   return () => watchers.delete(fn);
+}
+
+function announce(choice) {
+  for (const fn of watchers) fn(choice);
+  // A DOM event as well as the callbacks, because the native shell needs this
+  // too and `native.js` is loaded for its own reasons rather than subscribed
+  // from a component. See the status bar in `startNative`.
+  globalThis.dispatchEvent?.(
+    new CustomEvent("squirrel:theme", { detail: { choice, resolved: resolveTheme(choice) } }),
+  );
 }
 
 /**
@@ -87,6 +111,10 @@ export function startTheme() {
   applyTheme();
   const media = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
   media?.addEventListener?.("change", () => {
-    if (readTheme() === "system") applyTheme("system");
+    // Only when the system is the one being followed. Somebody who chose Light
+    // chose it on purpose, and sunset is not a reason to overrule them.
+    if (readTheme() !== "system") return;
+    applyTheme("system");
+    announce("system");
   });
 }

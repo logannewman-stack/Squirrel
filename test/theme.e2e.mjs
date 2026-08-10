@@ -72,6 +72,70 @@ for (const system of ["light", "dark"]) {
   await p.close();
 }
 
+/* ---------------------------------------------- the machine changing its mind
+ * A Mac flips itself at sunset while the app is sitting open. "Follows the
+ * system" has to mean following it *then*, not on the next reload — which is
+ * all a theme built from a boot-time read can manage.
+ */
+{
+  const p = await b.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: "light" });
+  const errs = [];
+  p.on("pageerror", (e) => errs.push(e.message));
+  const bg = () => p.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const says = async () => (await p.locator("body").innerText()).match(/Currently \w+/)?.[0] ?? "nothing";
+
+  await p.goto("http://localhost:5173/", { waitUntil: "networkidle" });
+  await p.evaluate(() => {
+    localStorage.removeItem("squirrel.v2");
+    localStorage.removeItem("squirrel.theme");
+  });
+  await p.reload({ waitUntil: "networkidle" });
+  await skipOnboarding(p);
+  await p.getByRole("button", { name: "Settings" }).first().click();
+  await p.getByRole("button", { name: "You", exact: true }).click();
+  await p.waitForTimeout(300);
+
+  t("on System the app starts as the machine is", (await bg()) === LIGHT, await bg());
+  t("and says so", (await says()) === "Currently light", await says());
+
+  await p.emulateMedia({ colorScheme: "dark" });
+  await p.waitForTimeout(300);
+  t("the machine going dark takes the app with it, with no reload",
+    (await bg()) === DARK, await bg());
+  /**
+   * The app itself was already right here; its description of itself was not.
+   * The line went on reading "Currently light" after the machine had gone dark
+   * around it, because only an explicit choice notified anything.
+   */
+  t("and what it says about itself changes with it", (await says()) === "Currently dark", await says());
+  t("leaving nothing stamped on the page, so it can change again",
+    (await p.evaluate(() => document.documentElement.getAttribute("data-theme"))) === null);
+  t("with the native chrome given the resolved answer",
+    (await p.evaluate(() => document.documentElement.style.colorScheme)) === "dark");
+
+  await p.emulateMedia({ colorScheme: "light" });
+  await p.waitForTimeout(300);
+  t("and back again at dawn", (await bg()) === LIGHT, await bg());
+
+  // Somebody who chose Light chose it on purpose, and sunset is not a reason
+  // to overrule them.
+  await p.getByRole("button", { name: /^Light/ }).first().click();
+  await p.waitForTimeout(200);
+  await p.emulateMedia({ colorScheme: "dark" });
+  await p.waitForTimeout(300);
+  t("a deliberate choice is not overruled when the machine changes",
+    (await bg()) === LIGHT, await bg());
+  t("and is still on the page as a choice",
+    (await p.evaluate(() => document.documentElement.getAttribute("data-theme"))) === "light");
+
+  await p.getByRole("button", { name: /^System/ }).first().click();
+  await p.waitForTimeout(250);
+  t("handing it back picks up wherever the machine got to", (await bg()) === DARK, await bg());
+
+  t("no page errors while the machine changes", errs.length === 0, errs.join(" · "));
+  await p.close();
+}
+
 await b.close();
 const failed = out.filter(([, ok]) => !ok);
 console.log(`\nTheme: ${out.length - failed.length} passed, ${failed.length} failed`);

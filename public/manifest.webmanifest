@@ -4,8 +4,8 @@
   "description": "A focus app for ADHD brains. Starting is the feature.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
+  "background_color": "#f7f7f8",
+  "theme_color": "#f7f7f8",
   "icons": [
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "/icon-1024.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any maskable" }

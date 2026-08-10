@@ -34,7 +34,18 @@ const ICONS = {
 
 export default function Appearance() {
   const [choice, setChoice] = useState(readTheme);
-  useEffect(() => onThemeChange(setChoice), []);
+  /**
+   * The resolved appearance is tracked separately from the choice, and has to
+   * be: on "System" a Mac going dark at sunset changes what the app looks like
+   * without changing what was chosen. Holding only the choice meant React saw
+   * "system" before and after, skipped the render, and the line at the bottom
+   * went on claiming "Currently light" over a dark app.
+   */
+  const [resolved, setResolved] = useState(resolveTheme);
+  useEffect(() => onThemeChange((next) => {
+    setChoice(next);
+    setResolved(resolveTheme(next));
+  }), []);
 
   return (
     <div>
@@ -67,7 +78,7 @@ export default function Appearance() {
       </div>
       {choice === "system" && (
         <p className="mt-3 text-xs text-[var(--muted)]">
-          Currently {resolveTheme("system")}, because that's what this device is set to.
+          Currently {resolved}, because that's what this device is set to.
         </p>
       )}
     </div>

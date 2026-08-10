@@ -16,6 +16,8 @@
  * fixing them is most of the distance between "a website in a box" and an app.
  */
 
+import { resolveTheme } from "./theme.js";
+
 const cap = () => globalThis.Capacitor ?? null;
 
 /** Is this the native shell rather than a browser tab? */
@@ -88,12 +90,23 @@ export async function startNative() {
     // The web view runs under the status bar so the header can sit against the
     // top edge; the safe-area padding in the CSS is what keeps text clear of it.
     await StatusBar.setOverlaysWebView({ overlay: true });
-    // Follow the system rather than pinning one. A light status bar over a dark
-    // app is the single most common giveaway that a shell was an afterthought.
-    const dark = matchMedia("(prefers-color-scheme: dark)");
-    const follow = () => StatusBar.setStyle({ style: dark.matches ? Style.Dark : Style.Light }).catch(() => {});
+    /**
+     * Follow the *app*, not the phone.
+     *
+     * This read `prefers-color-scheme` directly, which is right in the ordinary
+     * case and wrong in the one that matters: somebody on a dark phone who
+     * chose Light got a light app with light status-bar glyphs on top of it,
+     * which is invisible. The status bar sits on the app, so the app's resolved
+     * appearance is the only thing it should follow.
+     *
+     * `Style.Dark` means light glyphs for a dark background, and vice versa.
+     */
+    const follow = () =>
+      StatusBar.setStyle({ style: resolveTheme() === "dark" ? Style.Dark : Style.Light }).catch(() => {});
     follow();
-    dark.addEventListener("change", follow);
+    // Fires both for a choice made in Settings and for the system changing
+    // under a "System" choice — theme.js works out which of those happened.
+    addEventListener("squirrel:theme", follow);
   } catch { /* not available on this platform */ }
 
   try {

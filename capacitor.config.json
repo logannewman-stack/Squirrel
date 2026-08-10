@@ -5,8 +5,7 @@
   "ios": {
     "contentInset": "never",
     "scrollEnabled": true,
-    "limitsNavigationsToAppBoundDomains": true,
-    "backgroundColor": "#ffffff"
+    "limitsNavigationsToAppBoundDomains": true
   },
   "server": {
     "iosScheme": "https"

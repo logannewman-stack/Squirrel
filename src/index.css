@@ -209,13 +209,26 @@ body {
   border-radius: 6px;
 }
 
+/* ------------------------------------------------------- the two stragglers
+   Both of these followed `prefers-color-scheme` alone, which is the bug the
+   palette above is written in three parts to avoid: choose Light on a dark
+   phone and the date picker stayed dark and the logo stayed inverted, on an
+   otherwise correctly light page. So they take the same shape as everything
+   else — the media query yields to an explicit Light, and an explicit Dark
+   wins on a light machine. */
 input[type="date"], input[type="time"] { color-scheme: light; }
 @media (prefers-color-scheme: dark) {
-  input[type="date"], input[type="time"] { color-scheme: dark; }
+  :root:not([data-theme="light"]) input[type="date"],
+  :root:not([data-theme="light"]) input[type="time"] { color-scheme: dark; }
 }
+:root[data-theme="dark"] input[type="date"],
+:root[data-theme="dark"] input[type="time"] { color-scheme: dark; }
 
 /* The mark is authored black; invert rather than shipping a second file. */
-@media (prefers-color-scheme: dark) { .logo { filter: invert(1); } }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo { filter: invert(1); }
+}
+:root[data-theme="dark"] .logo { filter: invert(1); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 3px solid var(--paper); }
