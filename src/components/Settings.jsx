@@ -112,6 +112,20 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
         <Group header="Appearance" footer="System follows your Mac or phone, including when it changes at sunset.">
           <PanelRow><Appearance /></PanelRow>
         </Group>
+        <Group
+          header="The introduction"
+          footer="The screens from your first run. Nothing you've made is touched — it walks the same setup again and hands you back here."
+        >
+          <NavRow
+            label="Play it again"
+            onPress={() => {
+              // Only the flag. Wiping anything would make "show me that again"
+              // a destructive act, which is not what those words mean.
+              setSetting("onboarded", false);
+              onBack?.();
+            }}
+          />
+        </Group>
       </>
     ),
 
@@ -142,6 +156,16 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
             />
           </Group>
         )}
+        <Group
+          header="End of the day"
+          footer="Once your working day is over, on a screen you already have open: what got finished, and what to do about anything that didn't. Never twice, and never on a day with nothing in it."
+        >
+          <SwitchRow
+            label="Look back at the end of the day"
+            on={state.settings?.review !== false}
+            onChange={() => setSetting("review", state.settings?.review === false)}
+          />
+        </Group>
         <Group
           header="What she missed"
           footer="Every message she couldn't act on, so the gaps are a list rather than a feeling."

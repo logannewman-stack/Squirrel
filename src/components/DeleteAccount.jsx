@@ -23,7 +23,26 @@ export default function DeleteAccount({ email }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  if (!email) return null;
+  /**
+   * Signed out, this rendered nothing at all — which is wrong twice over.
+   *
+   * A reviewer checking for the deletion control finds a blank space and no
+   * explanation, and Apple treats "we could not find it" the same as "it is not
+   * there". And a person who *is* signed out still deserves an answer to "how
+   * do I get rid of this", rather than silence where a control should be.
+   *
+   * So the section always says something. Where there is no account, the honest
+   * answer is that there is nothing on a server to delete.
+   */
+  if (!email) {
+    return (
+      <p className="text-[15px] leading-relaxed text-[var(--muted)]">
+        You don't have an account, so there's nothing on a server to delete. Everything
+        Squirrel knows is on this device — <span className="text-[var(--ink)]">Erase everything</span>{" "}
+        above removes all of it.
+      </p>
+    );
+  }
 
   async function go() {
     setBusy(true);
