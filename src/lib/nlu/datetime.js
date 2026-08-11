@@ -375,6 +375,19 @@ export function parseTime(text) {
 }
 
 /**
+ * Which way round a bare "8/5" is read.
+ *
+ * Only consulted when both readings are real dates *and* both are still ahead,
+ * because in that one case there is genuinely nothing in the sentence to settle
+ * it — it is where the user learned to write dates, not anything about the
+ * words. A setting rather than a guess, and defaulted to the reading this
+ * parser has always used so that nobody's existing dates move underneath them.
+ * An app that knows its user is British calls `setDateOrder("dmy")` at startup.
+ */
+let DATE_ORDER = "mdy";
+export const setDateOrder = (order) => { DATE_ORDER = order === "dmy" ? "dmy" : "mdy"; };
+
+/**
  * Extract a calendar date.
  * @param {string} text
  * @param {Date} now
@@ -429,8 +442,13 @@ export function parseDate(text, now = new Date()) {
 
   // "aug 5", "5 august", "august 5th"
   const monthNames = Object.keys(MONTHS).join("|");
-  const md = s.match(new RegExp(`\\b(${monthNames})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`));
-  const dm = s.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthNames})\\b`));
+  // `of` is optional and load-bearing. "The 3rd of September" is how a date is
+  // written out loud nearly everywhere, and without it the two halves were
+  // never adjacent — so the bare-ordinal rule far below took "the 3rd", threw
+  // the month away, and booked *today*. Confidently, on the commonest long form
+  // of a date there is.
+  const md = s.match(new RegExp(`\\b(${monthNames})\\.?\\s+(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\b`));
+  const dm = s.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNames})\\b`));
   if (md || dm) {
     const month = MONTHS[(md ? md[1] : dm[2])];
     const day = Number(md ? md[2] : dm[1]);
@@ -441,21 +459,92 @@ export function parseDate(text, now = new Date()) {
     return { date: new Date(year, month, day), source: (md || dm)[0] };
   }
 
-  // 8/5 — day/month order is locale-dependent, so only accept the
-  // unambiguous US reading when the first number cannot be a day-of-month
-  // in the other reading, and otherwise leave it alone.
+  /**
+   * 8/5 — day/month or month/day, which is a fact about the user rather than
+   * about the sentence.
+   *
+   * What was here claimed to accept only the unambiguous reading and in fact
+   * read every pair as month/day. So "25/12" — Christmas, to most of the
+   * English-speaking world — parsed as nothing at all, and "3/9" booked the 9th
+   * of March. Three passes, in order of how much evidence there is:
+   *
+   *   1. only one reading is a real date  → take it            ("25/12", "13/9")
+   *   2. both real, one already behind    → take the one ahead ("3/9", "1/9")
+   *   3. both real and both ahead         → `DATE_ORDER`       ("12/8")
+   *
+   * The second pass is the same reasoning the month-name branch above already
+   * uses to roll a date into next year, and it is sound here for the same
+   * reason: this is a planner, and a date being asked for is a date ahead.
+   * Only the third pass is a guess, and it is the one that is now a setting.
+   */
   const slash = s.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
   if (slash) {
     const a = Number(slash[1]);
     const b = Number(slash[2]);
-    if (a <= 12 && b <= 31) {
-      const year = slash[3] ? Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3]) : now.getFullYear();
-      return { date: new Date(year, a - 1, b), source: slash[0] };
+    const year = slash[3] ? Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3]) : now.getFullYear();
+    const made = (mo, day) =>
+      mo >= 1 && mo <= 12 && day >= 1 && day <= 31 ? new Date(year, mo - 1, day) : null;
+    const mdy = made(a, b);
+    const dmy = made(b, a);
+    let picked = mdy && dmy ? null : (mdy || dmy);
+    if (mdy && dmy) {
+      if (mdy.getTime() === dmy.getTime()) picked = mdy;
+      else {
+        const aheadM = mdy >= base;
+        const aheadD = dmy >= base;
+        picked = aheadM === aheadD ? (DATE_ORDER === "dmy" ? dmy : mdy) : (aheadM ? mdy : dmy);
+      }
+    }
+    if (picked) {
+      if (!slash[3] && picked < base - 86400000 * 180) picked.setFullYear(picked.getFullYear() + 1);
+      return { date: picked, source: slash[0] };
     }
   }
 
-  // Weekdays: "monday", "next monday", "this friday"
   const wdNames = Object.keys(WEEKDAYS).join("|");
+
+  /**
+   * "Tues 14th." "Tuesday the 14th."
+   *
+   * The weekday is agreement and the number is the date. Read before the plain
+   * weekday match below, which took the coming Tuesday and ignored the number
+   * entirely — so a booking for the 14th landed on the 4th, ten days early,
+   * under a confirmation naming the right weekday. The ordinal suffix is
+   * required, so "monday 9am" and "thursday 2 to 4" are untouched.
+   */
+  const wdOrd = s.match(new RegExp(`\\b(?:${wdNames})\\s+(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)\\b`));
+  if (wdOrd) {
+    const n = Number(wdOrd[1]);
+    if (n >= 1 && n <= 31) {
+      const d = new Date(base.getFullYear(), base.getMonth(), n);
+      if (d < base) d.setMonth(d.getMonth() + 1);
+      return { date: d, source: wdOrd[0] };
+    }
+  }
+
+  /**
+   * "A week on Tuesday." "Tuesday week." "A fortnight on Monday."
+   *
+   * The day in the week *after* the coming one — ordinary British, Irish,
+   * Australian and New Zealand phrasing, and "a week from Tuesday" is the
+   * American form of the same thing. All of them read as the plain weekday
+   * below, so every one booked exactly seven days early: wrong by a whole week,
+   * silently, in the direction that makes somebody miss what they arranged.
+   */
+  const weekOut = s.match(new RegExp(
+    `\\b(?:(?:an?|one|1)\\s+(week|fortnight)\\s+(?:on\\s+|from\\s+)?(${wdNames})` +
+    `|(${wdNames})\\s+(week|fortnight))\\b`));
+  if (weekOut) {
+    const unit = weekOut[1] || weekOut[4];
+    const target = WEEKDAYS[weekOut[2] || weekOut[3]];
+    const d = new Date(base);
+    let delta = (target - d.getDay() + 7) % 7;
+    if (delta === 0) delta = 7;
+    d.setDate(d.getDate() + delta + (unit === "fortnight" ? 14 : 7));
+    return { date: d, source: weekOut[0] };
+  }
+
+  // Weekdays: "monday", "next monday", "this friday"
   const wd = s.match(new RegExp(`\\b(next|this|coming)?\\s*(${wdNames})\\b`));
   if (wd) {
     const target = WEEKDAYS[wd[2]];
@@ -472,12 +561,17 @@ export function parseDate(text, now = new Date()) {
   }
 
   // "in 3 days", "in a couple of days", "in two weeks", "in a month"
-  const inN = s.match(new RegExp(`\\bin\\s+(?:an?\\s+)?(\\d+|${NUM_WORDS})\\s*(?:of\\s+)?(day|week|month)s?\\b`));
+  // `fortnight` is a unit here rather than a phrase of its own, because "in a
+  // fortnight" is how a fortnight is nearly always said and it parsed as
+  // nothing at all. The count is optional for the same reason — there is no
+  // number in "in a fortnight".
+  const inN = s.match(new RegExp(`\\bin\\s+(?:an?\\s+)?(\\d+|${NUM_WORDS})?\\s*(?:of\\s+)?(day|week|fortnight|month)s?\\b`));
   if (inN) {
-    const n = /^\d+$/.test(inN[1]) ? Number(inN[1]) : WORD_NUMBERS[inN[1]];
+    const n = inN[1] === undefined ? 1 : /^\d+$/.test(inN[1]) ? Number(inN[1]) : WORD_NUMBERS[inN[1]];
     const d = new Date(base);
     if (inN[2] === "day") d.setDate(d.getDate() + n);
     else if (inN[2] === "week") d.setDate(d.getDate() + n * 7);
+    else if (inN[2] === "fortnight") d.setDate(d.getDate() + n * 14);
     else d.setMonth(d.getMonth() + n);
     return { date: d, source: inN[0] };
   }
@@ -748,7 +842,9 @@ export function parseRange(text, now = new Date(), opts = {}) {
     return { from: now, to, label: `the next ${n} ${nextN[2]}${n === 1 ? "" : "s"}`, scope: "span" };
   }
 
-  if (/\bthis weekend\b/.test(s)) {
+  // "At the weekend" is how the weekend is named outside America, where it is
+  // "on the weekend" or "this weekend". The same two days either way.
+  if (/\b(?:this|at the|over the|for the|during the|on the)\s+weekend\b/.test(s)) {
     const sat = new Date(today);
     sat.setDate(sat.getDate() + ((6 - sat.getDay() + 7) % 7));
     return clamp({ from: sat, to: nextDay(sat, 2), label: "this weekend", scope: "span" });

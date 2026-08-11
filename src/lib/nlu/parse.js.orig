@@ -423,13 +423,11 @@ const BARE_BOOKING =
  * direction is decoration: "move it back to Friday at 2" is a move to Friday,
  * not a shift backwards.
  */
-// `prepone` is a direction all by itself — it *means* earlier, which is why
-// "can we prepone the standup by an hour" carries no "forward" anywhere.
-const NUDGE_DIR = /\b(forwards?|earlier|sooner|ahead|back|backwards?|later|out|up|preponed?)\b/i;
+const NUDGE_DIR = /\b(forwards?|earlier|sooner|ahead|back|backwards?|later|out|up)\b/i;
 const NUDGE_AMOUNT =
-  /\b(?:by\s+)?(\d+|an?|one|two|three|four|five|six|half an?|a couple(?: of)?|a few)\s*(hours?|hrs?|h|minutes?|mins?|m|days?|weeks?|wks?|fortnights?)\b/i;
+  /\b(?:by\s+)?(\d+|an?|one|two|three|four|five|six|half an?|a couple(?: of)?|a few)\s*(hours?|hrs?|h|minutes?|mins?|m|days?|weeks?|wks?)\b/i;
 const NUDGE_UNIT = { h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, m: 1, min: 1, mins: 1, minute: 1, minutes: 1,
-  day: 1440, days: 1440, week: 10080, weeks: 10080, wk: 10080, wks: 10080, fortnight: 20160, fortnights: 20160 };
+  day: 1440, days: 1440, week: 10080, weeks: 10080, wk: 10080, wks: 10080 };
 
 function parseNudge(text) {
   const dir = text.match(NUDGE_DIR);
@@ -441,7 +439,7 @@ function parseNudge(text) {
     return null;
   }
 
-  const earlier = /^(?:forwards?|earlier|sooner|ahead|up|preponed?)$/i.test(dir[1]);
+  const earlier = /^(?:forwards?|earlier|sooner|ahead|up)$/i.test(dir[1]);
   const amt = text.match(NUDGE_AMOUNT);
   let mins = null;
   if (amt) {
@@ -590,7 +588,7 @@ export function parseAttendees(text) {
  * words and mean nothing schedulable.
  */
 const REPORTED =
-  /\bi(?:'ve|ve| have) got\b|\bi'?m (?:seeing|meeting|visiting|taking|off to|due at|due in|flying|driving)\b|\b(?:run|running|pop|popping|nip|nipping|head|heading|dash|dashing|drive|driving|fly|flying)\s+(?:over\s+)?(?:to|round|down to|up to)\s+[\w'’-]|\bthere'?s an? [\w'’-]+\b|\bwe'?re (?:meeting|having|seeing)\b|\basked (?:me )?for (?:time|\d+\s*(?:mins?|minutes?|hours?)|an hour|half an hour)\b|\b(?:annual leave|bank holiday|on holiday|out of (?:station|office)|half[- ]day)\b|\b(?:on|taking|having|booking)\s+(?:a |the )?(?:annual )?(?:leave|day off|holiday)\b/i;
+  /\bi(?:'ve|ve| have) got\b|\bi'?m (?:seeing|meeting|visiting|taking|off to|due at|due in|flying|driving)\b|\b(?:run|running|pop|popping|nip|nipping|head|heading|dash|dashing|drive|driving|fly|flying)\s+(?:over\s+)?(?:to|round|down to|up to)\s+[\w'’-]|\bthere'?s an? [\w'’-]+\b|\bwe'?re (?:meeting|having|seeing)\b|\basked (?:me )?for (?:time|\d+\s*(?:mins?|minutes?|hours?)|an hour|half an hour)\b/i;
 
 function isReportedBooking(body) {
   if (!REPORTED.test(body)) return false;
@@ -609,25 +607,7 @@ const DAYPART = /\b(?:morning|afternoon|evening|tonight|midday|noon|lunchtime|al
  * things a person does, which is exactly what a task is.
  */
 const ACTION_VERB =
-  // `finalis|finaliz` and `analys|analyz` are dead alternatives: this group
-  // ends in `\b`, which the next letter of "finalise"/"finalize" never gives
-  // them, so neither spelling has ever matched — in either dialect. Widening
-  // `s|z` bought nothing without the `\w*` that lets the word finish. The rest
-  // are British-spelled verbs the list never had, plus `sort` without its
-  // particle, which is how "sort the lease out" splits, and "give Bob a bell",
-  // which is a phone call.
-  /^(?:go\s+)?(?:review|read|check|chase|follow up(?: on| with)?|draft|write|prepare|prep|send|sign|file|submit|pay|order|buy|print|update|fix|finish|finali[sz]\w*|look (?:at|into|over)|go (?:over|through)|sort(?:\s+out)?|deal with|handle|reply to|respond to|revert back|confirm|ask|tell|speak to|talk to|catch up (?:on|with)|research|analy[sz]\w*|re-?organi[sz]e\w*|organi[sz]e\w*|summari[sz]e\w*|apologi[sz]e\w*|recogni[sz]e\w*|give\s+(?:the\s+|my\s+|our\s+|his\s+|her\s+|their\s+)?[\w'’-]+(?:\s+[\w'’-]+)?\s+an?\s+(?:bell|ring|buzz|shout)|build|ship|test|deploy|renew|refactor|email|call|ring|phone|text|message|ping|nudge|circle back|touch base|put together|pull together|work on|start|kick off|wrap up|smash(?: out)?|bash out|bang out|knock out|hammer out|churn out|crank out|crack on(?: with)?|get on with|get (?:the|my|our|this|that|it)\b[^.]*\bdone)\b/i;
-
-/**
- * An obligation in front of the verb: "I've got to sort out the lease."
- *
- * `POLITE_WRAPPER` peels "I need to" and stops there, so every other way of
- * saying the same thing kept its opener and hid the verb behind it from the
- * fallback that wanted it. Only ever applied once every rule in the table has
- * declined, so it cannot take a sentence away from a rule that wanted it.
- */
-const OBLIGATION_PREFIX =
-  /^(?:i|we)\s*(?:'ve|ve|'ll|ll|'d|d)\s*(?:still\s+)?(?:have to|need to|got to|gotta|have got to|going to|gonna|better)?\s+|^(?:i|we)\s+(?:still\s+)?(?:have to|need to|want to|would like to|like to|must|should|ought to|got to|gotta|will|am going to|am gonna)\s+/i;
+  /^(?:go\s+)?(?:review|read|check|chase|follow up(?: on| with)?|draft|write|prepare|prep|send|sign|file|submit|pay|order|buy|print|update|fix|finish|finalis|finaliz|look (?:at|into|over)|go (?:over|through)|sort out|deal with|handle|reply to|respond to|confirm|ask|tell|speak to|talk to|catch up (?:on|with)|research|analys|analyz|build|ship|test|deploy|renew|refactor|email|call|ring|phone|text|message|ping|nudge|circle back|touch base|put together|pull together|work on|start|kick off|wrap up|smash(?: out)?|bash out|bang out|knock out|hammer out|churn out|crank out|crack on(?: with)?|get on with|get (?:the|my|our|this|that|it)\b[^.]*\bdone)\b/i;
 
 
 /**
@@ -957,7 +937,7 @@ const AVOIDING =
 
 /** Out of road for today. "I've got no focus left." */
 const RUNNING_LOW =
-  /\bi'?m (?:so |really |completely |totally |absolutely |utterly |dead |proper(?:ly)? |well |bloody |flat )?(?:tired|exhausted|knackered|shattered|wiped|fried|spent|beat|running on (?:empty|fumes))\b|\bi (?:have|'?ve got|got|have got) (?:no|zero|not much|very little) (?:energy|focus|brain|bandwidth|steam|left)\b|\bno (?:focus|energy|brain|bandwidth) left\b|\bno brain\b|\b(?:my )?brain is (?:fried|mush|gone|dead|melted|off)\b|\bi can'?t (?:think|focus|concentrate)\b|\bout of (?:energy|steam|gas|juice)\b|\blow (?:on )?energy\b/i;
+  /\bi'?m (?:so |really |completely |totally )?(?:tired|exhausted|knackered|shattered|wiped|fried|spent|beat|running on (?:empty|fumes))\b|\bi (?:have|'?ve got|got|have got) (?:no|zero|not much|very little) (?:energy|focus|brain|bandwidth|steam|left)\b|\bno (?:focus|energy|brain|bandwidth) left\b|\bno brain\b|\b(?:my )?brain is (?:fried|mush|gone|dead|melted|off)\b|\bi can'?t (?:think|focus|concentrate)\b|\bout of (?:energy|steam|gas|juice)\b|\blow (?:on )?energy\b/i;
 
 /**
  * Asking for the *smallest* thing rather than the most important one.
@@ -1069,21 +1049,7 @@ const RULES = [
   // First, and unmissable. Undo is the thing people reach for while something
   // is going wrong, and it must never be shadowed by a verb inside the same
   // sentence — "undo that meeting move" is an undo, not a move.
-  /**
-   * Two narrowings, both about words that mean something else abroad.
-   *
-   * "Revert" is undo in America and *reply* across South Asia — "kindly revert
-   * back with the schedule" is a request to be got back to, and it reached the
-   * one rule in the table that throws the user's last action away. The
-   * lookahead lists what follows the reply sense and nothing that follows the
-   * undo sense, so "revert that" and "revert back to the old time" are
-   * untouched.
-   *
-   * "Put it back" is undo everywhere and *move it later* in British and Irish
-   * English — but only when an amount or a destination follows. Bare "put it
-   * back" stays an undo, which is what it is nine times in ten.
-   */
-  [INTENTS.UNDO, /\bundo\b|\bredo that\b|\bput (?:it|that|them) back\b(?!\s+(?:to|by|until|an?|one|two|three|four|five|half|\d)\b)|\brevert\b(?!\s+(?:back\s+)?(?:with|to me|to us|on\b|by\b|asap|soon|at the earliest))|\btake (?:that|it) back\b|\bnever ?mind that,? undo\b|\bi didn'?t mean (?:that|to)\b|\bthat was a mistake\b|\bchange (?:that|it) back\b|\brestore\b/],
+  [INTENTS.UNDO, /\bundo\b|\bredo that\b|\bput (?:it|that|them) back\b|\brevert\b|\btake (?:that|it) back\b|\bnever ?mind that,? undo\b|\bi didn'?t mean (?:that|to)\b|\bthat was a mistake\b|\bchange (?:that|it) back\b|\brestore\b/],
   /**
    * Second only to undo, and for the same reason: this is what people say while
    * something is going wrong, and every verb in it belongs to a rule further
@@ -1170,20 +1136,7 @@ const RULES = [
    * `instead` earns its place only at the end of a sentence: "put it thursday
    * instead" is a move, "book it thursday instead of friday" is a booking.
    */
-  /**
-   * `prepon\w*` earns its place here above everything else: "prepone" is the
-   * standard Indian English word for bringing a meeting forward, it has no
-   * American equivalent at all, and with no rule owning it "prepone the board
-   * call to Tuesday" fell through to the booking fallback and put a *second*
-   * board call on Tuesday beside the one it was meant to move.
-   *
-   * The `back` forms are the British side of the same gap. "Put the standup
-   * back an hour", "pop the board call back" — moves with the direction said
-   * instead of the destination, and none of them contained a verb this rule
-   * knew. They cannot swallow the undo above them, which is rule one, and what
-   * follows "back" keeps "put the deck back on the list" out.
-   */
-  [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|prepon\w*|re-?arrang\w*|re-?organi[sz]\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|shov(?:e|es|ed|ing)|shunt(?:s|ed|ing)?|scoot(?:s|ed|ing)?|nudg(?:e|es|ed|ing)\s+(?:it|that|them|the|my|our)|slid(?:e|ing)|switch\w*|put off|putting off|defer\w*|bring\w*\s+(?:it|that|them|the|my|forward)|pull\w*\s+(?:it|that|them|the|my)\b)\b|\binstead\s*[.?!]*$|\b(?:put|pop|knock|kick|nudge|shunt)\w*\s+(?:back\b|(?:it|that|them|the|my|our|his|her)\b[^.]{0,30}?\bback\b)(?!\s+(?:on|in|into|onto|at|with|from)\b)/],
+  [INTENTS.MOVE_EVENT, /\b(mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|shuffl\w*|shov(?:e|es|ed|ing)|shunt(?:s|ed|ing)?|scoot(?:s|ed|ing)?|nudg(?:e|es|ed|ing)\s+(?:it|that|them|the|my|our)|slid(?:e|ing)|switch\w*|put off|putting off|defer\w*|bring\w*\s+(?:it|that|them|the|my|forward)|pull\w*\s+(?:it|that|them|the|my)\b)\b|\binstead\s*[.?!]*$/],
   // Before cancel, after move: "move everything on Friday to Monday" is a bulk
   // move and stays a move; "cancel everything on Friday" is a bulk clear.
   [INTENTS.CLEAR_RANGE, isClearRange],
@@ -1197,7 +1150,7 @@ const RULES = [
   // The lookahead on "off" is the important part: "the board call is off" is a
   // cancellation and "the term sheet is off my plate" is a task being *done* —
   // one alternation apart, and the second was deleting a meeting.
-  [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch|skip|get rid of|blow(?:ing)? off|sack(?:ing)? off)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off(?!\s+(?:my|the|your|our)\s+(?:plate|list|books|desk|radar|hands))|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b|\b(?:don'?t|do not|dont|didn'?t) (?:need|want)\b.*\b(?:any ?more|any longer)?\b|\b(?:not|isn'?t|is not|aren'?t|are not) happening\b|\bfell through\b|\bwe'?re not doing\b|\b(?:can'?t|cannot|won'?t|will not|unable to|not able to) (?:make|do|attend|be at|get to)\b|\bchuck\w*\b[^.]{0,30}?\b(?:out|away)\b|\bbail(?:ing)? on\b|\b(?:back|backing|pull|pulling) out of\b|\bhave to (?:miss|skip)\b|\bgoing to (?:miss|skip)\b|\bgonna (?:miss|skip)\b/],
+  [INTENTS.CANCEL_EVENT, /\b(cancel\w*|delete|remove|drop|call off|scrap|bin|kill|nix|axe|ditch|scratch|skip|get rid of|blow(?:ing)? off|sack(?:ing)? off)\b|\btake .* off (?:my|the) calendar\b|\b(?:is|are|has been|have been) (?:off(?!\s+(?:my|the|your|our)\s+(?:plate|list|books|desk|radar|hands))|cancelled|canceled)\b|\bno longer (?:need|needed|happening)\b|\b(?:don'?t|do not|dont|didn'?t) (?:need|want)\b.*\b(?:any ?more|any longer)?\b|\b(?:not|isn'?t|is not|aren'?t|are not) happening\b|\bfell through\b|\bwe'?re not doing\b|\b(?:can'?t|cannot|won'?t|will not|unable to) (?:make|do|attend|be at|get to)\b|\bbail(?:ing)? on\b|\b(?:back|backing|pull|pulling) out of\b|\bhave to (?:miss|skip)\b|\bgoing to (?:miss|skip)\b|\bgonna (?:miss|skip)\b/],
   // "mark ... as done" allows words in between — that is how people write it.
   // "Add a task to finish the board deck" is a task being *made*, and it was
   // being read as one being finished — "finish" is a completion verb, and it
@@ -1327,7 +1280,7 @@ const RULES = [
     MENTIONS_PROJECT.test(body) &&
     /\bhow(?:'?s| is| are| am i doing)\b|\bprogress\b|\bwhere (?:are|is) (?:we|it|that)\b/i.test(body) &&
     Boolean(projectPhrase(body))],
-  [INTENTS.PLAN_DAY, /\b((?:plan|sort out|sort|organi[sz]e|map out|lay out) (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|make (?:me )?(?:a |the )?schedule\b|sort(?:ing)? out (?:my|the) (?:diary|calendar|schedule|day|week)\b|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|what'?s?(?: is)? left (?:on|for|in|of)\b|how(?:'?s| is| are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
+  [INTENTS.PLAN_DAY, /\b((?:plan|sort out|sort|organi[sz]e|map out|lay out) (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|what'?s?(?: is)? left (?:on|for|in|of)\b|how(?:'?s| is| are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|gaps?|any time|when can i|spare (?:time|hour|minutes?)|(?:any|some|got any|got some) (?:space|room))\b/],
   // Casual load words. "How packed is Friday" already worked and "am I slammed
   // tomorrow" did not, which is arbitrary from the outside — it is the same
@@ -1347,21 +1300,7 @@ const RULES = [
   // of "schedule". Each was falling past every booking rule and landing on the
   // catch-all CREATE_TASK at the bottom of the table, so "need to jump on a
   // call with Dana asap" became a to-do rather than a meeting.
-  /**
-   * Three widenings, each of them the same word said somewhere else.
-   *
-   * `book\w*` — "make a booking for Thursday 2pm" is ordinary phrasing across
-   * South Asia and much of Africa, and `\bbook\b` cannot see the noun.
-   *
-   * `diaris` — the verb behind the diary, which is what a calendar is called
-   * everywhere outside America. It only ever reached CREATE_EVENT by accident,
-   * when the sentence happened to also name a kind of meeting and a day.
-   *
-   * And the calendar phrase now takes the other two nouns and the other verbs:
-   * "stick it in the diary for Tuesday" and "chuck it in the diary" contained
-   * no word any booking rule knew, and landed as bare fragments.
-   */
-  [INTENTS.CREATE_EVENT, /\b((?:hop|jump|get|dial) on(?:to)? an? (?:call|zoom|meet|meeting|teams|sync|huddle|line)|swing by|schedule|book\w*|diaris\w*|diariz\w*|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|(?:put|stick|chuck|bung|shove|pop|whack|throw|get|slip) .* (?:on|in|into) (?:my|the) (?:calendar|diary|schedule)|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hours?|minutes?|time|slot)|add (?!.*\b(?:task|todo|to-do|reminder)\b).* (?:meeting|call|event))\b/],
+  [INTENTS.CREATE_EVENT, /\b((?:hop|jump|get|dial) on(?:to)? an? (?:call|zoom|meet|meeting|teams|sync|huddle|line)|swing by|schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) (?:calendar|diary|schedule)|get .* (?:on|in) (?:my|the) (?:calendar|diary|schedule)|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hours?|minutes?|time|slot)|add (?!.*\b(?:task|todo|to-do|reminder)\b).* (?:meeting|call|event))\b/],
   // The reporting voice. "I've got the dentist Friday at 9" is a booking with
   // no booking verb in it — people say what is happening as often as they ask
   // for it to be arranged. Guarded on there being a day or a clock, so "I've
@@ -1378,12 +1317,7 @@ const RULES = [
     MENTIONS_PROJECT.test(body) && FILES_UNDER.test(body) && Boolean(projectPhrase(body))],
   [INTENTS.CREATE_PROJECT, (body) =>
     MAKES_A_PROJECT.test(body) && Boolean(projectPhrase(body))],
-  // "Do the needful" is South Asian English for "handle it", and in "kindly do
-  // the needful regarding the lease" it is the whole instruction — there is no
-  // other verb in the sentence. Last in the table, so anything that also says
-  // *what* to do ("do the needful and clear my Friday") is claimed by the rule
-  // for that instead.
-  [INTENTS.CREATE_TASK, /\b(add|create|new|remind me to|need to|todo|do the needful)\b/],
+  [INTENTS.CREATE_TASK, /\b(add|create|new|remind me to|need to|todo)\b/],
 ];
 
 const PRIORITY = [
@@ -1485,17 +1419,6 @@ const NOT_A_NAME = new Set([
    */
   "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
   "january", "february", "september", "october", "november", "december",
-  /**
-   * Prepositions, for the same reason as the months directly above.
-   *
-   * "Book a call on Friday at 2" put a person named **On** on the invitation,
-   * and "schedule the board call for Friday" one named **For** — `call` takes
-   * a person as its direct object, and what actually follows it is very often
-   * a preposition. None of these is anybody's name in any dialect, so this
-   * list is where they belong.
-   */
-  "on", "for", "at", "in", "into", "about", "from", "by", "with",
-  "off", "out", "up", "over", "back", "around",
 ]);
 
 /**
@@ -1524,17 +1447,6 @@ function ownerFirst(body) {
    * parser has no intent that answers it; a miss is the honest outcome.
    */
   if (/^\s*(?:who|whom|whose|what|which|when|where|why|how)\b/i.test(text)) return null;
-  /**
-   * "I'm taking a half-day on Friday." "We're covering the Munich close."
-   *
-   * A first-person subject is never a hand-off — there is nobody on the other
-   * end of it. `NOT_A_NAME` below knows "i" and "we", and the word this
-   * pattern captures is "i'm", which is in no list at all; so a sentence about
-   * the user's own leave was delegated to a person called "I'm", and the leave
-   * itself never reached the calendar.
-   */
-  if (/^(?:i|we|you)(?:['’](?:m|re|ve|ll|d))?$/i.test(text.match(OWNER_FIRST)?.[1]?.trim() ?? "") ||
-      /^(?:im|ive|weve|youre)$/i.test(text.match(OWNER_FIRST)?.[1]?.trim() ?? "")) return null;
   const m = text.match(OWNER_FIRST);
   if (!m) return null;
   const name = m[1].trim();
@@ -1926,7 +1838,7 @@ function stripVerbs(text) {
     // phrase loses its anchor, leaving the word "calendar" behind as a title.
     .replace(/\s*(?:it|this|that|them)?\s*\b(?:on|in)(?:to)?\s+(?:my|the)\s+(?:calendar|schedule|diary)\b/i, " ")
     .replace(
-      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|chuck(?: in| out| away)?|bung(?: in)?|shove(?: in)?|whack(?: in)?|line up|arrange|organi[sz]e|diaris(?:e|ing)|diariz(?:e|ing)|prepon(?:e|ing)|do the needful(?:\s+(?:and|to|for))?|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|i need(?: to)?|i'?ve got|ive got|i have got|i'?m (?:seeing|meeting|visiting|taking|off to|flying to|driving to|on|off on|away on|out of)|im (?:seeing|meeting|visiting)|there'?s an?|theres an?|there is an?|we'?re (?:meeting|having|seeing)|i want(?: to)?|i'?d like|we need(?: to)?|i have to|i've got to|i gotta|smash(?:ing)?(?: out)?|bash(?:ing)? out|bang(?:ing)? out|knock(?:ing)? out|hammer(?:ing)? out|crank(?:ing)? out|crack(?:ing)? on(?: with)?|get(?:ting)? on with|mov(?:e|ing)|spread(?:ing)?|split(?:ting)?|divid(?:e|ing)|lay(?:ing)?|stagger(?:ing)?|stretch(?:ing)?|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
+      /^\s*(?:add|create|make|new|schedule|book|block(?: out| off)?|set up|set aside|carve out|pencil in|pencil|pop in|pop|put down|put|stick(?: in)?|slot in|slot|throw|line up|arrange|organi[sz]e|reserve|hold|open|squeeze in|find|get me|give me|find me|get|remind me to|need to|want to|i need(?: to)?|i'?ve got|ive got|i have got|i'?m (?:seeing|meeting|visiting|taking|off to|flying to|driving to)|im (?:seeing|meeting|visiting)|there'?s an?|theres an?|there is an?|we'?re (?:meeting|having|seeing)|i want(?: to)?|i'?d like|we need(?: to)?|i have to|i've got to|i gotta|smash(?:ing)?(?: out)?|bash(?:ing)? out|bang(?:ing)? out|knock(?:ing)? out|hammer(?:ing)? out|crank(?:ing)? out|crack(?:ing)? on(?: with)?|get(?:ting)? on with|mov(?:e|ing)|spread(?:ing)?|split(?:ting)?|divid(?:e|ing)|lay(?:ing)?|stagger(?:ing)?|stretch(?:ing)?|reschedul(?:e|ing)|shift(?:ing)?|bump(?:ing)?|postpon(?:e|ing)|push(?:ing)?|cancel(?:l?ing)?|delet(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|clear(?:ing)?|wip(?:e|ing))\s+/i,
       "",
     )
     .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder|appointment|sync|standup|stand-up|catch ?up|chat|block|slot|interview|review|1:1|one on one)\s+(?:to|for|called|named)?\s*/i, "")
@@ -1934,8 +1846,6 @@ function stripVerbs(text) {
     .replace(/^\s*(?:task|meeting|call|event|reminder)\s+(?:to|for|called|named)?\s*/i, "")
     // "make time for the letter" — the object of the verb is the time itself.
     .replace(/^\s*(?:some\s+)?time\s+(?:for|on|to)\s+/i, "")
-    // "Monday is a bank holiday" names the holiday, not the sentence.
-    .replace(/^\s*(?:[\w'’-]+\s+)?(?:is|are)\s+(?:a|an|the)?\s*(?=(?:bank holiday|public holiday|annual leave|half[- ]day|a day off))/i, "")
     .trim();
 }
 
@@ -1955,14 +1865,6 @@ function stripTemporal(text) {
     .replace(/\b(?:on|at)?\s*\b(?:next|this|coming)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?s?[ \t]*@?[ \t]*\d{1,2}(?::\d{2})?\b(?!\s*(?:st|nd|rd|th|[ap]\.?m|h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b))(?!\s*(?:-|–|—|to|until|till)\s*\d)(?![\d/:-])/gi, " ")
     .replace(/(?<![\d/:-])\b\d{1,2}(?::\d{2})?\s+(?:on\s+)?(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?s?\b/gi, " ")
     .replace(/\b(?:today|tomorrow|tonight|tmrw)[ \t]*@?[ \t]*\d{1,2}(?::\d{2})?\b(?!\s*(?:st|nd|rd|th|[ap]\.?m|h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b))(?!\s*(?:-|–|—|to|until|till)\s*\d)(?![\d/:-])/gi, " ")
-    // "A week on Tuesday", "Tuesday week", "Tues 14th" — dates whose weekday is
-    // only half of them, so all three run *before* the plain weekday strip
-    // below. That one would otherwise eat the day name and leave "a week on"
-    // and a bare "14th" standing in the title.
-    .replace(/\b(?:an?|one|1)\s+(?:week|fortnight)\s+(?:on|from)?\s*(?=\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)\w*\b)/gi, " ")
-    .replace(/\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?\s+(?:week|fortnight)\b/gi, " ")
-    .replace(/\bin\s+(?:an?\s+)?fortnights?\b|\ba fortnight\b|\bfortnight\b/gi, " ")
-    .replace(/\b(?:on|at|for|by|due)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b/gi, " ")
     .replace(/\b(?:on|at|for|by|due)?\s*\b(?:next|this|coming)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?\b/gi, " ")
     .replace(/\b(?:today|tomorrow|tonight|yesterday|tmrw)\b/gi, " ")
     // "2 to 4", "9 until 11:30" — a span written as two clock times. Left in,
@@ -1989,11 +1891,7 @@ function stripTemporal(text) {
     // "First thing".
     .replace(/\bfirst thing\b/gi, " ")
     .replace(/\b(?:morning|afternoon|evening|noon|midnight|night)\b/gi, " ")
-    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\w*\.?\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b/gi, " ")
-    // "3rd of September", "14 Aug", "3/9" — the day-first forms, which the
-    // month-first rule above cannot see, and the slash form, which nothing could.
-    .replace(/\b(?:on\s+|for\s+)?(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\w*\.?/gi, " ")
-    .replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, " ")
+    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\w*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, " ")
     .replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ")
     .replace(/\bdue\b/gi, " ")
     // "cancel tomorrow's lunch" loses its day above and keeps the possessive,
@@ -2498,8 +2396,7 @@ export function parse(text, now = new Date()) {
   // and "we should circle back on the term sheet" is a job to do with a soft
   // opener in front of it, not a sentence with no verb in it.
   if (intent === INTENTS.UNKNOWN && !timeOnly && !ASKED_OF_HER.test(s) &&
-      (ACTION_VERB.test(stripPolite(body).trim()) ||
-       ACTION_VERB.test(stripPolite(body).trim().replace(OBLIGATION_PREFIX, "")))) {
+      ACTION_VERB.test(stripPolite(body).trim())) {
     intent = INTENTS.CREATE_TASK;
   }
 
