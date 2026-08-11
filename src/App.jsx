@@ -237,7 +237,10 @@ export default function App() {
     const plan = distribute(state.tasks, state.events, state.sessions, planOpts(state.settings));
     const same =
       JSON.stringify(plan.blocks) === JSON.stringify(state.blocks) &&
-      JSON.stringify(plan.shortfalls) === JSON.stringify(state.shortfalls);
+      JSON.stringify(plan.shortfalls) === JSON.stringify(state.shortfalls) &&
+      // Compared too, or a task whose estimate runs out changes nothing the
+      // other two can see and the panel that asks about it never appears.
+      JSON.stringify(plan.spent) === JSON.stringify(state.spent);
     if (!same) setPlan(plan);
   }, [state.tasks, state.events, state.sessions, state.settings?.hours, state.settings?.workWeekend]);
 

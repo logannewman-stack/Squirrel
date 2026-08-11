@@ -35,6 +35,11 @@ const EMPTY = {
   // Tasks whose remaining work no longer fits before their deadline. Kept in
   // state because it is the one thing worth interrupting someone about.
   shortfalls: [],
+  // Tasks whose estimate is spent but which are still open — the state the
+  // focus timer manufactures when somebody works through it and forgets the
+  // checkbox. Derived like the two above, and surfaced on Today because the
+  // planner cannot decide it: only the person knows whether it is finished.
+  spent: [],
   active: null,
   settings: {},
   // Which tier this account is on, as last reported by the server. Cached here
@@ -606,5 +611,5 @@ export function claimAssist(now = new Date()) {
  * decides every block at once, and merging its output with a stale copy would
  * produce a schedule neither of them intended.
  */
-export const setPlan = ({ blocks, shortfalls }) =>
-  update({ blocks: blocks || [], shortfalls: shortfalls || [] });
+export const setPlan = ({ blocks, shortfalls, spent }) =>
+  update({ blocks: blocks || [], shortfalls: shortfalls || [], spent: spent || [] });

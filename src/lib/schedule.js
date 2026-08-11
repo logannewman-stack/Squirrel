@@ -256,6 +256,7 @@ function byUrgency(a, b) {
  *   blocks      [{taskId, day, mins, start, end}] — placed work, in day order
  *   shortfalls  what does not fit, and what would make it fit
  *   unestimated tasks with no duration on them, which cannot be planned at all
+ *   spent       tasks whose estimate is used up but which are still open
  *   byDay       Map(day → minutes committed)
  *   totals      {plannedMins, shortfallMins, taskCount}
  */
@@ -277,6 +278,34 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
   const unestimated = mine
     .filter((t) => !(t.estimateMins > 0))
     .map((t) => ({ taskId: t.id, title: t.title, due: t.due || null }));
+
+  /**
+   * Work whose estimate is used up but which nobody has ticked off.
+   *
+   * `remainingMins` reaches zero once logged sessions cover the estimate, and
+   * such a task was simply dropped here — no block, no shortfall, and not in
+   * `unestimated` either, so it appeared on no screen at all. The app
+   * manufactures this state with its own core loop: start a focus session, let
+   * the timer run out, forget the checkbox. For a planner built around
+   * *starting* things, that is the commonest way a session ends, and the work
+   * silently left the plan at exactly the moment somebody had done it.
+   *
+   * It is not a scheduling problem — there is nothing left to schedule — it is
+   * a question only the person can answer: is this finished, or did it need
+   * longer than you thought? So it comes back as its own list, the same way
+   * unestimated work does, and Today asks.
+   */
+  const spent = mine
+    .filter((t) => t.estimateMins > 0 && remainingMins(t, sessions) <= 0)
+    .map((t) => ({
+      taskId: t.id,
+      title: t.title,
+      due: t.due || null,
+      estimateMins: t.estimateMins,
+      spentMins: Math.round(
+        sessions.filter((x) => x.taskId === t.id).reduce((n, x) => n + (x.focusedMs || 0), 0) / 60000,
+      ),
+    }));
 
   const open = mine
     .filter((t) => t.estimateMins > 0 && remainingMins(t, sessions) > 0)
@@ -409,12 +438,14 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     blocks: placed,
     shortfalls,
     unestimated,
+    spent,
     byDay: committed,
     totals: {
       plannedMins: placed.reduce((n, b) => n + b.mins, 0),
       shortfallMins: shortfalls.reduce((n, s) => n + s.shortMins, 0),
       taskCount: new Set(placed.map((b) => b.taskId)).size,
       unestimatedCount: unestimated.length,
+      spentCount: spent.length,
     },
   };
 }

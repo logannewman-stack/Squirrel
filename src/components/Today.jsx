@@ -33,6 +33,9 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
   const blocks = workOn(state.blocks, state.tasks, day);
   const plannedMins = blocks.reduce((n, b) => n + b.mins, 0);
   const shortfalls = state.shortfalls || [];
+  // Estimate used up, still open. See the Spent panel below for why this is
+  // its own bucket rather than something the planner can decide.
+  const spent = state.spent || [];
   const unestimated = (state.tasks || []).filter(
     (t) => !t.done && !t.delegatedTo && !(t.estimateMins > 0),
   );
@@ -311,7 +314,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
             )}
           </div>
 
-          {plate.length === 0 && unestimated.length === 0 && waiting.length === 0 ? (
+          {plate.length === 0 && unestimated.length === 0 && waiting.length === 0 && spent.length === 0 ? (
             <p className="py-4 text-sm text-[var(--muted)]">
               Nothing due and nothing planned. Add work with a deadline and an estimate,
               and it lays itself out.
@@ -343,6 +346,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
             </ul>
           )}
 
+          {spent.length > 0 && <Spent list={spent} tasks={state.tasks} onFocus={onFocus} />}
           {unestimated.length > 0 && <NoEstimate list={unestimated} />}
 
         </section>
@@ -460,6 +464,65 @@ function Shortfalls({ list, tasks }) {
  * that had none, so a week could look comfortable while a third of the work
  * had never been counted. Silence was the worst available answer.
  */
+/**
+ * Work whose estimate is used up but which nobody ticked off.
+ *
+ * The app manufactures this state with its own core loop: start a focus
+ * session, let the timer run out, forget the checkbox. The planner then has
+ * nothing left to schedule, so the task fell out of the plan entirely — no
+ * block, no shortfall, not even counted as needing an estimate — and Today
+ * said "Nothing due and nothing planned" directly beneath a panel reading
+ * "1h 2m focused". For an app whose feature is *starting* things, that is the
+ * commonest way a session ends and the worst possible moment to lose the work.
+ *
+ * It is not a scheduling question, which is why the planner cannot answer it:
+ * either the thing is finished, or it needed longer than expected. Both are one
+ * tap, and neither is a guess the app is entitled to make on somebody's behalf.
+ */
+function Spent({ list, tasks, onFocus }) {
+  return (
+    <div className="mt-5 rounded-md border border-dashed border-[var(--line)] p-4">
+      <p className="label mb-1">Time's up on {list.length === 1 ? "this" : "these"}</p>
+      <p className="mb-3 text-xs leading-relaxed text-[var(--muted)]">
+        You've spent the estimate and {list.length === 1 ? "it's" : "they're"} still open, so
+        {list.length === 1 ? " it's" : " they're"} outside the plan. Finished, or did
+        {list.length === 1 ? " it" : " they"} need longer?
+      </p>
+      <ul className="space-y-2">
+        {list.map((x) => {
+          const task = tasks.find((t) => t.id === x.taskId);
+          return (
+            <li key={x.taskId} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="min-w-0 flex-1 truncate text-sm">{x.title}</span>
+              <span className="num shrink-0 text-xs text-[var(--muted)]">
+                {duration(x.spentMins * 60000)} spent of {duration(x.estimateMins * 60000)}
+              </span>
+              <span className="flex shrink-0 gap-1.5">
+                <button
+                  onClick={() => toggleTask(x.taskId)}
+                  className="rounded border border-[var(--line)] px-2 py-1 text-[11px]
+                             transition-colors hover:border-[var(--ink)]"
+                >
+                  Finished
+                </button>
+                {task && onFocus && (
+                  <button
+                    onClick={() => onFocus(task)}
+                    className="rounded border border-[var(--line)] px-2 py-1 text-[11px]
+                               transition-colors hover:border-[var(--ink)]"
+                  >
+                    Needs longer
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function NoEstimate({ list }) {
   return (
     <div className="mt-5 rounded-md border border-dashed border-[var(--line)] p-4">
