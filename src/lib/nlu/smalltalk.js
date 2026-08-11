@@ -92,21 +92,20 @@ const RULES = [
   [SMALL.COUNT, /\bhow many (?:tasks?|projects?|meetings?|events?)\b|\bwhat do i have (?:left|open|outstanding)\b/i],
 
   /**
-   * Said out of frustration rather than as a request.
+   * Overwhelm used to be answered here, and it is not small talk.
    *
-   * The temptation is to answer with sympathy, which is the one thing she is
-   * badly placed to offer. What she has instead is the actual arithmetic — how
-   * many hours of meetings, how much work, what will not fit — and turning
-   * "I'm swamped" into a number and an offer is both more useful and more
-   * honest than "that sounds hard".
+   * The arithmetic reply this layer gave — "3 meetings, 4h of them, 3 open
+   * tasks; say 'plan my week' and I'll lay the work into the gaps" — was honest
+   * and better than sympathy, but it stopped one sentence short of the thing
+   * being asked for. "I'm drowning" means *show me what to do first*, and
+   * answering it with a total and a homework assignment makes somebody who is
+   * already stuck type a second message to get the list. Starting is the
+   * feature; requiring a second turn to start is the bug.
    *
-   * Anchored at the front and kept clear of anything nameable: "I'm behind on
-   * the board deck" is a triage request and belongs to the real parser, which
-   * gives a better answer than this ever could.
+   * So the whole family now falls through to `isOverwhelmed` in parse.js and
+   * lands on PLAN_DAY, which keeps the arithmetic and adds the ranked list
+   * underneath it. Nothing was lost; a step was removed.
    */
-  [SMALL.OVERWHELM, /^(?:i'?m|im|i am|i feel|feeling)\s+(?:so |really |very |completely |totally |a bit |kind of |kinda |pretty )?(?:swamped|slammed|buried|drowning|underwater|overwhelmed|overloaded|stressed|stretched|frazzled|burnt? out|spread thin|losing it|in trouble)\b/i],
-  [SMALL.OVERWHELM, /^(?:this|the|my)\s+(?:week|day|month|schedule|calendar|diary)\s+(?:is|looks?)\s+(?:a\s+)?(?:mess|insane|crazy|nuts|brutal|mental|chaos|chaotic|ridiculous|awful|terrible|rough|heavy|hell|packed|slammed|jammed|too much)\b/i],
-  [SMALL.OVERWHELM, /\b(?:too much on(?: my plate)?|can'?t keep up|cannot keep up|not enough hours|no time for anything)\b/i],
 
   // General knowledge, which she genuinely does not have. Detected on purpose
   // so she can say so instead of falling through to "I didn't catch that",
@@ -114,7 +113,11 @@ const RULES = [
   // "Who is …" is general knowledge unless it is about who is in the room.
   // Without the exception, "who is on the board call" was answered "that's
   // outside what I know" — about the user's own calendar.
-  [SMALL.OUTSIDE, /\b(?:capital of|weather|who (?:is|was)(?!\s+(?:coming|going|in|on|at|attending|joining|invited|dial|else|with|my|i))|who (?:invented|won)|what is the (?:capital|population|meaning)|how tall|how far|translate|define|recipe|news|score|stock price|joke|poem|story|write me)\b/i],
+  //
+  // `how far` needs its object. Bare, it caught "how far behind am I" — a
+  // question about the user's own backlog, answered "that's outside what I
+  // know". Distance takes a preposition; being behind does not.
+  [SMALL.OUTSIDE, /\b(?:capital of|weather|who (?:is|was)(?!\s+(?:coming|going|in|on|at|attending|joining|invited|dial|else|with|my|i))|who (?:invented|won)|what is the (?:capital|population|meaning)|how tall|how far (?:is|are|to|from|away|apart)|translate|define|recipe|news|score|stock price|joke|poem|story|write me)\b/i],
 ];
 
 const COURTESY = new Set([
@@ -124,17 +127,6 @@ const COURTESY = new Set([
   // ungated would make "wait, cancel my 3pm" a request for a pause.
   SMALL.HOLD,
 ]);
-
-/**
- * A verb that makes a sentence an instruction.
- *
- * Narrower than HAS_REQUEST, which counts any calendar noun and so matches
- * "this week is a mess" on the word "week". Only used to stop a complaint with
- * a command bolted onto it — "I'm swamped, move my Thursday" — from being read
- * as only the complaint.
- */
-const HAS_COMMAND =
-  /\b(?:book|schedule|blocks?|move|shift|push|pull|cancel|delete|remove|clear|wipe|add|create|make|set|put|rename|delegate|assign|finish|complete|undo|plan|spread|split|show|list|tell me|find|what'?s|what is|what do|when(?:'s| is)?|how many|how much|who)\b/i;
 
 /**
  * Anything that makes a sentence a request rather than a pleasantry.
@@ -171,8 +163,6 @@ export function classify(text) {
   // difference between "are you there" and "are you".
   for (const [kind, re] of RULES) {
     if (COURTESY.has(kind)) continue;
-    // A complaint with an instruction attached is an instruction.
-    if (kind === SMALL.OVERWHELM && HAS_COMMAND.test(text)) continue;
     if (re.test(text)) return kind;
   }
   return null;

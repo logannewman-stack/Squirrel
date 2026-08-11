@@ -649,11 +649,175 @@ const MAKES_A_PROJECT =
 const FILES_UNDER =
   /\b(?:to|under|into|in|on)\s+(?:the\s+)?[\w'’&.-]+(?:\s+[\w'’&.-]+){0,3}\s+projects?\b|\b(?:file|move|put|assign|link|attach)\b.*\b(?:under|into|to)\s+["“']/i;
 
+/**
+ * Said by someone who is stuck, rather than by someone giving an order.
+ *
+ * "I'm drowning" is a request with a real answer — it means *show me what to do
+ * first* — and read literally it is not a command at all. That is precisely why
+ * these were so badly handled: the verbs people reach for when they are sinking
+ * (finish, drop, push, do, start) already belong to other rules and win on word
+ * order alone. Measured against the live table, "I'll never finish the deck by
+ * Friday" reached COMPLETE_TASK and ticked the board deck off; "I can't do all
+ * this" reached CANCEL_EVENT; "I've done nothing all week" reached
+ * COMPLETE_TASK. Someone at their worst moment was being told their work was
+ * done, or having it deleted.
+ *
+ * So the whole family sits above every verb rule and routes to PLAN_DAY, which
+ * already owns the question underneath all of it: what is on me, and what do I
+ * start with. Nothing here is a new intent — there was a home for it already.
+ */
+
+/** A first-person report of being under it. "I'm swamped." "I'm so behind." */
+const FEELS_UNDER =
+  /^\s*(?:i'?m|im|i am|i feel|feeling|we'?re|were)\b[^.?!]{0,40}?\b(?:swamped|slammed|buried|drowning|underwater|overwhelmed|overloaded|stressed|frazzled|burnt? ?out|spread thin|losing it|in trouble|behind|snowed under|maxed out|out of time|in over my head|never going to (?:finish|get|make)|not going to (?:finish|get|make)|falling apart|falling behind|failing|sinking|stuck)\b/i;
+
+/** Nothing specific is named, because everything is the problem. */
+const ALL_OF_IT =
+  /\btoo much\b(?!\s+(?:time|of|for)\b)|\bway too much\b|\bso much to do\b|\beverything(?:'?s| is| has)?\s+(?:on fire|urgent|late|overdue|due|a mess|falling apart|slipping|important|critical)\b|\bcan'?t (?:keep up|cope|do all|do it all|manage it|face (?:it|this)|deal with (?:it|this))\b|\bcannot keep up\b|\bcan'?t do all\b|\bnot enough (?:time|hours|days)\b|\bno time for anything\b|\bnothing (?:is )?getting done\b/i;
+
+/** "My week is a mess." The shape of the week, described as a feeling. */
+const WEEK_IS_A_MESS =
+  /\b(?:this|the|my|our)\s+(?:week|day|month|schedule|calendar|diary|list|plate)\s+(?:is|looks?|feels?)\s+(?:a\s+|so\s+|really\s+|completely\s+|totally\s+|absolutely\s+)*(?:mess|disaster|insane|crazy|nuts|brutal|mental|chaos|chaotic|ridiculous|awful|terrible|rough|heavy|hell|packed|slammed|jammed|hopeless|impossible|too much|shot|wrecked|write ?off)\b/i;
+
+/** "Where do I start?" — the single commonest thing this app exists to answer. */
+const WHERE_TO_START =
+  /\b(?:i (?:don'?t|do not|dont) know (?:where|what|how) to (?:start|begin|do)|where (?:do|should|would|shall) i (?:start|begin)|where to start|which (?:one|thing|task) (?:first|do i)|what'?s the one thing|what (?:do|should) i do (?:now|first)|what'?s first|no idea (?:what|where) to (?:do|start)|get something done)\b/i;
+
+/**
+ * Handing the decision over. "What should I focus on?" "You pick."
+ *
+ * `help me` is stripped by `unwrap` before any rule sees the sentence, so
+ * "help me prioritise" arrives as the bare word — which is why the bare forms
+ * are listed as well as the full ones.
+ */
+const ASKS_FOR_JUDGEMENT =
+  /\bwhat'?s (?:the )?most important\b|\bthe most important thing\b|\bwhat (?:matters|counts)\b|\bwhat'?s worth doing\b|\bwhat needs (?:to happen|doing)\b|\bwhat should i (?:focus on|be doing|priorit\w+)\b|\bwhat would you do\b|\btell me what to (?:do|work on|start)\b|\b(?:pick|choose) (?:one|something|a task|for me)\b|\byou (?:pick|choose|decide)\b|\bdecide for me\b|\bshould i be worried\b|\bwhat'?s the (?:priority|big one)\b|^\s*(?:priorit\w+|decide|choose|pick)\b[^.?!]{0,20}$/i;
+
+/**
+ * "Am I behind?" "How bad is it?" — a question about state, not about a day.
+ *
+ * `am i going to miss …` is here rather than left to the PLAN_DAY rule at the
+ * bottom of the table, which already has the pattern and never gets to use it:
+ * "am I going to miss the deadline" contains the word deadline, EDIT_TASK owns
+ * that word, and the sentence was coming back "I couldn't find a task matching
+ * that". The question is about the whole week, not about one task's due date.
+ */
+const HOW_BAD =
+  /\bam i (?:actually |really |badly |even |properly )?(?:behind|on track|keeping up|screwed|in trouble|going to be ok(?:ay)?)\b|\b(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|\bwill i (?:make|hit|miss)\b|\bhow (?:far |badly )?behind am i\b|\bhow bad (?:is|are)\b|\bhow much trouble am i in\b|\bis it as bad as\b|\bwhere am i (?:at|up to)\b|\bhow (?:screwed|cooked) am i\b/i;
+
+/** "There's no way this fits." Arguing with the arithmetic. */
+const WONT_FIT =
+  /\b(?:there'?s|there is) no way\b|\bno way (?:this|that|i|it)\b|\b(?:this|that|it) (?:isn'?t|is not|won'?t|will not|ain'?t) (?:going to |gonna )?(?:fit|work|happen)\b|\b(?:i'?ll|i will|i'?m) never (?:finish|going to finish|get|make|be done)\b|\bsomething has to (?:give|go)\b|\bi (?:need|want) (?:more time|another (?:day|week|hour)|an extra (?:day|week|hour))\b|\bi (?:don'?t|do not|dont) have (?:the |enough )?time\b|\bis there any way (?:this|that|i)\b|\bcan i (?:actually |even |realistically |really )?finish\b|\bcan i get (?:it|this|everything|them) (?:all )?done\b|\bcan i buy (?:myself )?(?:some )?time\b/i;
+
+/**
+ * Weighing a change rather than asking for one. "What if I push the deck?"
+ *
+ * These already carried `refuses: "asked"`, so nothing was being destroyed —
+ * but the reply was "I couldn't find that on your calendar", which answers a
+ * question nobody asked. The permission forms are held to an indefinite object
+ * on purpose: "can I move something" is deliberation, "can you move my 3pm" is
+ * an instruction and keeps its own rule.
+ */
+const WEIGHING_A_CHANGE =
+  /\bwhat if i\b|\bwhat happens if i\b|\bwhat would happen if\b|\bcan i (?:move|push|shift|drop|skip|delay|postpone|bump|lose)\s+(?:something|anything|some ?thing|stuff|one thing)\b|\bcan i (?:move|push|shift|drop|skip|delay|postpone)\b\s*[?.!]*$/i;
+
+/**
+ * "Give me a fresh start."
+ *
+ * Emphatically not a request to delete anything. Somebody asking to start over
+ * at four in the afternoon wants the day laid out again, and answering it with
+ * an emptied calendar would be the single worst thing in this file. Kept above
+ * CLEAR_RANGE so the word "wipe" in "wipe the slate clean" can never reach it.
+ */
+const START_AGAIN =
+  /\b(?:start (?:over|again|afresh|fresh|from scratch)|start me over|starting over|fresh start|clean slate|blank slate|wipe the slate clean|reset (?:everything|my day|my week|me|this)|begin again|from the top)\b/i;
+
+/** Avoidance, said out loud. "I keep putting this off." */
+const AVOIDING =
+  /\bi (?:haven'?t|have not|havent) (?:even )?(?:started|touched|looked at|begun|opened|got to)\b|\bi keep (?:putting (?:this|it|them|that) off|procrastinating|avoiding|not doing)\b|\bi'?ve been (?:avoiding|putting (?:this|it|that|them) off|ignoring)\b|\bi can'?t (?:make myself|get myself to|bring myself to)\b|\bi'?m (?:procrastinating|avoiding it)\b/i;
+
+/** Out of road for today. "I've got no focus left." */
+const RUNNING_LOW =
+  /\bi'?m (?:so |really |completely |totally )?(?:tired|exhausted|knackered|shattered|wiped|fried|spent|beat|running on (?:empty|fumes))\b|\bi (?:have|'?ve got|got|have got) (?:no|zero|not much|very little) (?:energy|focus|brain|bandwidth|steam|left)\b|\bno (?:focus|energy|brain|bandwidth) left\b|\bno brain\b|\b(?:my )?brain is (?:fried|mush|gone|dead|melted|off)\b|\bi can'?t (?:think|focus|concentrate)\b|\bout of (?:energy|steam|gas|juice)\b|\blow (?:on )?energy\b/i;
+
+/**
+ * Asking for the *smallest* thing rather than the most important one.
+ *
+ * A different sort from everything else here, and worth keeping separate: at
+ * 4pm on a bad day the top of the triage list is the wrong answer, because the
+ * hardest job is the one they have already failed to start. Exported so the
+ * handler can rank by what is shortest instead of by what is tightest.
+ */
+const WANTS_SOMETHING_SMALL =
+  /\bsomething (?:small|easy|quick|simple|short|light|low[- ]effort|mindless|i can actually do|i can do)\b|\ban? (?:easy|quick|small|cheap) (?:win|one|thing|task|job)\b|\b(?:the )?(?:smallest|easiest|quickest|shortest|simplest) (?:thing|task|one|job)\b|\bnothing (?:hard|big|heavy|difficult|taxing)\b|\bwhat'?s something (?:quick|small|easy|short)\b|\bonly do something easy\b|\blow effort\b|\bquick win\b/i;
+
+/**
+ * Should the answer be the shortest job rather than the most urgent one?
+ *
+ * True both when it is asked for outright ("give me something small") and when
+ * it is only implied ("I'm tired", "my brain is fried"). Someone with nothing
+ * left does not need to be told the eight-hour job is the important one; they
+ * already know, and that is why they are asking.
+ */
+export function wantsSomethingSmall(body) {
+  const s = body.toLowerCase();
+  return WANTS_SOMETHING_SMALL.test(s) || RUNNING_LOW.test(s);
+}
+
+/**
+ * A complaint with an instruction bolted onto it is the instruction.
+ *
+ * "I'm swamped, clear my Wednesday" is a clearing; answering it with a triage
+ * list loses the work. The calendar object is required, so the idiom in "wipe
+ * the slate clean" is not mistaken for a request to wipe anything.
+ *
+ * Only the statements are held to this. A question is never an order, so the
+ * interrogative families below skip the guard entirely.
+ */
+const ORDER_ATTACHED = new RegExp(
+  "\\b(?:book|schedule|reschedul\\w*|cancel\\w*|delete|remove|clear|wipe|empty|scrub|purge|nuke|" +
+  "mov(?:e|ing)|shift|bump|postpone|add|create|set up|delegate|assign|rename|remind me to|" +
+  // A question bolted onto a complaint is still the question. "I'm so behind,
+  // what's on Thursday" was being answered with a triage list of the whole
+  // week — true, and not what was asked. Only the *statement* families are
+  // held to this guard; the interrogative ones return before it, so asking
+  // "what matters today" still gets judgement rather than Thursday's diary.
+  "what'?s|what is|what do|what have|what'?ve|when'?s|when is|how many|show me|tell me)\\b" +
+  "[^.?!]{0,30}?\\b(?:calendar|schedule|diary|meetings?|calls?|appointments?|events?|tasks?|to-?dos?|" +
+  // The kinds of thing a meeting is usually called. "I'm drowning, cancel the
+  // standup" is an instruction and was being answered with a triage list,
+  // because the guard could only recognise an object it had a word for and
+  // "standup" was not one. A meeting named something unguessable — "cancel the
+  // Munich walkthrough" — still falls through, and fails in the safe
+  // direction: she offers the list instead of deleting something.
+  "stand-?ups?|syncs?|retros?|reviews?|demos?|kick-?offs?|off-?sites?|interviews?|" +
+  "one-?on-?ones?|1:1s?|catch-?ups?|check-?ins?|debriefs?|lunch|dinner|coffee|" +
+  "mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|" +
+  "monday|tuesday|wednesday|thursday|friday|saturday|sunday|" +
+  "today|tomorrow|tonight|morning|afternoon|evening|weekend|\\d)\\b", "i");
+
+/** Is this sentence a person asking to be told what to do, rather than telling? */
+export function isOverwhelmed(body) {
+  const s = body.toLowerCase();
+  if (WHERE_TO_START.test(s) || ASKS_FOR_JUDGEMENT.test(s) || HOW_BAD.test(s) ||
+      WONT_FIT.test(s) || WEIGHING_A_CHANGE.test(s) || WANTS_SOMETHING_SMALL.test(s)) return true;
+  if (ORDER_ATTACHED.test(s)) return false;
+  return FEELS_UNDER.test(s) || ALL_OF_IT.test(s) || WEEK_IS_A_MESS.test(s) ||
+    RUNNING_LOW.test(s) || AVOIDING.test(s) || START_AGAIN.test(s);
+}
+
 const RULES = [
   // First, and unmissable. Undo is the thing people reach for while something
   // is going wrong, and it must never be shadowed by a verb inside the same
   // sentence — "undo that meeting move" is an undo, not a move.
   [INTENTS.UNDO, /\bundo\b|\bredo that\b|\bput (?:it|that|them) back\b|\brevert\b|\btake (?:that|it) back\b|\bnever ?mind that,? undo\b|\bi didn'?t mean (?:that|to)\b|\bthat was a mistake\b|\bchange (?:that|it) back\b|\brestore\b/],
+  /**
+   * Second only to undo, and for the same reason: this is what people say while
+   * something is going wrong, and every verb in it belongs to a rule further
+   * down that would act on it. Above HELP as well, so "help me prioritise"
+   * comes back as a list of work rather than a list of capabilities.
+   */
+  [INTENTS.PLAN_DAY, isOverwhelmed],
   [INTENTS.HELP, /\b(help|what can you do|commands?)\b/],
   // Asking what to give up is a triage question, not a cancellation. It has to
   // come this early because "drop", "cut", and "lose" are all cancel verbs, and
@@ -719,8 +883,16 @@ const RULES = [
    * got done is the opposite of a command to get something done, and the two
    * are one auxiliary verb apart.
    */
+  /**
+   * "Did I get anything done?" is the same question asked by someone who
+   * suspects the answer is no. It carried no "what", so it missed every branch
+   * of the rule above and fell through — and "I've done nothing all week"
+   * reached COMPLETE_TASK, which went looking for an open task called "nothing
+   * all week". Both want the honest read of the logged sessions, which is very
+   * often kinder than the guess they arrived with.
+   */
   [INTENTS.QUERY_PROGRESS,
-    /\bwhat (?:did|have|'?ve) (?:i|we) (?:do|done|finish|finished|complete|completed|get|got|accomplish\w*|achieve\w*)\b|\bhow much (?:did|have) (?:i|we)\b|\bwhat'?s (?:been )?(?:done|finished|completed)\b/],
+    /\bwhat (?:did|have|'?ve) (?:i|we) (?:do|done|finish|finished|complete|completed|get|got|accomplish\w*|achieve\w*)\b|\bhow much (?:did|have) (?:i|we)\b|\bwhat'?s (?:been )?(?:done|finished|completed)\b|\b(?:did|have) (?:i|we) (?:get |got )?(?:anything|much|any) (?:done|finished|sorted)\b|\bdid (?:i|we) do (?:anything|much)\b|\bhave (?:i|we) (?:been (?:productive|any use)|made any (?:progress|headway)|got(?:ten)? anywhere)\b|\b(?:i|we)(?:'?ve)? (?:did|done|got|have done|have got) (?:nothing|zero|not much|sod all)\b|\bnothing (?:got|has been) done\b|\bam i doing (?:ok|okay|alright|any good)\b/],
   /**
    * "I have to finish the board deck this week" is a task being created, and it
    * was being read as one being completed — she replied "Done" and ticked it
@@ -1030,18 +1202,36 @@ const POLITE_SOFT = /^\s*(?:actually|so|ok|okay|hey|hi|hello|right|well|mind|let
 function stripPolite(text, re = POLITE_WRAPPER) {
   let t = text;
   for (let i = 0; i < 8; i++) {
-    const next = t.replace(re, "").replace(POLITE_SOFT, "");
+    const next = t.replace(COMPLAINT_PREFIX, "").replace(re, "").replace(POLITE_SOFT, "");
     if (next === t) break;
     t = next;
   }
   return t;
 }
 
+/**
+ * A complaint said before the instruction, peeled off like a courtesy.
+ *
+ * "I'm drowning, book lunch Friday" routes correctly and then books a meeting
+ * called "I'm drowning lunch"; "everything is on fire, cancel the standup"
+ * comes back "Standup is at fire, cancel the standup" — the words "on fire"
+ * read as a location. The routing was never the problem. Everything downstream
+ * that reads the sentence for a title, an object or a place gets the venting
+ * along with the request.
+ *
+ * So it is removed the same way "please" and "could you" are, and for the same
+ * reason: it is how somebody speaks, not part of what they are asking for. A
+ * comma and something substantial after it are both required, so a bare "I'm
+ * drowning" keeps all of its words and still reaches the triage answer.
+ */
+const COMPLAINT_PREFIX =
+  /^\s*(?:(?:i'?m|im|i am|we'?re|were|this|that|everything|it)\s+[^,]{0,40}?)?\b(?:swamped|slammed|buried|drowning|underwater|overwhelmed|overloaded|stressed|snowed under|maxed out|so behind|really behind|way behind|on fire|a mess|a disaster|insane|crazy|chaos|chaotic|too much|hopeless|impossible|exhausted|knackered|shattered|fried|dying|dead)\b[^,]{0,20},\s*/i;
+
 /** Only the wrappers, for the classifier. */
 export const unwrap = (text) => {
   let t = text;
   for (let i = 0; i < 6; i++) {
-    const next = t.replace(POLITE_WRAPPER, "");
+    const next = t.replace(COMPLAINT_PREFIX, "").replace(POLITE_WRAPPER, "");
     if (next === t) break;
     t = next;
   }

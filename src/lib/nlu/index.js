@@ -11,7 +11,7 @@
  * moving the wrong meeting is far worse than one extra tap.
  */
 
-import { parse, INTENTS, placeIn } from "./parse.js";
+import { parse, INTENTS, placeIn, isOverwhelmed, wantsSomethingSmall } from "./parse.js";
 import { classify as smallTalk, answer as smallAnswer } from "./smalltalk.js";
 import { resolveEvent, resolveTask, resolveProject, isConfident } from "./resolve.js";
 import { describe, toLocalIso, dayKey, atLocal, parseDate, parseRange, dayRange, fixDateWords } from "./datetime.js";
@@ -2166,17 +2166,64 @@ export function ask(text, state, opts = {}) {
         const load = projectLoad(hit[0].item, state.tasks, state.sessions, state.events, { ...work, now });
         return reply(describeLoad(load), [], { day: load.due });
       }
-      // "what's most urgent" — ranked by how little room each has left, which
-      // is not the same as what the user marked important.
-      if (/\bmost urgent\b|\bwhat'?s urgent\b|\bwhat should i (?:do|work on) first\b|\bbehind on\b|\btriage\b/i.test(p.body)) {
-        const ranked = triage(state.tasks, state.events, state.sessions, { ...work, now }).slice(0, 5);
-        if (!ranked.length) return reply("Nothing open with time on it.");
+      /**
+       * "I'm drowning." "Where do I start?" "I'm tired."
+       *
+       * All of these want the same thing the urgency question wants — a short
+       * list of what to do first — so they share its branch rather than
+       * getting one of their own. It has to be tested *before* the "week"
+       * branch below, because "my week is a mess" contains the word week and
+       * that branch writes a plan; somebody saying they are drowning has not
+       * asked for anything to be changed.
+       *
+       * The tone here is load-bearing and deliberately flat. No sympathy, no
+       * encouragement: the arithmetic, then the list, then one thing they can
+       * say next. "That sounds hard" is the one answer this app is worst
+       * placed to give and the only one a language model would reach for.
+       */
+      const stuck = isOverwhelmed(p.body);
+      if (stuck || /\bmost urgent\b|\bwhat'?s urgent\b|\bwhat should i (?:do|work on) first\b|\bbehind on\b|\btriage\b/i.test(p.body)) {
         const h = (m) => (m >= 60 ? `${+(m / 60).toFixed(m % 60 ? 1 : 0)}h` : `${m}m`);
+        let ranked = triage(state.tasks, state.events, state.sessions, { ...work, now });
+        if (!ranked.length) return reply("Nothing open with time on it.");
+
+        /**
+         * "Give me something small" is not the same question.
+         *
+         * Ranked hardest-first, the top of the list is the eight-hour job they
+         * have already failed to start twice — which is the answer that makes
+         * somebody close the app. Asked for something small, answer with the
+         * shortest thing open and stop talking.
+         */
+        if (stuck && wantsSomethingSmall(p.body)) {
+          const [first, ...rest] = [...ranked].sort((a, b) => a.need - b.need).slice(0, 3);
+          return reply(
+            `Shortest thing open: ${first.task.title}, ${h(first.need)}.` +
+            (rest.length ? `\nAfter that: ${rest.map((x) => `${x.task.title}, ${h(x.need)}`).join("; ")}.` : ""),
+          );
+        }
+
+        const top = ranked.slice(0, 5);
+        const lines = top.map((x) =>
+          `${x.level === "critical" ? "⚠ " : ""}${x.task.title} — ${h(x.need)} left` +
+          (x.task.due ? `, due ${x.task.due}` : "") +
+          (x.days ? `, ${x.days} working ${x.days === 1 ? "day" : "days"} to do it` : ""));
+        if (!stuck) return reply(lines.join("\n"));
+
+        // The shape of it, in front of the list. Someone who says they are
+        // drowning is asking two questions — how much is there, and what do I
+        // touch first — and the total on its own is the less useful half.
+        const open = state.tasks.filter((t) => !t.done);
+        const left = ranked.reduce((n, x) => n + x.need, 0);
+        const soon = new Date(now.getTime() + 7 * 86400000);
+        const week = state.events.filter((e) => new Date(e.start) >= now && new Date(e.start) < soon);
+        const bits = [`${open.length} open ${open.length === 1 ? "task" : "tasks"}`];
+        if (left) bits.push(`${duration(left * 60000)} of work`);
+        if (week.length) bits.push(`${week.length} ${week.length === 1 ? "meeting" : "meetings"} in the next seven days`);
         return reply(
-          ranked.map((x) =>
-            `${x.level === "critical" ? "⚠ " : ""}${x.task.title} — ${h(x.need)} left` +
-            (x.task.due ? `, due ${x.task.due}` : "") +
-            (x.days ? `, ${x.days} working ${x.days === 1 ? "day" : "days"} to do it` : "")).join("\n"),
+          `${bits.join(", ")}. Start here:\n${lines.join("\n")}` +
+          `\n\nSay “plan my week” and I'll lay these into the gaps` +
+          `${ranked.length > top.length ? `, or “what should I drop” for the rest` : ""}.`,
         );
       }
 
