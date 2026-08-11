@@ -7,7 +7,7 @@
  * rather than a guess.
  */
 
-import { parseDateTime, parseDuration, parseTime, parseDate, parseRange } from "./datetime.js";
+import { parseDateTime, parseDuration, parseTime, parseDate, parseRange, atLocal, TERSE_CLOCK } from "./datetime.js";
 
 export const INTENTS = {
   MOVE_EVENT: "move_event",
@@ -155,6 +155,33 @@ const SAYS_PRIORITY = /\b(?:make|mark|set|bump|flag|treat)\b[^.]*\b(?:critical|u
 // The noun is how most people say it; the adjective "due" is the minority form.
 const SAYS_DUE = /\b(?:is |isn'?t |is not )?(?:due|deadline|not due until|needed by|wanted by|has to be (?:done|in|ready) by)\b/i;
 /**
+ * The same statements with every word that makes them sentences taken out:
+ * "board deck: 8h", "lease 45m", "term sheet critical", "deck due fri".
+ *
+ * This is how somebody who has typed it a hundred times types it, and none of
+ * the rules above can see any of it — `SAYS_LENGTH` is built out of the
+ * copula, and `SAYS_DUE` leans on an article that the terse register does not
+ * have. A colon is optional, because half of these are written without one.
+ *
+ * Two guards, and both are load-bearing. The head may not open with a command
+ * verb, or "block 2h" and "give me 30 mins" become estimates on tasks that do
+ * not exist. And it must contain a letter and be followed by real whitespace,
+ * or the head matches the digits of the value itself and "90m" reads as a task
+ * called "9" that will take ten minutes. `isTaskEdit` adds the third: the line
+ * may not name a kind of meeting.
+ */
+const TERSE_HEAD =
+  "^(?!(?:book|schedule|add|create|make|move|shift|push|bump|cancel|delete|remove|drop|" +
+  "clear|wipe|block|hold|pencil|slot|put|find|reserve|give|get|carve|squeeze|set|spread|split)\\b)" +
+  "[\\w'’&.-]*[a-z][\\w'’&.-]*(?:\\s+[\\w'’&.-]+){0,3}\\s*[:,]?\\s+";
+const SAYS_LENGTH_TERSE = new RegExp(
+  `${TERSE_HEAD}(?:\\d{1,2}\\s*h(?:rs?|ours?)?\\s*\\d{1,2}\\s*(?:m|mins?|minutes?)?` +
+  `|\\d+(?:\\.\\d+)?\\s*(?:h|hrs?|hours?|m|mins?|minutes?))\\s*[.!]*$`, "i");
+const SAYS_PRIORITY_TERSE =
+  new RegExp(`${TERSE_HEAD}(?:critical|urgent|high|low|normal)(?:\\s+priority)?\\s*[.!]*$`, "i");
+/** "deck due fri", "term sheet: 2h, due friday" — a deadline with no article. */
+const SAYS_DUE_TERSE = /^[\w'’&.-]*[a-z][\w'’&.-]*(?:[\s,:;]+[\w'’&.-]+){0,5}[\s,:;]+(?:due|deadline)\b/i;
+/**
  * The office shorthand for a deadline, which contains the word "due" nowhere.
  *
  * "I need the letter by EOW" and "the review needs to be done by close" are
@@ -253,15 +280,33 @@ export function isTaskEdit(body) {
   // "Add a task to sign the lease, high priority, due Friday" names a priority
   // and a deadline and is nonetheless a creation. The leading verb governs.
   if (IS_CREATION.test(s)) return false;
+  /**
+   * The terse property forms, and the two things that disqualify a line from
+   * being one.
+   *
+   * A kind of meeting, because "standup 15m" is a booking to make and "lease
+   * 45m" is how long a job will take — the noun is the whole difference. And a
+   * question word, because "what's most urgent" has the exact shape of "term
+   * sheet critical" — a short phrase and a priority — so a request for triage
+   * was setting a priority on a task called "What's most".
+   */
+  const terseProperty =
+    !KIND_NOUN.test(s) &&
+    !/\b(?:what|which|who|whom|how|why|when|where|is|are|am|do|does|did|can|could|should|would|will|any|anything|everything|something|most|more|less|too)\b/i.test(s) &&
+    (SAYS_LENGTH_TERSE.test(s) || SAYS_PRIORITY_TERSE.test(s));
   return (
-    SAYS_LENGTH.test(s) || SAYS_PRIORITY.test(s) || SAYS_REOPEN.test(s) ||
+    SAYS_LENGTH.test(s) || terseProperty ||
+    SAYS_PRIORITY.test(s) || SAYS_REOPEN.test(s) ||
     PARKED.test(s) ||
     SAYS_TASK_DELETE.test(s) || SAYS_RENAME.test(s) || Boolean(placeIn(body)) ||
     SAYS_SUBJECT.test(s) || SAYS_FORMAT.test(s) ||
     // The article is what usually says a specific task is being talked about.
     // People drop it in a hurry — "term sheet is due asap" — so a subject
     // sitting directly in front of "is due" counts as naming one too.
-    (SAYS_DUE.test(s) && (/\b(?:the|my)\b/.test(s) || /^[\w'’ -]{2,40}\bis (?:due|overdue)\b/.test(s))) ||
+    // …and dropped entirely — "deck due fri" — in the telegraphic register.
+    (SAYS_DUE.test(s) &&
+      (/\b(?:the|my)\b/.test(s) || /^[\w'’ -]{2,40}\bis (?:due|overdue)\b/.test(s) ||
+       SAYS_DUE_TERSE.test(s))) ||
     (SAYS_DUE_IDIOM.test(s) && /\b(?:the|my|our)\b/.test(s))
   );
 }
@@ -273,7 +318,15 @@ export function isTaskEdit(body) {
  * `parseTime` answers both with an hour, so the distinction has to be drawn
  * here or every "cancel my 4pm" becomes a request to empty the afternoon.
  */
-const hasClock = (s) => /\d\s*(?:am|pm|a\.m\.|p\.m\.|:\d{2})|\bat\s+\d|\b\d{1,2}\s*o'?\s*c?l[o0]?c?k\b/i.test(s);
+/**
+ * `TERSE_CLOCK` is on this list for the same reason the rest of the pattern
+ * exists. "Cancel Friday" empties a day; "cancel fri 3" names the meeting at
+ * three o'clock, and without the terse form here the second read as the first
+ * and cleared the day.
+ */
+const hasClock = (s) =>
+  /\d\s*(?:am|pm|a\.m\.|p\.m\.|:\d{2})|\bat\s+\d|\b\d{1,2}\s*o'?\s*c?l[o0]?c?k\b/i.test(s) ||
+  TERSE_CLOCK.test(s);
 
 /**
  * "Cancel Friday's 1pm and rebook it Saturday at 2" — two verbs, one intention.
@@ -960,6 +1013,38 @@ export function isOverwhelmed(body) {
  */
 const COMPLETES = /\b(?:complete|completed|finish\w*|tick(?:ed)? off|check(?:ed)? off|did the)\b|\bmark\b.*\bdone\b|\b(?:is|are|'s) (?:done|finished|complete|sorted|handled|out of the way)\b|\bi'?ve (?:done|finished|completed|sorted)\b|\ball done\b|\bwrapped up\b|\b(?:smashed|nailed|wrapped|sorted|aced|crushed|nuked|bagged|knocked out|knocked off|smashed out|bashed out|banged out|polished off|powered through)\s+(?:the|my|our|that|this|it|them)\b|\bknocked\s+(?:the|my|that|this|it)\b[^.]*\bout\b|\b(?:is|are|'s|was|were) (?:in the bag|off my plate|off the list|squared away|good to go)\b|^(?:that'?s\s+)?(?:the\s+|my\s+|our\s+)?(?!well\b|nicely\b|all\b|nothing\b|not\b|almost\b|nearly\b|half\b|hardly\b|barely\b)[\w'’-]+(?:\s+[\w'’-]+){0,2}\s+(?:is\s+)?(?:done|sorted|finished|dusted)\s*[.!]*$/;
 
+/**
+ * A day and a question mark, and nothing else at all.
+ *
+ * "friday?" is the shortest anyone asks what is on a day, and it was reaching
+ * the follow-up machinery instead — where a bare date means "make it Friday",
+ * which after "cancel the standup" is a very different sentence. The question
+ * mark is the entire difference and it is required: bare "friday" stays a
+ * fragment, because as a follow-up that is exactly what it is.
+ */
+const TERSE_DAY_QUESTION = new RegExp(
+  "^\\s*(?:next\\s+|this\\s+|coming\\s+)?" +
+  "(?:today|tonight|tomorrow|tmrw|weekend|week|month|morning|afternoon|evening|" +
+  "mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|" +
+  "monday|tuesday|wednesday|thursday|friday|saturday|sunday)" +
+  "(?:\\s+(?:morning|afternoon|evening))?\\s*\\?+\\s*$", "i");
+
+/** The one-word questions. "Busy?" is a whole sentence to someone in a hurry. */
+const TERSE_BUSY = /^\s*(?:busy|anything|how many|much left|what'?s on)\s*\?+\s*$/i;
+
+/**
+ * "standup?", "board call?" — a named thing with a question mark after it.
+ *
+ * A question about that thing, never an instruction to create one. Held to a
+ * short line that names a kind of meeting and contains no question word and no
+ * verb, so "what's on?" stays a question about the day and "book lunch?" never
+ * reaches here.
+ */
+const NAMED_THING_QUESTION = (body) =>
+  /^[^?]{2,30}\?+\s*$/.test(body.trim()) &&
+  KIND_NOUN.test(body) &&
+  !/\b(?:what|when|where|who|whom|how|why|which|is|are|do|does|did|can|could|should|book|add|move|cancel|delete|schedule)\b/i.test(body);
+
 const RULES = [
   // First, and unmissable. Undo is the thing people reach for while something
   // is going wrong, and it must never be shadowed by a verb inside the same
@@ -1022,6 +1107,21 @@ const RULES = [
   // cancelling rules because "no meetings before 10" is a fence, not a
   // deletion, and either of those would have read it as one.
   [INTENTS.CREATE_EVENT, (body) => Boolean(parseProtect(body))],
+  /**
+   * The arrow forms, together and here.
+   *
+   * Above MOVE and CANCEL because the arrow is the more specific statement —
+   * "move standup -> 10" is already a move and loses nothing, while
+   * "lease → anders" contains no verb any rule below is looking for and was
+   * falling through entirely. Below EDIT_ATTENDEES and EDIT_TASK because those
+   * name a thing outright and an arrow is only ever punctuation.
+   *
+   * `parseArrow` returns null unless the right-hand side is unmistakably a
+   * time or unmistakably a name, so a line with an arrow and anything else in
+   * it is left to whatever it was already reaching.
+   */
+  [INTENTS.MOVE_EVENT, (body) => parseArrow(body)?.op === "move"],
+  [INTENTS.DELEGATE_TASK, (body) => parseArrow(body)?.op === "delegate"],
   [INTENTS.SWAP_EVENTS, /\b(?:swap|switch|exchange|trade|flip)\b[^.]*\b(?:and|with|for|round|around)\b/],
   /**
    * `shove`, `shunt` and `scoot` are the spoken forms of `move`, and every one
@@ -1145,7 +1245,9 @@ const RULES = [
   // Before MOVE, because "shorten"/"extend" are edits to length rather than
   // to when — and "push the review out by an hour" is genuinely ambiguous, so
   // the explicit length verbs win.
-  [INTENTS.RESIZE_EVENT, /\bknock\b[^.]*\boff\b|\badd\s+[^.]{0,16}?\b(?:\d+|an?|half an?)\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b[^.]*\bto\b|\bgive (?:it|them|that|the [\w'’-]+(?:\s+[\w'’-]+)?)\s+another\b|\b(?:it|that|this|the\s+[\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:only\s+)?needs?\s+(?:only\s+)?\d+\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b|\b(shorten|lengthen|extend|trim|cut)\b.*\b(?:to|by|in half)\b|\bmake\b.*\b(?:\d+|one|two|three|four|five|half)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)/],
+  // `+2h` is "give it another two hours", written the short way. There is no
+  // other reading of a plus sign in front of a length.
+  [INTENTS.RESIZE_EVENT, /\+\s*\d+(?:\.\d+)?\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)|\bknock\b[^.]*\boff\b|\badd\s+[^.]{0,16}?\b(?:\d+|an?|half an?)\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b[^.]*\bto\b|\bgive (?:it|them|that|the [\w'’-]+(?:\s+[\w'’-]+)?)\s+another\b|\b(?:it|that|this|the\s+[\w'’-]+(?:\s+[\w'’-]+)?)\s+(?:only\s+)?needs?\s+(?:only\s+)?\d+\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b|\b(shorten|lengthen|extend|trim|cut)\b.*\b(?:to|by|in half)\b|\bmake\b.*\b(?:\d+|one|two|three|four|five|half)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)/],
   // Questions about one specific thing on the calendar, which want a fact
   // rather than a day's worth of listing.
   // "When is my next meeting" is a question about the calendar, not about a
@@ -1153,6 +1255,8 @@ const RULES = [
   // answered "I couldn't find that on your calendar" to the single most
   // ordinary question anyone asks a diary. Placed ahead of it for that reason;
   // MOVE and CANCEL still win, so "move my next meeting" is a move.
+  // "next?" — the whole question, asked by somebody who has asked it before.
+  [INTENTS.QUERY_NEXT, /^\s*(?:what'?s\s+)?next\s*\?+\s*$/i],
   [INTENTS.QUERY_NEXT, /\b(?:what|when|which)(?:'s| is)?\s+(?:my |the )?next\b|\bwhat'?s (?:up )?next\b|\bnext (?:meeting|thing|one|up|appointment|call)\b|\bwhat'?s after (?:this|that)\b|\bhow long (?:until|till|til|to) (?:my |the )?next\b/],
   // Projects, ahead of the general question rules. "What projects do I have"
   // is caught by QUERY_DAY's "do i have" otherwise, and answered as an empty
@@ -1161,7 +1265,9 @@ const RULES = [
     MENTIONS_PROJECT.test(body) &&
     /\b(?:what|which|list|show|how many|how are|how's|tell me about)\b/i.test(body) &&
     !MAKES_A_PROJECT.test(body))],
-  [INTENTS.QUERY_EVENT, /\b(?:where(?:'?s| is)|how long is|is .* still on|when(?:'?s| is) (?:my|the)|what time is (?:my|the))\b/],
+  // "standup?" — a question about one thing, in one word.
+  [INTENTS.QUERY_EVENT, NAMED_THING_QUESTION],
+  [INTENTS.QUERY_EVENT, /\b(?:where(?:'?s| is)|how long is|is .* still on|when(?:'?s| is) (?:my|the)|what time is (?:my|the))\b|^\s*how long\s*\?+\s*$/],
   // `how's my week` is progress; `how's my week looking` is the diary. The two
   // are one word apart and QUERY_DAY, four rules down, already owns the second
   // — it just never got the chance, so "how's my week looking" came back as
@@ -1180,6 +1286,9 @@ const RULES = [
   // tomorrow" did not, which is arbitrary from the outside — it is the same
   // question. The `is <day> <adjective>` form is held to a list of actual days
   // so it cannot swallow "is the board prep still on".
+  // "friday?", "busy?" — a whole question, in one word and a mark.
+  [INTENTS.QUERY_DAY, TERSE_DAY_QUESTION],
+  [INTENTS.QUERY_DAY, TERSE_BUSY],
   [INTENTS.QUERY_DAY, /\b(what(?:'?s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded|slammed|jammed|heavy|light|rammed|manic|hectic)|am i (?:busy|slammed|swamped|packed|booked|jammed|rammed)|is (?:it |my |the )?(?:today|tomorrow|tmrw|tonight|mon|tues?|weds?|thur?s?|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|day|week|morning|afternoon|evening) (?:going to be |gonna be )?(?:chill|light|quiet|busy|packed|slammed|jammed|manic|heavy|hectic|full|rammed)|on my plate|how'?s? (?:my |the |it )?(?:today|tomorrow|tmrw|tonight|mon|tues?|weds?|thur?s?|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|day|week|morning|afternoon|evening)\b|read me|read back|run ?down|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double[- ]?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed)|bandwidth|at capacity|back[- ]to[- ]back|wall[- ]?to[- ]?wall|(?:have i got|do i have|got|is there) (?:the |any |enough )?(?:room|space|capacity)\b)\b/],
   // A series, not a booking. Checked before create, or only the first one of
   // twelve ever reaches the calendar.
@@ -1242,6 +1351,25 @@ const PRIORITY = [
  */
 const REPAIR = /^\s*(?:(?:no+|nope|nah|wait|whoops|oops)(?!\s+(?:meetings?|calls?|appointments?|events?|bookings?|commitments?|time|room|space|more|one)\b)|actually|sorry|i meant|i said|not that|scratch that|never ?mind that|instead)\b[\s,.:;!—-]*/i;
 
+/**
+ * Two instructions with a comma between them: "book lunch fri, cancel the 4pm".
+ *
+ * The leading verb governs — that is the rule this whole table is ordered
+ * around — and a comma was quietly breaking it, because CANCEL sits above
+ * CREATE and took the sentence off the second clause. So she cancelled a
+ * meeting when the first thing asked of her was to book one.
+ *
+ * Both halves must open with a command verb, which is what makes splitting on
+ * a comma safe at all. "I'm swamped, clear my Wednesday" fails on the left —
+ * a complaint is not a command — and "add sign the lease, high priority, due
+ * friday" fails on the right, so the one sentence in the corpus carrying three
+ * commas inside a single instruction is untouched.
+ */
+const COMMAND_VERB =
+  "book|schedule|add|create|make|move|shift|push|bump|reschedul\\w*|cancel\\w*|delete|remove|drop|clear|wipe|block|hold|pencil|slot|put|find";
+const TWO_COMMANDS = new RegExp(
+  `^((?:${COMMAND_VERB})\\b[^,]{2,})\\s*,\\s*((?:${COMMAND_VERB})\\b[^]{2,})$`, "i");
+
 /** "make it 3pm", "move it to Friday" — an edit to something already named. */
 const AMEND = /^\s*(?:make|change|set|push|move|shift|bump)\s+(?:it|that|this|them)\b/i;
 
@@ -1279,6 +1407,18 @@ const NOT_A_NAME = new Set([
   // First and third person. Without these, "I can't make the board call" was
   // read as removing an attendee named "I" instead of as a cancellation.
   "i", "we", "he", "she", "they", "nobody", "everybody",
+  /**
+   * Months, in the abbreviations people type. "board call sept 3" was booking
+   * a meeting with somebody called Sept — `call` takes a person as its direct
+   * object, and a month sitting where the person goes looked exactly like one.
+   *
+   * Only the short forms and the four long ones that are not also given names:
+   * March, April, May, June, July and August belong to people as well as to
+   * the calendar, and `handoffTarget` already lets a capital letter overrule
+   * this list for exactly that reason.
+   */
+  "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+  "january", "february", "september", "october", "november", "december",
 ]);
 
 /**
@@ -1359,7 +1499,11 @@ function handoffTarget(body) {
   // "Fob the diligence index off on Dana." The one hand-off preposition that
   // isn't "to", and only ever in that shape — nothing else in a calendar app
   // ends "off on <word>".
-  const m = body.match(/\b(?:to|with|for|off on)\s+([A-Za-z][\w'’-]*(?:\s+[A-Za-z][\w'’-]+)?)\s*$/);
+  //
+  // An arrow stands in for the preposition too: "lease → anders" is the same
+  // sentence as "give the lease to anders", typed by somebody who has typed it
+  // a hundred times.
+  const m = body.match(/(?:\b(?:to|with|for|off on)\s+|(?:-{1,2}>|=>|→|⟶)\s*)([A-Za-z][\w'’-]*(?:\s+[A-Za-z][\w'’-]+)?)\s*$/);
   if (!m) return ownerFirst(body);
 
   const name = m[1].trim();
@@ -1450,7 +1594,12 @@ function expandShorthand(text) {
     .replace(/\s+&\s+/g, " and ")
     .replace(/\bb4\b/gi, "before")
     .replace(/\bwks\b/gi, "weeks")
-    .replace(/\bwk\b/gi, "week");
+    .replace(/\bwk\b/gi, "week")
+    // "@3pm", "fri @10". `parseTime` wants an "at" or a meridiem in front of a
+    // bare hour and an "@" is neither as far as a regex is concerned, so the
+    // commonest shorthand on a calendar carried no time at all. An "@" in
+    // front of a digit is never an email address.
+    .replace(/@\s*(?=\d)/g, "at ");
 }
 
 /**
@@ -1461,6 +1610,40 @@ const SPOKEN_DAY =
 
 /** Verbs that make a following number a destination rather than a count. */
 const MOVES = /\b(?:mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|switch\w*|chang\w*|put)\b/i;
+
+/**
+ * "3pm → 4", "lease → anders", "move standup -> 10".
+ *
+ * An arrow is the whole of the telegraphic register's syntax for "becomes",
+ * and it means two different things depending only on what sits to the right
+ * of it: a time is a move, a person is a hand-off. Read as one shape anchored
+ * to the line rather than bolted onto the alternations of the move and
+ * delegate rules, which would then each have to work out whether the other one
+ * wanted it — and that is how "lease -> anders" ends up moving a meeting to a
+ * colleague.
+ *
+ * Returns null for anything else on the right, including a second arrow: a
+ * list is not an edit, and a phrase that is neither a time nor a name is not
+ * something to guess about.
+ */
+const ARROW = /^\s*(\S[^]{0,60}?)\s*(?:-{1,2}>|=>|→|⟶|›|»)\s*([^]{1,40}?)\s*[.!]*$/;
+
+export function parseArrow(text, now = new Date()) {
+  const m = text.match(ARROW);
+  if (!m) return null;
+  const left = m[1].trim();
+  const right = m[2].trim();
+  if (!left || !right || /-{1,2}>|=>|→|⟶/.test(right)) return null;
+
+  // A bare number on the right of an arrow is a clock time. There is nothing
+  // else it can be: the thing on the left already exists.
+  if (/^\d{1,2}(?::\d{2})?$/.test(right) || parseTime(right) || parseDate(right, now)) {
+    return { op: "move", left, right };
+  }
+  const name = right.match(/^([A-Za-z][\w'’-]{1,19})(?:\s+[A-Za-z][\w'’-]{1,19})?$/);
+  if (name && !NOT_A_NAME.has(name[1].toLowerCase())) return { op: "delegate", left, right };
+  return null;
+}
 
 function fixHomophones(text) {
   let t = expandShorthand(text)
@@ -1673,26 +1856,47 @@ function stripTemporal(text) {
     // meetings all called "Every standup".
     .replace(/\b(?:every|each)\s+(?:other\s+)?(?:day|weekday|week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b/gi, " ")
     .replace(/\b(?:daily|weekly|fortnightly|bi-?weekly|monthly|recurring|repeat(?:s|ing|ed)?)\b/gi, " ")
+    /**
+     * "fri 10", "10 fri", "tues 3" — the day and the bare hour attached to it,
+     * removed together and ahead of the day-only rule below. Taking the day
+     * out first strands the number, and a stranded number is what put "Priya
+     * 10" and "Bob 10" on the calendar as the names of meetings.
+     */
+    .replace(/\b(?:on|at)?\s*\b(?:next|this|coming)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?s?[ \t]*@?[ \t]*\d{1,2}(?::\d{2})?\b(?!\s*(?:st|nd|rd|th|[ap]\.?m|h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b))(?!\s*(?:-|–|—|to|until|till)\s*\d)(?![\d/:-])/gi, " ")
+    .replace(/(?<![\d/:-])\b\d{1,2}(?::\d{2})?\s+(?:on\s+)?(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?s?\b/gi, " ")
+    .replace(/\b(?:today|tomorrow|tonight|tmrw)[ \t]*@?[ \t]*\d{1,2}(?::\d{2})?\b(?!\s*(?:st|nd|rd|th|[ap]\.?m|h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b))(?!\s*(?:-|–|—|to|until|till)\s*\d)(?![\d/:-])/gi, " ")
     .replace(/\b(?:on|at|for|by|due)?\s*\b(?:next|this|coming)?\s*\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day|nesday|rsday|urday)?\b/gi, " ")
     .replace(/\b(?:today|tomorrow|tonight|yesterday|tmrw)\b/gi, " ")
     // "2 to 4", "9 until 11:30" — a span written as two clock times. Left in,
     // it becomes the title: "hold thursday 2 to 4" booked a meeting called
     // "2 to 4".
-    .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:to|until|till|–|-)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/gi, " ")
+    .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:to|until|till|–|—|-)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/gi, " ")
     .replace(/\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/gi, " ")
     // Bare "at 10" with no meridiem — otherwise it survives into a title or
     // subject as trailing noise.
     .replace(/\b\d{1,2}\s*o'?\s*c?l[o0]?c?k\b/gi, " ")
     .replace(/\bat\s+\d{1,2}(?::\d{2})?\b/gi, " ")
     .replace(/\b\d{1,2}:\d{2}\b/g, " ")
+    // "1h30", "2h15m" — hours and minutes run together, removed before the
+    // plain form below, which takes the "1h" and leaves "30" in the title.
+    .replace(/\b\d{1,2}\s*h(?:rs?|ours?)?\s*\d{1,2}\s*(?:m|mins?|minutes?)?\b(?![\d:])/gi, " ")
     .replace(/\b\d+(?:\.\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b/gi, " ")
     .replace(/\b(?:half an hour|an hour|a hour)\b/gi, " ")
     .replace(/\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple|few|several|half)\s+(?:of\s+)?(?:and a half\s+)?(?:hours?|hrs?|minutes?|mins?)\b/gi, " ")
     .replace(/\b(?:in\s+\d+\s+days?)\b/gi, " ")
+    // "first thing" names an hour as plainly as "at nine" does — `DAYPARTS`
+    // reads it as one — so it has to come out of a title for the same reason
+    // the other parts of the day do. Left in, "first thing tomorrow" is a
+    // complete when and a leftover noun, which reads as a booking called
+    // "First thing".
+    .replace(/\bfirst thing\b/gi, " ")
     .replace(/\b(?:morning|afternoon|evening|noon|midnight|night)\b/gi, " ")
     .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\w*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, " ")
     .replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ")
     .replace(/\bdue\b/gi, " ")
+    // "cancel tomorrow's lunch" loses its day above and keeps the possessive,
+    // which then reads as a word: the title came out "'s lunch".
+    .replace(/(^|\s)['’]s\b/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -1825,6 +2029,15 @@ function cleanTitle(text, people = [], subject = null) {
   // "make it an hour" is an instruction about an existing thing, not a name.
   // Without this the leftovers spell "Make" and the meeting gets renamed.
   let t = stripVerbs(text.replace(AMEND, " "))
+    /**
+     * Everything past an arrow, which is never part of the name.
+     *
+     * "lease → anders" is the lease, handed to Anders; the person belongs in
+     * the hand-off slot and was ending up in the title instead. Same for
+     * "3pm → 4pm", where cutting at the arrow leaves nothing at all — which is
+     * correct, and lets the caller compose a name from whatever it resolved.
+     */
+    .replace(/\s*(?:-{1,2}>|=>|→|⟶|›|»)[^]*$/, " ")
     .replace(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+.+$/i, " ")
     // Cut the exact subject that was extracted rather than everything after a
     // preposition — "on" is far too common to truncate a title on.
@@ -1856,7 +2069,10 @@ function cleanTitle(text, people = [], subject = null) {
     // was cut out from behind it. Only "before" — "after" is left alone so
     // "the day after tomorrow" keeps the shape it already had.
     t = t.replace(/\s+(?:for|about|on|in|at|to|by|from|with|and|it|that|me|us|before)$/i, "");
-    t = t.replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "").trim();
+    // The symbols a terse line is punctuated with, peeled off both ends the
+    // same way the connectors are. "board deck +2h" is the board deck, not a
+    // task called "Board deck +", and "@3pm" names nothing whatsoever.
+    t = t.replace(/^[\s,;:.\-@+&/?<>=|"'’]+|[\s,;:.\-@+&/?<>=|"'’]+$/g, "").trim();
   } while (t !== prev);
   // A bare "meeting" is not a title. Returning null lets the caller compose one
   // from who it is with, which is what the user would have written anyway.
@@ -1908,12 +2124,35 @@ export function parse(text, now = new Date()) {
   // "And move it to Friday at 2." A conjunction joining this turn to the last
   // one is discourse, and leaving it in put the word "And" at the front of
   // every title and defeated the follow-up test behind it.
-  body = body.replace(/^\s*(?:and|then|also|plus|oh(?:,| and)?|next|after that|as well)\b[\s,]*/i, "").trim() || body;
+  // The strip has to leave a word behind. "next?" is a whole question and the
+  // word is on this list, so peeling it left a body of "?" — a sentence that
+  // could never match anything.
+  const unjoined = body.replace(/^\s*(?:and|then|also|plus|oh(?:,| and)?|next|after that|as well)\b[\s,]*/i, "").trim();
+  body = /[a-z0-9]/i.test(unjoined) ? unjoined : body;
+  /**
+   * "call priya fri 10; deck 2h due fri" — two commands on one line.
+   *
+   * Only the first is read. A semicolon between two substantial clauses is
+   * never anything else in a calendar sentence, and parsing the whole line
+   * produced a meeting called "Priya 10; deck" at the wrong hour. The
+   * remainder comes back untouched as `more`, so the caller can offer it
+   * rather than silently dropping half of what was typed.
+   */
+  let more = null;
+  const twoUp = body.match(/^([^;]{3,}?)\s*;\s*(\S[^]{2,})$/) || body.match(TWO_COMMANDS);
+  if (twoUp) {
+    body = twoUp[1].trim();
+    more = twoUp[2].trim();
+  }
   // Applied to every sentence rather than only on the spelling retry: the
   // corrections below are position-bound and cannot be wrong, and leaving them
   // to the retry meant "I need too call the bank" never reached the rule that
   // would have caught the fixed version.
   body = fixHomophones(body);
+  // "w/" and "@" spelled out, for the same reason and in the same place: they
+  // are position-bound, they cannot be wrong, and every rule below is looking
+  // for the words rather than the symbols.
+  body = expandShorthand(body);
 
   // Classified without the courtesy in front of it. "When you get a chance,
   // book lunch Friday" is a booking; left wrapped, the "when" made it a
@@ -1942,15 +2181,28 @@ export function parse(text, now = new Date()) {
     subjectPhrase = compound[1].trim();
     targetPhrase = compound[2].trim();
   } else if (intent === INTENTS.MOVE_EVENT) {
+    // "move standup -> 10" — an arrow splits the two halves as plainly as the
+    // word does, and it is checked first because the word may not be there.
+    const arrow = parseArrow(body, now);
     // "move X to Y" — the target time is what follows the first "to"/"until".
-    const split = body.match(/^(.*?)\s+\b(?:to|until|till|for|->)\b\s+(.*)$/i);
-    if (split) {
+    const split = body.match(/^(.*?)\s+\b(?:to|until|till|for)\b\s+(.*)$/i);
+    if (arrow) {
+      subjectPhrase = arrow.left;
+      targetPhrase = arrow.right;
+    } else if (split) {
       subjectPhrase = split[1];
-      targetPhrase = split[2];
+      // "move standup to 10 and cancel the 3pm" — a second instruction bolted
+      // on with an "and". Left in the target half it supplies the time, so the
+      // standup moved to three o'clock: the hour of the meeting the user was
+      // asking her to get rid of. Only a following command verb cuts it, so
+      // "move it to Friday and Saturday" keeps both words.
+      const tail = split[2].match(new RegExp(`^([^]*?)\\s+\\b(?:and|then)\\s+(?:can you\\s+|please\\s+)?((?:${COMMAND_VERB})\\b[^]*)$`, "i"));
+      targetPhrase = tail ? tail[1].trim() : split[2];
+      if (tail && !more) more = tail[2].trim();
     }
   }
 
-  const when = parseDateTime(targetPhrase, now);
+  let when = parseDateTime(targetPhrase, now);
   // The anchor is read first and its span cut out before the length is looked
   // for, or "an hour before the board call" books an hour-long meeting at some
   // default time instead of a meeting one hour earlier than the board call.
@@ -1994,15 +2246,111 @@ export function parse(text, now = new Date()) {
     }
   }
   const kindNoun = body.match(KIND_NOUN)?.[1]?.toLowerCase() ?? null;
+
+  /**
+   * The last two places a bare number can only be a clock time.
+   *
+   * `clockTail` is what has to come back out of the title afterwards: the
+   * number was read as the time, so leaving it in produced meetings called
+   * "Lunch 12" and "Standup 9".
+   *
+   * First: the destination of a move. With a "to" or an arrow in the sentence
+   * the target half stands alone, so a clock elsewhere belongs to the meeting
+   * being moved and cannot be confused with where it is going — "move 3pm -> 4"
+   * goes to four. Without a separator the whole line is the target half, and a
+   * clock in it is the subject: "move my 3pm" names a meeting and gives
+   * nowhere to put it.
+   *
+   * Second: a kind of meeting and a trailing number — "lunch 12", "standup 9",
+   * "1:1 bob 2", which is the whole grammar of a telegraphic booking. A unit
+   * after the number rules it out, so "board deck 2h" is still a length, and
+   * so does a month in front of it, because "board call sept 3" is the third
+   * of September and was booking at three o'clock.
+   */
+  let clockTail = null;
+  if (!timeOnly && intent === INTENTS.MOVE_EVENT && (targetPhrase !== body || !hasClock(s))) {
+    const bare = targetPhrase.trim().match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*[.!?]*$/);
+    if (bare) {
+      let h = Number(bare[1]);
+      if (h >= 1 && h <= 7) h += 12;
+      if (h <= 23) {
+        timeOnly = { h, m: Number(bare[2] || 0), source: "terse-target" };
+        // Out of the title as well, when it is on the end of the line: "shift
+        // the standup to 10" was leaving a meeting named "10" behind it.
+        clockTail = body.match(/(?:^|\s)\d{1,2}(?::\d{2})?\s*[.!?]*$/)?.[0] ?? null;
+      }
+    }
+  } else if (!timeOnly && kindNoun) {
+    const bare = body.match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*[.!?]*$/);
+    const isDayOfMonth =
+      /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\w*\.?\s+\d{1,2}\s*[.!?]*$/i.test(body);
+    if (bare && !isDayOfMonth && !/\b(?:quick|fast|short|brief|little)\s+\d{1,3}\s*$/i.test(body)) {
+      let h = Number(bare[1]);
+      if (h >= 1 && h <= 6) h += 12;
+      if (h <= 23) {
+        timeOnly = { h, m: Number(bare[2] || 0), source: "terse-noun" };
+        clockTail = bare[0];
+      }
+    }
+  }
+
+  /**
+   * A clock read by one of the terse rules above has to reach `when`, which
+   * was built before they ran. A no-op whenever `parseDateTime` already found
+   * the time itself, which is the ordinary case.
+   */
+  if (timeOnly && !when?.hadTime) {
+    const day = when?.hadDate ? new Date(when.at) : (dateOnly ? new Date(dateOnly) : now);
+    const at = atLocal(day, timeOnly.h, timeOnly.m);
+    if (!when?.hadDate && !dateOnly && at <= now) at.setDate(at.getDate() + 1);
+    when = { at, hadTime: true, hadDate: Boolean(when?.hadDate || dateOnly) };
+  }
   // Whether this sentence merely *mentions* a destructive verb rather than
   // asking for one. Acted on in `ask`, before anything is allowed to run.
   const refuses = refusalIn(s, unwrap(body).toLowerCase().trim());
   const allDay = /\ball[- ]?day\b|\bwhole day\b|\bentire day\b|\bfull day\b/i.test(body);
 
+  // The number that was read as the clock comes back out of the title, or
+  // "lunch 12" lands on the calendar as a meeting called "Lunch 12".
+  const title = cleanTitle(clockTail ? said.replace(clockTail, " ") : said, people, subject);
+
   // "lunch with priya friday at 12" — nobody writes a verb in front of that.
   // A meeting noun with a time attached is a booking, and the only reason it
   // needed "schedule" in front was that the rules were looking for a verb.
   if (intent === INTENTS.UNKNOWN && kindNoun && (dateOnly || timeOnly)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  /**
+   * "call w/ priya", "1:1 w/ bob" — a kind of meeting and who it is with, and
+   * not one word more.
+   *
+   * The "with" is load-bearing and required. "Call Priya" is a job to do and
+   * belongs to the bare-imperative rule below; "a call with Priya" is a
+   * meeting, and the preposition is the only thing separating them. Ahead of
+   * that rule for exactly that reason — `call` is on its verb list too, and it
+   * was winning both readings.
+   */
+  if (intent === INTENTS.UNKNOWN && kindNoun && people.length && /\bwith\b/i.test(s)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  /**
+   * "dentist tues 3." "retro thurs 4." "walkthrough munich thurs 2."
+   *
+   * A name, a day and a clock, with no verb and no word for a meeting anywhere
+   * in it — which is the whole of the telegraphic register, and every one of
+   * these was reaching the follow-up machinery instead. Read as a fragment,
+   * "dentist tues 3" means *change the last thing to Tuesday at three*, which
+   * against the wrong previous turn moves a real meeting.
+   *
+   * Both halves of the when are required, and that is what makes it safe to
+   * sit here. With only a day it is a deadline — "deck fri" — and with only a
+   * clock it is a correction — "@3pm" — and both of those are still fragments.
+   * A deadline word rules it out outright: "deck due fri 5" is a task.
+   */
+  if (intent === INTENTS.UNKNOWN && dateOnly && timeOnly && title &&
+      !/\bdue\b|\bdeadline\b/i.test(s)) {
     intent = INTENTS.CREATE_EVENT;
   }
 
@@ -2024,6 +2372,19 @@ export function parse(text, now = new Date()) {
   // anywhere — which is a complete request and was falling through because
   // every rule wanted to be told what to do with it first.
   if (intent === INTENTS.UNKNOWN && people.length && (dateOnly || timeOnly)) {
+    intent = INTENTS.CREATE_EVENT;
+  }
+
+  // Ahead of the bare-imperative rule below, which owns "prep" and "review"
+  // and was reading "prep 30m before board call" as a job to do. A position
+  // relative to a meeting is a position on the calendar.
+  // "Put a debrief right after the board call." There is no clock in that
+  // sentence at all, which is exactly why every phrasing like it fell through
+  // — the booking rules are looking for a time and this names a position
+  // instead. Something has to be being placed, though: a kind of meeting, a
+  // person, or a placement verb. "After the board call" on its own is a
+  // fragment and belongs to the follow-up machinery, not to a new booking.
+  if (intent === INTENTS.UNKNOWN && anchor && (kindNoun || people.length || PLACE_VERB.test(s))) {
     intent = INTENTS.CREATE_EVENT;
   }
 
@@ -2055,16 +2416,6 @@ export function parse(text, now = new Date()) {
     intent = INTENTS.CREATE_EVENT;
   }
 
-  // "Put a debrief right after the board call." There is no clock in that
-  // sentence at all, which is exactly why every phrasing like it fell through
-  // — the booking rules are looking for a time and this names a position
-  // instead. Something has to be being placed, though: a kind of meeting, a
-  // person, or a placement verb. "After the board call" on its own is a
-  // fragment and belongs to the follow-up machinery, not to a new booking.
-  if (intent === INTENTS.UNKNOWN && anchor && (kindNoun || people.length || PLACE_VERB.test(s))) {
-    intent = INTENTS.CREATE_EVENT;
-  }
-
   const slots = {
     when: when?.at ?? null,
     hadTime: when?.hadTime ?? false,
@@ -2082,7 +2433,7 @@ export function parse(text, now = new Date()) {
     projectAsk: projectMoneyAsk(body),
     targetPhrase,
     // Title with verbs, temporal phrases, and priority wording removed.
-    title: cleanTitle(said, people, subject),
+    title,
     rename: extractRename(body),
     people,
     subject,
@@ -2140,6 +2491,10 @@ export function parse(text, now = new Date()) {
     // reports success.
     plural: PLURAL_PRONOUN.test(s),
     compound: Boolean(compound),
+    // "call priya fri 10; deck 2h due fri" — the half of the line that was not
+    // acted on. Null for the overwhelming majority of sentences, which carry
+    // one instruction.
+    more,
     fragment,
     slots,
   };

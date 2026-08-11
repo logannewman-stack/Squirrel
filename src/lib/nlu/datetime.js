@@ -268,6 +268,46 @@ function spokenClock(s, mer) {
  */
 export const OCLOCK = /\b(\d{1,2})\s*o'?\s*c?l[o0]?c?k\b/i;
 
+/**
+ * A stretch written as two clock times: "3-4pm", "2 to 4", "9 until 11:30".
+ *
+ * The booking starts at the near end. Read before the digit scan, which walks
+ * past a bare "3" looking for something explicit and comes back with the *far*
+ * end — so "3-4pm board call" landed at four o'clock, an hour after it starts.
+ * The meridiem carries backwards from the far end, because nobody writes
+ * "3pm-4pm".
+ *
+ * The digit guards on both sides are what keep it off "2026-08-05": inside a
+ * longer run of digits and dashes this is a date, not a range.
+ */
+const TIME_SPAN =
+  /(?<![\d/:-])\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b(?!\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b|days?\b|weeks?\b|months?\b|people\b))(?![\d/-])/i;
+
+/**
+ * Days, in every abbreviation anyone types. Shared with `parse.js`, which uses
+ * the same pattern to decide whether a sentence names one meeting or a stretch
+ * of a day.
+ */
+const DAY_WORD = "mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|tonight|tmrw";
+
+/**
+ * A clock time in the telegraphic register: "fri 10", "10 fri", "tues 3".
+ *
+ * This is the shape the whole shorthand turns on — "call priya fri 10" — and
+ * it carried no time at all, so the meeting landed at the nine o'clock default
+ * with the hour still sitting in its name: "Priya 10".
+ *
+ * A bare number is normally too ambiguous to be a time, which is why the scan
+ * above insists on a meridiem, a colon or an "at". So this is held to the one
+ * context where nothing else fits: directly beside the name of a day. The
+ * lookahead is what keeps "sept 3" a date, "the 4th" an ordinal, and "fri 2h"
+ * a length.
+ */
+export const TERSE_CLOCK = new RegExp(
+  `\\b(?:${DAY_WORD})s?\\b[ \\t]*(\\d{1,2})(?::(\\d{2}))?\\b` +
+  `(?!\\s*(?:st|nd|rd|th|[ap]\\.?m|o'?clock|h\\b|hrs?\\b|hours?\\b|m\\b|mins?\\b|minutes?\\b))(?![\\d/:-])` +
+  `|(?<![\\d/:-])\\b(\\d{1,2})(?::(\\d{2}))?\\s+(?:on\\s+)?(?:${DAY_WORD})s?\\b`, "i");
+
 export function parseTime(text) {
   const s = text.toLowerCase();
   // "in the evening" is a meridiem with no am or pm in it. Read once, up front,
@@ -285,6 +325,16 @@ export function parseTime(text) {
   // has its time in the words, and the digit scan below would take the date.
   const said = spokenClock(s, dayMer);
   if (said) return said;
+
+  const span = s.match(TIME_SPAN);
+  if (span) {
+    const hour = Number(span[1]);
+    const mins = span[2] ? Number(span[2]) : 0;
+    const mer = span[3] || span[6] || dayMer;
+    if (hour <= 23 && mins <= 59 && Number(span[4]) <= 23) {
+      return { h: disambiguateHour(hour, mer), m: mins, source: span[0].trim() };
+    }
+  }
 
   // 3pm, 3:30 pm, 15:00, at 2
   //
@@ -304,6 +354,17 @@ export function parseTime(text) {
     const explicit = Boolean(mer || m[3] || m[1]);
     if (hour <= 23 && mins <= 59 && explicit) {
       return { h: disambiguateHour(hour, mer), m: mins, source: m[0].trim() };
+    }
+  }
+
+  // "call priya fri 10". Tried after everything explicit and before the parts
+  // of the day, so "friday morning 10" is ten o'clock rather than nine.
+  const terse = s.match(TERSE_CLOCK);
+  if (terse) {
+    const hour = Number(terse[1] ?? terse[3]);
+    const mins = Number(terse[2] ?? terse[4] ?? 0);
+    if (hour <= 23 && mins <= 59) {
+      return { h: disambiguateHour(hour, dayMer), m: mins, source: terse[0].trim() };
     }
   }
 
@@ -803,6 +864,15 @@ export function parseDuration(text) {
   }
   const wordMins = s.match(new RegExp(`\\b(${NUM_WORDS})\\b(?:\\s+of)?\\s*(?:m\\b|mins?\\b|minutes?\\b)`));
   if (wordMins) return WORD_NUMBERS[wordMins[1]];
+
+  /**
+   * "1h30", "2h15", "1h30m" — hours and minutes run together with nothing
+   * between them, which is how a length gets typed by somebody who types it
+   * every day. Read before the separate hour and minute scans, which see only
+   * the "1h" and book an hour.
+   */
+  const run = s.match(/\b(\d{1,2})\s*h(?:rs?|ours?)?\s*(\d{1,2})\s*(?:m|mins?|minutes?)?\b(?![\d:])/);
+  if (run && Number(run[2]) <= 59) return Number(run[1]) * 60 + Number(run[2]);
 
   const hm = s.match(/\b(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b)/);
   const mm = s.match(/\b(\d+)\s*(?:m\b|mins?\b|minutes?\b)/);

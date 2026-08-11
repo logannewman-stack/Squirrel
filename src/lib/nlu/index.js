@@ -297,7 +297,49 @@ export const EXAMPLES = [
  * @param {object} [opts] `{ now, resolvedId }` — resolvedId answers a prior choice.
  * @returns {{text: string, actions: {summary: string}[], choices: object|null}}
  */
+/**
+ * One turn, and the half of it she has not done yet.
+ *
+ * A line can carry two instructions — "book lunch Friday, cancel the 4pm" —
+ * and the parser deliberately answers only the first, because reading the
+ * whole line produced a meeting called "Priya 10; deck" at the wrong hour and,
+ * worse, sometimes acted on the *second* verb: that sentence used to cancel a
+ * meeting and book nothing.
+ *
+ * Answering half is the right behaviour. Answering half and reporting it as
+ * done is not — somebody who asked for two things and is told "Booked 1h
+ * Friday" will believe the 4pm is cancelled, and find out when they turn up to
+ * it. So the remainder is said back, in their own words, as something they can
+ * repeat.
+ *
+ * Not offered where there is already a question on the table: a disambiguation
+ * has to be answered before anything else can be, and stacking a second
+ * instruction onto "which one did you mean?" is how a person ends up answering
+ * neither.
+ */
 export function ask(text, state, opts = {}) {
+  const out = answer(text, state, opts);
+  // Already offered further down a recursive call — confirming "yes" re-enters
+  // here with the original sentence, and it must not be offered twice.
+  if (!out || out.moreOffered || out.choices?.length) return out;
+  /**
+   * Read off a parse rather than re-split here, because there are two kinds of
+   * cut and only the parser knows about both: a semicolon or a comma between
+   * two command verbs is decided up front, while an "and" is cut inside the
+   * move rule — deliberately, since "cancel my one o'clock and reschedule it
+   * for Saturday" is a single move stated as two clauses, and splitting that
+   * globally turns it into a cancellation.
+   */
+  const rest = parse(text, opts.now || new Date()).more;
+  if (!rest) return out;
+  return {
+    ...out,
+    moreOffered: true,
+    text: `${out.text}\n\nI've only done the first part — say “${rest}” and I'll do the rest.`,
+  };
+}
+
+function answer(text, state, opts = {}) {
   const now = opts.now || new Date();
   const memory = opts.memory ?? state.memory ?? EMPTY_MEMORY;
   let p = parse(text, now);
