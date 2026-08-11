@@ -58,7 +58,11 @@ const RULES = [
   // The suffix after "you" is required, not optional. Left optional, a bare
   // "you" matched — and since courtesies are checked first, "you still there?"
   // was answered "Ready when you are" instead of "Still here".
-  [SMALL.HOWAREYOU, /^(?:how'?s\b|how (?:is|are|do you|goes|have you)\b|you(?: ok| okay| good| alright| doing| about)\b|what'?s (?:up|new|good)\b)/],
+  // `how's` needs its object. Bare, it caught "hows the munich thing going" —
+  // a question about the user's own work, answered "Ready when you are". What
+  // makes the phrase a courtesy is that it asks after *her*, and the short list
+  // of things it can ask after is closed: it, things, life, your day.
+  [SMALL.HOWAREYOU, /^(?:how'?s (?:it|everything|things|life|your|the world|tricks)\b|how'?s\s*[?.!]*$|how (?:is|are|do you|goes|have you)\b|you(?: ok| okay| good| alright| doing| about)\b|what'?s (?:up|new|good)\b)/],
   [SMALL.THANKS, /^(?:thanks?|thank you|thx|ty|cheers|nice|great|perfect|awesome|amazing|excellent|lovely|brilliant|superb|fantastic|appreciate|much appreciated|good (?:job|work|stuff)|well done|nicely done|you'?re the best)\b/],
   [SMALL.BYE, /^(?:bye+|goodbye|see ya|see you|catch you|goodnight|good night|night|later|i'?m off|signing off|that'?s (?:all|it)|that'?ll be all|that will be all|talk (?:soon|to you)|done for (?:today|now))\b/],
   [SMALL.SORRY, /^(?:sorry|my bad|oops|whoops|my mistake|apologies|nevermind|never mind)\b/],
@@ -137,8 +141,17 @@ const COURTESY = new Set([
  * "hi, what does Friday look like?" into a greeting too. A courtesy is short
  * and mentions nothing schedulable; that is the actual distinction.
  */
+/**
+ * The shorthand halves of these words count too.
+ *
+ * "How's tomorrow looking" reaches the parser; "how's tmrw looking" was
+ * answered "Ready when you are" — five words, and not one of them on this list,
+ * so a question about the diary was read as a pleasantry. Typing the short form
+ * is the norm on a phone, and this gate is the one place in the app where not
+ * knowing it loses the whole request rather than merely misreading it.
+ */
 const HAS_REQUEST =
-  /\d|\b(?:schedule|book|block|move|cancel|delete|reschedul\w*|push|remind|plan|add|create|task|tasks|meeting|meetings|call|project|projects|deadline|due|calendar|free|busy|today|tomorrow|tonight|yesterday|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|am|pm|hour|hours|minute|minutes|undo|revert|restore|back)\b/i;
+  /\d|\b(?:schedule|book|block|move|cancel|delete|reschedul\w*|push|remind|plan|add|create|task|tasks|meeting|meetings|call|project|projects|deadline|due|calendar|free|busy|today|tomorrow|tonight|yesterday|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|am|pm|hour|hours|minute|minutes|undo|revert|restore|back|tmrw|tmr|tmw|2moro|2day|tonite|arvo|wknd|eod|cob|asap|mins?|hrs?|mon|tues?|weds?|thur?s?|fri|sat|sun)\b/i;
 
 export function classify(text) {
   const bare = trim(text);
