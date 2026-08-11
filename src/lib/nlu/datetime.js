@@ -456,6 +456,30 @@ export function parseDate(text, now = new Date()) {
     return { date: d, source: coarse[0] };
   }
 
+  /**
+   * Office shorthand for a deadline, read last so anything more specific in
+   * the same sentence wins: "COB Friday" is Friday, not today, because the
+   * weekday matcher above has already claimed it.
+   *
+   * Every one of these resolves to a date rather than a time. "EOD" does mean
+   * the end of the working day, but a deadline in this app is a day — and
+   * inventing 17:00 out of it would put a false precision on the screen.
+   */
+  const shorthand = s.match(
+    /\b(?:eow|e\.o\.w|end of (?:the )?week)\b|\b(?:eod|e\.o\.d|eop|end of (?:play|business|the day|day)|close of (?:business|play)|by close|cob|c\.o\.b)\b|\bthis quarter\b/,
+  );
+  if (shorthand) {
+    const d = new Date(base);
+    const word = shorthand[0];
+    if (/^(?:eow|e\.o\.w|end of)/.test(word) && /week/.test(word)) {
+      // Friday of the week it is said in, which is what "end of week" buys.
+      d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7));
+    } else if (/quarter/.test(word)) {
+      d.setMonth(Math.floor(d.getMonth() / 3) * 3 + 3, 0);
+    }
+    return { date: d, source: word };
+  }
+
   // "sometime this week", "later this week" — treated as the end of it, since
   // vague intent with a deadline attached means "before it runs out".
   const thisWeek = s.match(/\b(?:some ?time|any ?time|at some point)?\s*(this|next) week\b/);

@@ -28,7 +28,27 @@ import { interpret, hasResolver, contextFor } from "./fallback.js";
 import { findFreeSlots, fmtTime, workOn } from "../agenda.js";
 import { distribute, describePlan, projectLoad, describeLoad, triage, isWorkday } from "../schedule.js";
 import { planOpts, hoursOf, describeHours, sayMins, saySpan, sayHour, weeklyMins } from "../hours.js";
-import { duration } from "../format.js";
+import { duration, money } from "../format.js";
+
+/**
+ * Which project a sentence is about, when it never says the word "project".
+ *
+ * "How much is the Q3 launch worth" names one and `projectPhrase` cannot see
+ * it — that function is anchored on the noun, which is exactly what this shape
+ * of question leaves out. So the names are matched against the sentence
+ * instead, longest first, because "Series B" and "Series B Extension" both
+ * appear in a sentence about the second one.
+ */
+function namedProject(text, phrase, live) {
+  const s = String(text ?? "").toLowerCase();
+  const byName = [...live]
+    .filter((x) => x.name && s.includes(x.name.toLowerCase()))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+  if (byName) return byName;
+  if (!phrase) return null;
+  const hit = resolveProject(phrase, live);
+  return hit.length && isConfident(hit) ? hit[0].item : null;
+}
 
 const DEFAULT_MEETING_MINS = 60;
 const DEFAULT_TASK_MINS = 30;
@@ -926,6 +946,59 @@ export function ask(text, state, opts = {}) {
       const live = state.projects.filter((x) => !x.archived);
       if (!live.length) {
         return reply("No projects yet. Say \u201cstart a project called \u2026\u201d and I'll make one.");
+      }
+
+      /**
+       * "How much is the Q3 launch worth?" "Who's the client on Series B?"
+       *
+       * Routing this correctly was only half of it. The answer below is
+       * composed from `projectLoad`, which counts tasks and minutes and knows
+       * nothing about `value` or `client` — so a correctly-routed money
+       * question came back as a list of task estimates with no money in it,
+       * which reads exactly like the app not holding the number at all.
+       */
+      if (slots.projectAsk) {
+        const named = namedProject(p.body, slots.project, live);
+        const money_ = slots.projectAsk.money;
+
+        if (named) {
+          const bits = [];
+          if (money_ || named.value != null) {
+            bits.push(named.value != null
+              ? `${named.name} is worth ${money(named.value)}`
+              : `${named.name} has no value on it`);
+          }
+          if (slots.projectAsk.client || named.client) {
+            bits.push(named.client
+              ? `${bits.length ? "for " : `${named.name} is for `}${named.client}`
+              : `${bits.length ? "with " : `${named.name} has `}no client set`);
+          }
+          return reply(`${bits.join(", ")}.`,
+            [], { entity: { kind: "project", id: named.id } });
+        }
+
+        // No one project named, so the question is about the portfolio.
+        if (!money_ && slots.projectAsk.client) {
+          const named2 = live.filter((x) => x.client);
+          if (!named2.length) return reply("None of your projects has a client on it yet.");
+          return reply(
+            `${named2.length === 1 ? "One client" : `${named2.length} clients`}:\n\n` +
+            named2.map((x) => `\u2022 ${x.client} \u2014 ${x.name}`).join("\n"), [], { entity: null });
+        }
+
+        const valued = live.filter((x) => Number(x.value) > 0)
+          .sort((a, b) => Number(b.value) - Number(a.value));
+        if (!valued.length) {
+          return reply("None of your projects has a value on it yet, so I can't rank them by what they're worth.");
+        }
+        const totalValue = valued.reduce((n, x) => n + Number(x.value), 0);
+        const unpriced = live.length - valued.length;
+        return reply(
+          `${money(totalValue)} across ${valued.length} ${valued.length === 1 ? "project" : "projects"}.\n\n` +
+          valued.slice(0, 6).map((x) =>
+            `\u2022 ${x.name} \u2014 ${money(x.value)}${x.client ? ` \u00b7 ${x.client}` : ""}`).join("\n") +
+          (unpriced > 0 ? `\n\n${unpriced} more with no value set.` : ""),
+          [], { entity: null });
       }
 
       const lines = live.slice(0, 8).map((project) => {

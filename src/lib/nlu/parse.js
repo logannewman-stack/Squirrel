@@ -154,9 +154,54 @@ const SAYS_PRIORITY = /\b(?:make|mark|set|bump|flag|treat)\b[^.]*\b(?:critical|u
 // past EDIT_TASK to MOVE_EVENT two rules later and moved an actual meeting.
 // The noun is how most people say it; the adjective "due" is the minority form.
 const SAYS_DUE = /\b(?:is |isn'?t |is not )?(?:due|deadline|not due until|needed by|wanted by|has to be (?:done|in|ready) by)\b/i;
+/**
+ * The office shorthand for a deadline, which contains the word "due" nowhere.
+ *
+ * "I need the letter by EOW" and "the review needs to be done by close" are
+ * deadlines stated the way anyone in an office states them, and every one of
+ * them fell through to "I didn't catch that". The preposition is required:
+ * bare "close" and bare "first thing" are ordinary words, and only "by close"
+ * and "for first thing" are unmistakably a date.
+ */
+const SAYS_DUE_IDIOM =
+  /\b(?:by|for|before|due)\s+(?:the\s+)?(?:eod|e\.o\.d|cob|c\.o\.b|eow|e\.o\.w|eop|close of (?:business|play)|close|end of (?:play|business|day|week|month|the (?:day|week|month))|first thing|start of play)\b/i;
 const SAYS_REOPEN = /\b(?:re-?open|un-?complete|un-?tick|un-?check|not done|isn'?t done|didn'?t (?:actually )?finish|still open|mark .* (?:as )?(?:not done|undone|open))\b/i;
 const SAYS_TASK_DELETE = /\b(?:delete|remove|drop|bin|scrap|get rid of)\b[^.]*\btasks?\b|\btasks?\b[^.]*\b(?:delete|removed?)\b/i;
 const SAYS_RENAME = /\b(?:rename|re-?title|call it|title it|name it)\b/i;
+/**
+ * Work put down rather than done. "Park the board deck." "Shelve it for now."
+ *
+ * Every one of these fell through to "I didn't catch that", which is a strange
+ * answer to the commonest thing anyone says about a list that got too long. It
+ * is an edit to a task and not a deletion of one — "kill the Monday sync" is
+ * genuinely a cancellation and keeps its own rule; parking is reversible and
+ * deleting is not, so the two must not share a verb list.
+ *
+ * The leading form is anchored on purpose. "Table" is a noun far more often
+ * than it is a verb, and an unanchored one would read "book a table for
+ * Friday" as a request to deprioritise something.
+ */
+const SAYS_PARKED =
+  /^\s*(?:(?:let'?s|lets|we should|we can|maybe|just|please|can we|i'?ll)\s+)*(?:park|shelve|table|backlog|punt|de-?prioriti[sz]e)\b/i;
+/** The same thing said mid-sentence, where the object pins the verb down. */
+const SAYS_PARKED_OBJECT =
+  /\b(?:park|shelve|backlog|punt|de-?prioriti[sz]e)(?:s|d|ed|ing)?\s+(?:it|that|this|them|the|my|our)\b/i;
+/**
+ * "Put the deck on the back burner." "Put it on hold."
+ *
+ * Opens with a creation verb and creates nothing, so it is settled ahead of
+ * the guard below that would otherwise hand the sentence to CREATE_EVENT.
+ * Safe to put there because the idiom is unmistakable — nothing else in a
+ * calendar is on a back burner.
+ */
+const BACK_BURNER = /\bon (?:the )?back ?burner\b|\bput (?:it|that|this|them|the [\w'’ -]{2,30}?) on hold\b/i;
+/**
+ * All three shapes at once, so the priority level below is the same test that
+ * routed the sentence rather than a second list that can drift from it. That
+ * mattered immediately: a looser word list put "table" in the priority table
+ * and "put the table in the boardroom" started reading as a fragment.
+ */
+const PARKED = new RegExp([SAYS_PARKED.source, SAYS_PARKED_OBJECT.source, BACK_BURNER.source].join("|"), "i");
 /**
  * "The board call is about the term sheet."
  *
@@ -193,14 +238,17 @@ export function isTaskEdit(body) {
   const s = body.toLowerCase();
   // A clock time means a meeting is being talked about, not a task's length.
   if (hasClock(s)) return false;
+  if (BACK_BURNER.test(s)) return true;
   // "Add a task to sign the lease, high priority, due Friday" names a priority
   // and a deadline and is nonetheless a creation. The leading verb governs.
   if (IS_CREATION.test(s)) return false;
   return (
     SAYS_LENGTH.test(s) || SAYS_PRIORITY.test(s) || SAYS_REOPEN.test(s) ||
+    PARKED.test(s) ||
     SAYS_TASK_DELETE.test(s) || SAYS_RENAME.test(s) || Boolean(placeIn(body)) ||
     SAYS_SUBJECT.test(s) || SAYS_FORMAT.test(s) ||
-    (SAYS_DUE.test(s) && /\b(?:the|my)\b/.test(s))
+    (SAYS_DUE.test(s) && /\b(?:the|my)\b/.test(s)) ||
+    (SAYS_DUE_IDIOM.test(s) && /\b(?:the|my|our)\b/.test(s))
   );
 }
 
@@ -641,6 +689,58 @@ export function projectPhrase(body) {
 /** Does this sentence talk about a project at all? A cheap guard for the rules. */
 const MENTIONS_PROJECT = /\bprojects?\b/i;
 
+/**
+ * What a project is worth, and who it is for.
+ *
+ * `project.value` and `project.client` are stored on every project and printed
+ * on two screens, and until now not one word of either appeared anywhere in
+ * this file. Measured against the live table, that had two consequences and
+ * both are worse than a miss: "how much money is in the Q3 launch project"
+ * reached EDIT_TASK, where `placeIn` read "in the q3 launch project" as a
+ * *location* and set it on a task; and "who is the client on Q3 launch" was
+ * answered "that's outside what I know" — about data the app is holding.
+ *
+ * Narrow on purpose. "Budget 2 hours for the review" is an estimate and stays
+ * one; "arrange a call with the client friday" is a booking and stays one. So
+ * the money words are only believed inside an actual question, and only when
+ * there is no duration in the sentence to say the noun meant time instead.
+ */
+const MONEY_WORD =
+  /\bworth\b|\bvalue[ds]?\b|\bvaluable\b|\bvaluation\b|\brevenues?\b|\bbudgets?\b|\bmoney\b|\bfees?\b|\bbilling\b|\bdeal size\b|\bcontract value\b|\bpipeline\b|\briding on\b/i;
+
+/** Who is paying for it. */
+const CLIENT_WORD = /\bclients?\b|\bcustomers?\b|\bwho(?:'?s| is) paying\b|\bpaying for\b/i;
+
+/** Asked rather than instructed — tested after the polite wrapper comes off. */
+const ASKS_A_QUESTION =
+  /^\s*(?:who|what|which|whose|how much|how many|how big|list|show|tell me|rank|sort)\b|\bwho(?:'?s| is| are| was)\b|\bwhat(?:'?s| is| are)\b|\bwhich\b|\bhow much\b|\bhow many\b/i;
+
+/** "Total value of my projects" — a question with no question word in it. */
+const BARE_VALUE_PHRASE =
+  /^\s*(?:(?:the|my|our|total|overall|combined)\s+)*(?:value|worth|revenue|budget|clients?)\s+(?:of|on|for)\b/i;
+
+/**
+ * Is this a question about a project's money or its client?
+ *
+ * @returns {{money: boolean, client: boolean}|null}
+ */
+export function projectMoneyAsk(body) {
+  const s = String(body ?? "").toLowerCase();
+  const money = MONEY_WORD.test(s);
+  const client = CLIENT_WORD.test(s);
+  if (!money && !client) return null;
+  if (!ASKS_A_QUESTION.test(s) && !BARE_VALUE_PHRASE.test(s)) return null;
+  /**
+   * A length is an estimate, not a price. "Budget 2 hours for the review" and
+   * "what's the budget on Q3" share a noun and mean opposite things, and the
+   * one that means time always says how much of it.
+   */
+  if (hasClock(s) || /\b\d+(?:\.\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)\b/i.test(s)) return null;
+  // "Start a project called Series B" is a creation however it ends.
+  if (MAKES_A_PROJECT.test(s)) return null;
+  return { money, client };
+}
+
 /** The verb sits immediately before the noun: "start a project", "new project". */
 const MAKES_A_PROJECT =
   /\b(?:new|start|create|set ?up|begin|open|make|add)\b(?:\s+(?:a|an|another|the))?\s+(?:new\s+)?projects?\b/i;
@@ -669,7 +769,7 @@ const FILES_UNDER =
 
 /** A first-person report of being under it. "I'm swamped." "I'm so behind." */
 const FEELS_UNDER =
-  /^\s*(?:i'?m|im|i am|i feel|feeling|we'?re|were)\b[^.?!]{0,40}?\b(?:swamped|slammed|buried|drowning|underwater|overwhelmed|overloaded|stressed|frazzled|burnt? ?out|spread thin|losing it|in trouble|behind|snowed under|maxed out|out of time|in over my head|never going to (?:finish|get|make)|not going to (?:finish|get|make)|falling apart|falling behind|failing|sinking|stuck)\b/i;
+  /^\s*(?:i'?m|im|i am|i feel|feeling|we'?re|were)\b[^.?!]{0,40}?\b(?:swamped|slammed|buried|drowning|underwater|overwhelmed|overloaded|stressed|frazzled|burnt? ?out|spread thin|losing it|in trouble|behind|snowed under|maxed out|out of time|in over my head|never going to (?:finish|get|make)|not going to (?:finish|get|make)|falling apart|falling behind|failing|sinking|stuck|at capacity|stretched|back[- ]to[- ]back|wall[- ]to[- ]wall|out of bandwidth|short on bandwidth)\b/i;
 
 /** Nothing specific is named, because everything is the problem. */
 const ALL_OF_IT =
@@ -848,6 +948,18 @@ const RULES = [
   // has the exact shape of an estimate — a task, a number, a unit — and being
   // read as one would quietly replace a six-hour job with a two-hour one.
   [INTENTS.SPREAD_TASK, /\b(?:spread|split|divide|break (?:it |them |this |that )?up|chunk|stagger|stretch|lay)\b[^.]*\b(?:across|over|out|between|into|through|up)\b|\b(?:\d+|an?|one|two|three|four|half an?)\s*(?:h\b|hrs?\b|hours?\b|m\b|mins?\b|minutes?\b)\s*(?:a|per|each|every)\s+day\b/],
+  /**
+   * Above EDIT_TASK because `placeIn` reads "…is in the Q3 launch project" as
+   * a location and writes it to a task — a question answered by changing data,
+   * which is the worst thing in this file. Above QUERY_DAY, twelve rules
+   * further down, because "what's the value of the Atlas project" opens with
+   * "what's" and that rule owns the word. Below PLAN_DAY, which keeps "what's
+   * worth doing" as the triage question it is.
+   *
+   * QUERY_PROJECTS only ever reads, so a wrong match here costs an answer and
+   * never a record.
+   */
+  [INTENTS.QUERY_PROJECTS, (body) => Boolean(projectMoneyAsk(body))],
   [INTENTS.EDIT_TASK, isTaskEdit],
   // Two meetings changing places. Ahead of MOVE because "swap X and Y" has no
   // move verb in it at all, and a rule that merely tolerated it would move one
@@ -907,7 +1019,13 @@ const RULES = [
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b|\b(?:is|are|'s) (?:done|finished|complete|sorted|handled|out of the way)\b|\bi'?ve (?:done|finished|completed|sorted)\b|\ball done\b|\bwrapped up\b/],
   // `give (?!me)`: "give me something to do" is someone asking for work, not
   // handing it over, and it was being answered with "delegate it to whom?".
-  [INTENTS.DELEGATE_TASK, /\b(delegate|hand off|hand over|assign|pass (?:it |that |the |this )?(?:on |over )?to|(?:hand|give|pass)\s+(?!me\b|us\b)[^.]{2,30}?\s+to)\b/],
+  // "Take the deck off my plate" names no one, and DELEGATE_TASK's answer to
+  // that — "delegate it to whom?" — is exactly the right question. `TAKE_OFF`
+  // and CANCEL_EVENT both only know about a calendar, so neither claims it.
+  [INTENTS.DELEGATE_TASK, (body) =>
+    /\b(delegate|hand off|hand over|assign|pass (?:it |that |the |this )?(?:on |over )?to|(?:hand|give|pass)\s+(?!me\b|us\b)[^.]{2,30}?\s+to)\b/i.test(body) ||
+    /\boff (?:my|his|her|their) plate\b/i.test(body) ||
+    Boolean(ownerFirst(body))],
   // Before MOVE, because "shorten"/"extend" are edits to length rather than
   // to when — and "push the review out by an hour" is genuinely ambiguous, so
   // the explicit length verbs win.
@@ -938,14 +1056,14 @@ const RULES = [
     Boolean(projectPhrase(body))],
   [INTENTS.PLAN_DAY, /\b(plan (?:my|the)? ?(?:day|week|month)|plan today|what should i (?:do|work on)|priorit\w+ (?:my|the) day|schedule (?:my|the) work|spread .* out|when (?:will|can) i (?:do|finish)|will .* fit|fit .* deadline|most urgent|what'?s urgent|behind on|on track|how much .* left|what'?s?(?: is)? left (?:on|for|in|of)\b|how (?:is|are) .* (?:going|doing)|triage|give me something to (?:do|work on)|what can i (?:do|work on)|something to work on|what'?s? (?:first|next up)|what should i (?:drop|cut|skip|postpone|shelve|lose)|(?:am|are) i (?:going to |gonna )?(?:make|hit|miss)\b|will i (?:make|hit|miss)\b|what'?s (?:at risk|slipping|in trouble)|falling behind|realistic)\b/],
   [INTENTS.QUERY_FREE, /\b(free|available|open (?:time|slot)|gaps?|any time|when can i|spare (?:time|hour|minutes?))\b/],
-  [INTENTS.QUERY_DAY, /\b(what(?:'?s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double ?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed))\b/],
+  [INTENTS.QUERY_DAY, /\b(what(?:'?s| is| does)?|show|list|when|do i have|how many|agenda|(?:my|the) schedule|look like|going on|how (?:busy|full|packed|loaded)|on my plate|how'?s? (?:my|the) (?:day|week)|read me|read back|run me through|walk me through|talk me through|anything (?:on|in|this|that|tomorrow|today|tonight|next|left|else|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at|after|before|in the)|clash(?:es)? with|conflicts? with|double[- ]?booked|overbooked|over ?committed|over ?loaded|too (?:full|packed)|bandwidth|at capacity|back[- ]to[- ]back|wall[- ]?to[- ]?wall|(?:have i got|do i have|got|is there) (?:the |any |enough )?(?:room|space|capacity)\b)\b/],
   // A series, not a booking. Checked before create, or only the first one of
   // twelve ever reaches the calendar.
   [INTENTS.REPEAT_EVENT, /\bevery other (?:day|week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\bevery (?:day|weekday|week|other week|month|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:daily|weekly|fortnightly|biweekly|monthly)\b|\brepeat(?:s|ing)?\b|\brecurring\b|\beach (?:day|week|monday|tuesday|wednesday|thursday|friday)\b/],
   // Booking verbs, which is most of them. Every one of these was a real
   // sentence that fell through to "I didn't catch that" — people reach for a
   // startling number of words for "put this on the calendar".
-  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hours?|minutes?|time|slot)|add (?!.*\b(?:task|todo|to-do|reminder)\b).* (?:meeting|call|event))\b/],
+  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) (?:calendar|diary|schedule)|get .* (?:on|in) (?:my|the) (?:calendar|diary|schedule)|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hours?|minutes?|time|slot)|add (?!.*\b(?:task|todo|to-do|reminder)\b).* (?:meeting|call|event))\b/],
   // The reporting voice. "I've got the dentist Friday at 9" is a booking with
   // no booking verb in it — people say what is happening as often as they ask
   // for it to be arranged. Guarded on there being a day or a clock, so "I've
@@ -969,6 +1087,10 @@ const PRIORITY = [
   [/\b(critical|urgent|asap|drop everything)\b/, "critical"],
   [/\b(high priority|important|high)\b/, "high"],
   [/\b(low priority|whenever|low|someday)\b/, "low"],
+  // Parking something is how anybody actually says "low priority", and the
+  // rule that routes it to EDIT_TASK had no level to set — so the edit landed
+  // with nothing in it and she answered "I'm not sure what to change".
+  [PARKED, "low"],
 ];
 
 /**
@@ -1001,7 +1123,16 @@ const PRONOUN = /\b(?:it|that one|that|this one|them|those|the meeting|the event
 const PLURAL_PRONOUN = /\b(?:them|those|these|they|both|all of (?:them|it|those)|the rest of (?:them|it)|everything)\b/i;
 
 /** The noun that decides whether a bare booking is a "Call" or a "Meeting". */
-const KIND_NOUN = /\b(call|meeting|sync|standup|stand-up|interview|review|1:1|one on one|lunch|dinner|coffee|appointment|catch ?up|break|breather|debrief|prep|block|slot|session|walk|workout|gym|school run|commute|travel|drive|flight|train)\b/i;
+/**
+ * The office names for a meeting were missing from this list, so a sentence
+ * with no booking verb in it — "let's touch base tomorrow at 3", "put the
+ * retro in for Friday at 4" — had nothing to tell the parser a meeting was
+ * being described, and fell through to the follow-up machinery.
+ *
+ * `kick-off` and `all-hands` are held to the hyphenated or joined spellings.
+ * "Kick off" with a space is a verb, and it already belongs to ACTION_VERB.
+ */
+const KIND_NOUN = /\b(call|meeting|sync|standup|stand-up|interview|review|1:1|one on one|lunch|dinner|coffee|appointment|catch ?up|break|breather|debrief|prep|block|slot|session|walk|workout|gym|school run|commute|travel|drive|flight|train|touch ?base|touch-base|all[- ]hands|off-?site|kick-?off|retro(?:spective)?|huddle)\b/i;
 
 /**
  * Words that follow "with" but are not people.
@@ -1021,6 +1152,44 @@ const NOT_A_NAME = new Set([
   // read as removing an attendee named "I" instead of as a cancellation.
   "i", "we", "he", "she", "they", "nobody", "everybody",
 ]);
+
+/**
+ * "Bob is taking point on Munich." "Let Sarah run with the term sheet."
+ *
+ * The person is the subject of the sentence rather than the object of a "to",
+ * which is the only shape `handoffTarget` can see — so all of these fell
+ * through to "I didn't catch that", and the ones that did route asked
+ * "delegate it to whom?" of somebody who had just said whom.
+ *
+ * Held to an explicit hand-off verb directly after the name. Without that,
+ * "Bob can't make the board call" is a cancellation with a name in front of
+ * it, and reading the name as a hand-off target would quietly assign the work
+ * to the one person who just said they were unavailable.
+ */
+const OWNER_FIRST =
+  /^\s*(?:(?:let|get|have|can|could|maybe|perhaps|so)\s+)?([A-Za-z][\w'’-]{1,20})\s+(?:(?:can|could|will|would|should|is|are|'s|'ll|to|has)\s+)?(?:take point|takes point|taking point|take over|takes over|taking over|run with|runs with|running with|pick up|picks up|picking up|owns?|owning|covers?|covering|takes?|taking)\b/i;
+
+function ownerFirst(body) {
+  const text = String(body ?? "");
+  /**
+   * "Who owns the board deck?" has this shape exactly, and reading it as a
+   * hand-off assigned the task to a person named "Who" — a question answered
+   * by changing data, which is the worst thing this file can do. Asking who
+   * has something is a different question from giving it to them, and this
+   * parser has no intent that answers it; a miss is the honest outcome.
+   */
+  if (/^\s*(?:who|whom|whose|what|which|when|where|why|how)\b/i.test(text)) return null;
+  const m = text.match(OWNER_FIRST);
+  if (!m) return null;
+  const name = m[1].trim();
+  if (NOT_A_NAME.has(name.toLowerCase())) return null;
+  if (/^(?:whoever|somebody|anybody|everyone|people|person|noone)$/i.test(name)) return null;
+  if (name.length < 2) return null;
+  // A number is not a person, for the same reason it is not an attendee.
+  if (/^(?:\d|(?:an?|one|two|three|four|five|six|seven|eight|nine|ten|half|couple|few|some)$)/i.test(name)) return null;
+  if (parseDate(name, new Date()) || parseTime(name)) return null;
+  return [m[0], name.replace(/^\w/, (c) => c.toUpperCase())];
+}
 
 /**
  * Who a task is being handed to: "delegate the deck to bob".
@@ -1048,7 +1217,7 @@ function handoffTarget(body) {
   // all, so requiring one on the second word only moved the failure along by a
   // word. "next friday" is caught by the date check below rather than here.
   const m = body.match(/\b(?:to|with|for)\s+([A-Za-z][\w'’-]*(?:\s+[A-Za-z][\w'’-]+)?)\s*$/);
-  if (!m) return null;
+  if (!m) return ownerFirst(body);
 
   const name = m[1].trim();
   const capitalised = /^[A-Z]/.test(name);
@@ -1693,8 +1862,11 @@ export function parse(text, now = new Date()) {
   // sheet." "Chase legal about the lease." This is also what is left after the
   // polite wrapper takes "I need to" off the front, which is most of how
   // anyone actually adds work — and every one of those was falling through.
+  // `stripPolite` rather than `unwrap`: it peels "let's" and "we should" too,
+  // and "we should circle back on the term sheet" is a job to do with a soft
+  // opener in front of it, not a sentence with no verb in it.
   if (intent === INTENTS.UNKNOWN && !timeOnly && !ASKED_OF_HER.test(s) &&
-      ACTION_VERB.test(unwrap(body).trim())) {
+      ACTION_VERB.test(stripPolite(body).trim())) {
     intent = INTENTS.CREATE_TASK;
   }
 
@@ -1735,6 +1907,10 @@ export function parse(text, now = new Date()) {
     subjectPhrase: renameSubject(body) || subjectPhrase,
     // The project a sentence names, as a phrase. Resolved where the data is.
     project: projectPhrase(body),
+    // "…worth", "…the client on…" — which of a project's two commercial
+    // fields was asked about, so the handler answers the question that was
+    // asked instead of reciting the task load for everything.
+    projectAsk: projectMoneyAsk(body),
     targetPhrase,
     // Title with verbs, temporal phrases, and priority wording removed.
     title: cleanTitle(said, people, subject),

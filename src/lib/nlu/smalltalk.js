@@ -117,7 +117,7 @@ const RULES = [
   // `how far` needs its object. Bare, it caught "how far behind am I" — a
   // question about the user's own backlog, answered "that's outside what I
   // know". Distance takes a preposition; being behind does not.
-  [SMALL.OUTSIDE, /\b(?:capital of|weather|who (?:is|was)(?!\s+(?:coming|going|in|on|at|attending|joining|invited|dial|else|with|my|i))|who (?:invented|won)|what is the (?:capital|population|meaning)|how tall|how far (?:is|are|to|from|away|apart)|translate|define|recipe|news|score|stock price|joke|poem|story|write me)\b/i],
+  [SMALL.OUTSIDE, /\b(?:capital of|weather|who (?:is|was)(?!\s+(?:coming|going|in|on|at|attending|joining|invited|dial|else|with|my|i|the (?:client|customer)|paying))|who (?:invented|won)|what is the (?:capital|population|meaning)|how tall|how far (?:is|are|to|from|away|apart)|translate|define|recipe|news|score|stock price|joke|poem|story|write me)\b/i],
 ];
 
 const COURTESY = new Set([
