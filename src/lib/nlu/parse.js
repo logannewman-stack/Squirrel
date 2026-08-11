@@ -150,7 +150,10 @@ export function isClearRange(body) {
  */
 const SAYS_LENGTH = /\b(?:is|will take|takes|needs|should take|is about|is roughly|is around)\b[^.]*\b(?:\d+(?:\.\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)|an? hour|half an hour|(?:one|two|three|four|five|six|seven|eight|nine|ten|couple|few)\s+(?:and a half\s+)?(?:hours?|minutes?|mins?))/i;
 const SAYS_PRIORITY = /\b(?:make|mark|set|bump|flag|treat)\b[^.]*\b(?:critical|urgent|high|low|normal)\b|\bis (?:critical|urgent|high|low)(?: priority)?\b|\b(?:critical|high|low|normal) priority\b/i;
-const SAYS_DUE = /\b(?:is |isn'?t |is not )?(?:due|not due until|needed by|wanted by|has to be (?:done|in|ready) by)\b/i;
+// `deadline` was missing, so "push the board deck deadline to Friday" fell
+// past EDIT_TASK to MOVE_EVENT two rules later and moved an actual meeting.
+// The noun is how most people say it; the adjective "due" is the minority form.
+const SAYS_DUE = /\b(?:is |isn'?t |is not )?(?:due|deadline|not due until|needed by|wanted by|has to be (?:done|in|ready) by)\b/i;
 const SAYS_REOPEN = /\b(?:re-?open|un-?complete|un-?tick|un-?check|not done|isn'?t done|didn'?t (?:actually )?finish|still open|mark .* (?:as )?(?:not done|undone|open))\b/i;
 const SAYS_TASK_DELETE = /\b(?:delete|remove|drop|bin|scrap|get rid of)\b[^.]*\btasks?\b|\btasks?\b[^.]*\b(?:delete|removed?)\b/i;
 const SAYS_RENAME = /\b(?:rename|re-?title|call it|title it|name it)\b/i;
@@ -421,6 +424,17 @@ export function parseAttendees(text) {
     if (!m) continue;
     const who = m[1].trim();
     const phrase = m[2].trim();
+    /**
+     * A number is not a person.
+     *
+     * "Add two hours to the board deck" has the exact shape of "add Priya to
+     * the board call", and this rule sits thirteen places ahead of the one that
+     * wanted it — so it added an attendee literally named "Two hours" to a
+     * meeting. `handoffTarget` already applies a guard of this kind; this rule
+     * simply never got one.
+     */
+    if (/^(?:\d|(?:an?|one|two|three|four|five|six|seven|eight|nine|ten|half|couple|few|some)\b)/i.test(who)) continue;
+    if (/\b(?:h|hrs?|hours?|m|mins?|minutes?|days?|weeks?)\b/i.test(who)) continue;
     // "Take the standup off my calendar" has this exact shape and means delete
     // the standup. The tell is what sits on either side: a meeting where the
     // person should be, and a calendar where the meeting should be.
@@ -707,6 +721,17 @@ const RULES = [
    */
   [INTENTS.QUERY_PROGRESS,
     /\bwhat (?:did|have|'?ve) (?:i|we) (?:do|done|finish|finished|complete|completed|get|got|accomplish\w*|achieve\w*)\b|\bhow much (?:did|have) (?:i|we)\b|\bwhat'?s (?:been )?(?:done|finished|completed)\b/],
+  /**
+   * "I have to finish the board deck this week" is a task being created, and it
+   * was being read as one being completed — she replied "Done" and ticked it
+   * off. An obligation and a report of having met it are one auxiliary apart,
+   * and the obligation is far commoner in a planner.
+   *
+   * Placed after QUERY_PROGRESS so "what did I finish" stays a question, and
+   * before COMPLETE_TASK so it wins the word "finish".
+   */
+  [INTENTS.CREATE_TASK,
+    /^\s*(?:i|we)\s*(?:'ve|ve|'d|d)?\s*(?:still\s+)?(?:have to|need to|want to|would like to|like to|must|should|got to|gotta|have got to)\s+(?:finish|complete|wrap up)\b/i],
   [INTENTS.COMPLETE_TASK, /\b(?:complete|completed|finish\w*|tick off|check off|did the)\b|\bmark\b.*\bdone\b|\b(?:is|are|'s) (?:done|finished|complete|sorted|handled|out of the way)\b|\bi'?ve (?:done|finished|completed|sorted)\b|\ball done\b|\bwrapped up\b/],
   // `give (?!me)`: "give me something to do" is someone asking for work, not
   // handing it over, and it was being answered with "delegate it to whom?".
@@ -990,7 +1015,7 @@ const classify = (s) => {
  * to the classifier first.
  */
 const POLITE_WRAPPER =
-  /^\s*(?:please|kindly|just|quickly|go ahead and|do me a favou?r and|if you (?:could|can|would)|whenever you (?:get|have) a (?:chance|moment|sec|second)|when you (?:get|have) a (?:chance|moment|sec|second)|i was wondering if you (?:could|can)|any chance (?:you )?(?:could|can)|do you think you could|is it possible to|would it be possible to|are you able to|would you be able to|can you|could you|would you|will you|would you mind|do you mind|i'?d like(?: you)? to|i want(?: you)? to|i need(?: you)? to|we need to|help me)\b[\s,]*/i;
+  /^\s*(?:please|kindly|just|quickly|go ahead and|do me a favou?r and|if you (?:could|can|would)|whenever you (?:get|have) a (?:chance|moment|sec|second)|when you (?:get|have) a (?:chance|moment|sec|second)|i was wondering if you (?:could|can)|any chance (?:you )?(?:could|can)|do you think you could|is it possible to|would it be possible to|are you able to|would you be able to|can you|could you|would you|will you|would you mind|do you mind|(?:i'?d like(?: you)? to|i want(?: you)? to|i need(?: you)? to|we need to)(?!\s+(?:finish|complete|wrap up)\b)|help me)\b[\s,]*/i;
 
 /**
  * Softer openers, removed only when composing a title.
