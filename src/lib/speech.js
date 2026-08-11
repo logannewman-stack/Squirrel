@@ -774,7 +774,19 @@ export function fromSpeech(raw = "") {
 
   // A bare hour word: "at three", "three pm", "three o'clock".
   const hourWords = Object.keys(ONES).join("|");
-  s = s.replace(new RegExp(`\\bat\\s+(${hourWords})\\b`, "g"), (m, w) => `at ${ONES[w]}`);
+  /**
+   * An hour that is only the opening word of a longer spoken time.
+   *
+   * "At ten to five" is 16:50 and "at oh nine hundred" is 09:00. Rewriting the
+   * leading word to a digit left "at 10 to five" and "at 0 nine hundred"
+   * behind, and the parser read the hour it had been handed — 10:00 and 00:00,
+   * both silently wrong by most of a day. `parseTime` understands all of these
+   * whole, so the safe thing here is to leave them alone. "oh" and "zero" are
+   * dropped from the rewrite entirely: neither is ever an hour on its own.
+   */
+  const clockHours = Object.keys(ONES).filter((w) => ONES[w] >= 1).join("|");
+  const LONGER = "(?!\\s+(?:past|to|till|til|before|after|hundred|fifteen))";
+  s = s.replace(new RegExp(`\\bat\\s+(${clockHours})\\b${LONGER}`, "g"), (m, w) => `at ${ONES[w]}`);
   s = s.replace(new RegExp(`\\b(${hourWords})\\s*(am|pm)\\b`, "g"), (m, w, mer) => `${ONES[w]}${mer}`);
   s = s.replace(new RegExp(`\\b(${hourWords})\\s+o'?clock\\b`, "g"), (m, w) => `${ONES[w]} o'clock`);
 

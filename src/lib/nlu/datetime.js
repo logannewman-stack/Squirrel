@@ -61,7 +61,13 @@ export function wordNumber(text) {
 }
 
 /** Rough parts of day, used when no clock time is given. */
-const DAYPARTS = { morning: 9, afternoon: 14, evening: 18, night: 19, noon: 12, midnight: 0 };
+const DAYPARTS = {
+  morning: 9, afternoon: 14, evening: 18, night: 19, noon: 12, midday: 12,
+  midnight: 0,
+  // "Call Bob first thing" names an hour as plainly as "at nine" does, and
+  // carried none — so it read as a job to do rather than a meeting to book.
+  "first thing": 9,
+};
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -92,6 +98,164 @@ function disambiguateHour(h, meridiem) {
 }
 
 /**
+ * ---------------------------------------------------------------- spoken time
+ *
+ * A clock time as somebody says it rather than types it.
+ *
+ * Dictation arrives as words: "half past two", "quarter to nine", "ten thirty",
+ * "oh nine hundred". None of it contains a digit, so the scan below — which is
+ * built entirely out of `\d` — found nothing at all and the sentence carried no
+ * time. That is the good failure. The bad one is the daypart fallback at the
+ * end of `parseTime` picking the phrase up instead: "book a call at three in
+ * the afternoon" matched `afternoon` and booked 14:00, confidently, an hour
+ * before the meeting. A missing time asks a question; a wrong one moves a board
+ * meeting.
+ *
+ * This lives in `datetime.js` rather than in the recogniser shim in `speech.js`
+ * on purpose. `fromSpeech` is wired only to the in-app microphone; Siri, the
+ * Shortcuts app, the widget and the deep link all hand their sentence straight
+ * to `parse()`. Time understanding put here is shared by every one of them.
+ */
+
+/** Numbers a clock is said in, 0–59. */
+const CLOCK_NUM = {
+  oh: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, forty: 40, fourty: 40, fifty: 50,
+};
+
+const ONES_W = "one|two|three|four|five|six|seven|eight|nine";
+const TENS_W = "twenty|thirty|forty|fourty|fifty";
+/** An hour anybody names out loud. Longest first, so "six" never eats "sixteen". */
+const H12_W = "eleven|twelve|seven|three|eight|four|five|nine|ten|one|two|six";
+/** Any spoken 0–59, compound included: "twenty five", "forty-five". */
+const CLOCK_W =
+  `(?:${TENS_W})[\\s-]+(?:${ONES_W})|` +
+  Object.keys(CLOCK_NUM).sort((a, b) => b.length - a.length).join("|");
+
+/** "forty five" → 45. Null if any word in it is not a number. */
+function spokenNumber(w) {
+  if (!w) return null;
+  let total = 0;
+  for (const part of w.toLowerCase().trim().split(/[\s-]+/)) {
+    if (!(part in CLOCK_NUM)) return null;
+    total += CLOCK_NUM[part];
+  }
+  return total;
+}
+
+/**
+ * A meridiem said as a part of the day.
+ *
+ * "At 8 in the evening" was reading as 08:00 — the hour is bare, so
+ * `disambiguateHour` applied the business-hours rule and put a dinner twelve
+ * hours early. The words are right there in the sentence; they were simply
+ * never consulted.
+ */
+function spokenMeridiem(s) {
+  if (/\bin the morning\b|\bthis morning\b/.test(s)) return "am";
+  if (/\bin the (?:afternoon|evening)\b|\bthis (?:afternoon|evening)\b|\bat night\b|\btonight\b/.test(s)) return "pm";
+  return null;
+}
+
+/**
+ * A clock time written out in words.
+ *
+ * Ordered most specific first, exactly like the intent table: "half past two"
+ * has to be read before the bare "two" inside it, or every relative time
+ * collapses onto its own hour.
+ *
+ * @returns {{h: number, m: number, source: string} | null}
+ */
+function spokenClock(s, mer) {
+  // 24-hour, said aloud. Never disambiguated — military time means what it says.
+  // "at" or a trailing part is required so the interjection in "oh, one more
+  // thing" is not read as one o'clock.
+  const lead = s.match(new RegExp(`\\b(at\\s+)?(?:oh|zero)\\s+(${ONES_W})(?:\\s+(hundred|${CLOCK_W}))?\\b`));
+  if (lead && (lead[1] || lead[3])) {
+    const h = spokenNumber(lead[2]);
+    const m = !lead[3] || lead[3] === "hundred" ? 0 : spokenNumber(lead[3]);
+    if (h !== null && m !== null && m <= 59) return { h, m, source: lead[0].trim() };
+  }
+  // "fifteen hundred", "eighteen hundred". Below thirteen it needs the word
+  // "hours", because "two hundred" is a quantity far more often than a time.
+  const mil = s.match(new RegExp(`\\b(${CLOCK_W})\\s+hundred(\\s+hours)?\\b`));
+  if (mil) {
+    const h = spokenNumber(mil[1]);
+    if (h !== null && h <= 23 && (h >= 13 || mil[2])) return { h, m: 0, source: mil[0] };
+  }
+
+  // "half past two", "quarter to nine", "twenty past three", "ten to five".
+  //
+  // The backward forms are fenced behind "at" unless the amount is half or a
+  // quarter, because "move my two to five" is a reschedule and reading it as
+  // 16:58 would be both wrong and unnoticeable.
+  const rel = s.match(new RegExp(
+    `\\b(at\\s+|for\\s+)?(half|(?:a\\s+)?quarter|${CLOCK_W})\\s+(?:minutes?\\s+)?` +
+    `(past|after|to|till|til|before)\\s+(${H12_W}|\\d{1,2})\\b`));
+  if (rel) {
+    const word = rel[2].replace(/^a\s+/, "");
+    const mins = word === "half" ? 30 : word === "quarter" ? 15 : spokenNumber(word);
+    const hour = /^\d+$/.test(rel[4]) ? Number(rel[4]) : spokenNumber(rel[4]);
+    const forward = /past|after/.test(rel[3]);
+    const fenced = forward || rel[1] || word === "half" || word === "quarter";
+    if (fenced && mins !== null && mins >= 1 && mins <= 59 && hour !== null && hour >= 1 && hour <= 12) {
+      return {
+        h: disambiguateHour(forward ? hour : hour === 1 ? 12 : hour - 1, mer),
+        m: forward ? mins : 60 - mins,
+        source: rel[0].trim(),
+      };
+    }
+  }
+
+  // "half two" — British for 2:30, and American for nothing at all, so it is
+  // fenced behind a preposition. Bare "half" is a fraction: "half an hour",
+  // "cut it in half", "an hour and a half" all have to survive untouched.
+  const brit = s.match(new RegExp(
+    `(?:^|\\b(?:at|by|around|about|from|until|till|til)\\s+)half\\s+(${H12_W})\\b` +
+    `(?!\\s*(?:hours?|hrs?|mins?|minutes?|days?|weeks?|months?|past|to))`));
+  if (brit) {
+    const h = spokenNumber(brit[1]);
+    if (h !== null) return { h: disambiguateHour(h, mer), m: 30, source: brit[0].trim() };
+  }
+
+  // "at ten thirty", "at nine fifteen", "at eleven forty five" — an hour and
+  // its minutes said as two numbers. Fenced behind a preposition or a meridiem,
+  // the same caution the digit scan uses: without it "block two hours" and
+  // "book five ten minute slots" become clock times.
+  const unit = "(?!\\s*(?:hours?|hrs?|mins?|minutes?|days?|weeks?|months?|people|meetings?|calls?))";
+  // The articles are here because a spoken time is as often named as booked:
+  // "cancel the two thirty" points at a meeting the same way "cancel my 4pm"
+  // does, and without them that sentence carried no time to find it by.
+  const pair =
+    s.match(new RegExp(`\\b(?:at|for|from|by|around|about|the|my|our|that|this)\\s+(${H12_W})\\s+(${CLOCK_W})\\b${unit}`)) ||
+    s.match(new RegExp(`\\b(${H12_W})\\s+(${CLOCK_W})\\s*(am|pm)\\b`));
+  if (pair) {
+    const h = spokenNumber(pair[1]);
+    const m = spokenNumber(pair[2]);
+    if (h !== null && m !== null && m <= 59) {
+      return { h: disambiguateHour(h, pair[3] || mer), m, source: pair[0].trim() };
+    }
+  }
+
+  // "four o'clock", said without a digit in it.
+  const oc = s.match(new RegExp(`\\b(${H12_W})\\s+o'?\\s*c?l[o0]?c?k\\b`));
+  if (oc) return { h: disambiguateHour(spokenNumber(oc[1]), mer), m: 0, source: oc[0] };
+
+  // "three pm", "eight am".
+  const merW = s.match(new RegExp(`\\b(${H12_W})\\s*(am|pm)\\b`));
+  if (merW) return { h: disambiguateHour(spokenNumber(merW[1]), merW[2]), m: 0, source: merW[0] };
+
+  // A bare spoken hour, which needs "at" in front of it for exactly the reason
+  // a bare digit does: "book four meetings" is a count, "at four" is a time.
+  const bare = s.match(new RegExp(`\\bat\\s+(${H12_W})\\b${unit}`));
+  if (bare) return { h: disambiguateHour(spokenNumber(bare[1]), mer), m: 0, source: bare[0] };
+
+  return null;
+}
+
+/**
  * Extract a clock time.
  * @returns {{h: number, m: number, source: string} | null}
  */
@@ -106,12 +270,21 @@ export const OCLOCK = /\b(\d{1,2})\s*o'?\s*c?l[o0]?c?k\b/i;
 
 export function parseTime(text) {
   const s = text.toLowerCase();
+  // "in the evening" is a meridiem with no am or pm in it. Read once, up front,
+  // and handed to every branch below — an hour is disambiguated in three
+  // different places and all three were ignoring the words next to it.
+  const dayMer = spokenMeridiem(s);
 
   const oc = s.match(OCLOCK);
   if (oc) {
     const hour = Number(oc[1]);
-    if (hour <= 23) return { h: disambiguateHour(hour, null), m: 0, source: oc[0] };
+    if (hour <= 23) return { h: disambiguateHour(hour, dayMer), m: 0, source: oc[0] };
   }
+
+  // Words before digits. A sentence with both — "at ten thirty on the 15th" —
+  // has its time in the words, and the digit scan below would take the date.
+  const said = spokenClock(s, dayMer);
+  if (said) return said;
 
   // 3pm, 3:30 pm, 15:00, at 2
   //
@@ -122,7 +295,10 @@ export function parseTime(text) {
   for (const m of s.matchAll(/\b(at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/g)) {
     const hour = Number(m[2]);
     const mins = m[3] ? Number(m[3]) : 0;
-    const mer = m[4] ? m[4].replace(/\./g, "").slice(0, 2) : null;
+    // "at 8 in the evening" is 20:00, and was 08:00 — the bare hour fell to the
+    // business-hours rule while the half of the sentence that settles it sat
+    // two words away, unread.
+    const mer = m[4] ? m[4].replace(/\./g, "").slice(0, 2) : dayMer;
     // A bare number with no meridiem, no colon, and no "at" in front of it is
     // more likely a duration or a count — leave it to the duration parser.
     const explicit = Boolean(mer || m[3] || m[1]);
@@ -574,7 +750,26 @@ export function parseDuration(text) {
 
   if (/\bhalf an hour\b|\bhalf hour\b/.test(s)) return 30;
   if (/\ban hour and a half\b|\bhour and a half\b/.test(s)) return 90;
+  // Before the plain "an hour" below, which is inside both of these and was
+  // answering 60 to a phrase that says three quarters of that.
+  if (/\bthree quarters of an? hour\b/.test(s)) return 45;
+  if (/\b(?:a )?quarter of an? hour\b/.test(s)) return 15;
   if (/\ban hour\b|\ba hour\b/.test(s)) return 60;
+
+  /**
+   * "Forty five minutes." "Twenty five minutes."
+   *
+   * A two-word number, and the single-word scan below read only its second
+   * half — "forty five minutes" booked five minutes, silently, which is the
+   * same class of failure as booking at the wrong hour. Placed above that scan
+   * because it is the same text and the longer reading has to win.
+   */
+  const compound = s.match(/\b(twenty|thirty|forty|fourty|fifty)[\s-]+(one|two|three|four|five|six|seven|eight|nine)\s*(?:m\b|mins?\b|minutes?\b)/);
+  if (compound) {
+    const tens = { twenty: 20, thirty: 30, forty: 40, fourty: 40, fifty: 50 };
+    const ones = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
+    return tens[compound[1]] + ones[compound[2]];
+  }
 
   // "a couple of hours", "two and a half hours", "three quarters of an hour".
   const wordHours = s.match(new RegExp(`\\b(${NUM_WORDS})\\b(?:\\s+of)?(\\s+and\\s+a\\s+half)?\\s*(?:h\\b|hrs?\\b|hours?\\b)`));

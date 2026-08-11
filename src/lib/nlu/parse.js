@@ -945,7 +945,7 @@ const RULES = [
   // Booking verbs, which is most of them. Every one of these was a real
   // sentence that fell through to "I didn't catch that" — people reach for a
   // startling number of words for "put this on the calendar".
-  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hour|minutes?|time|slot)|add (?!.*\b(?:task|todo|to-do|reminder)\b).* (?:meeting|call|event))\b/],
+  [INTENTS.CREATE_EVENT, /\b(schedule|book|block|set up|pencil in|pencil|hold|reserve|pop in|stick in|slot in|line up|put .* (?:on|in) (?:my|the) calendar|get .* (?:on|in) (?:my|the) calendar|(?:find|make|set aside|carve out|free up|squeeze in) .*(?:time|hours?|minutes?)|(?:give|get|book) me\b.*\b(?:hours?|minutes?|time|slot)|add (?!.*\b(?:task|todo|to-do|reminder)\b).* (?:meeting|call|event))\b/],
   // The reporting voice. "I've got the dentist Friday at 9" is a booking with
   // no booking verb in it — people say what is happening as often as they ask
   // for it to be arranged. Guarded on there being a day or a clock, so "I've
@@ -1121,12 +1121,83 @@ function distance(a, b, max) {
  * — "too" directly before a bare verb is always "to" — rather than a general
  * swap, which would break "two" and "too" everywhere they are correct.
  */
+/**
+ * A weekday, for the positions where a number word is really a preposition.
+ */
+const SPOKEN_DAY =
+  "monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun|tomorrow|today|tonight|next week|next month";
+
+/** Verbs that make a following number a destination rather than a count. */
+const MOVES = /\b(?:mov(?:e|es|ed|ing)|reschedul\w*|push\w*|shift\w*|bump\w*|postpon\w*|switch\w*|chang\w*|put)\b/i;
+
 function fixHomophones(text) {
-  return text
+  let t = text
     .replace(/\b(remind(?:er)? (?:me |us )?)too\b/gi, "$1to")
     .replace(/\b(need|want|have|got|going|like|able|forget|remember|meant|try|trying)\s+too\s+(?=[a-z])/gi, "$1 to ")
     .replace(/\bi'?d like too\b/gi, "i'd like to")
     .replace(/\bhow long til\b/gi, "how long until");
+
+  /**
+   * What a recogniser hears when somebody says a time.
+   *
+   * "Move my meeting too for pm." Every word is a real English word and the
+   * sentence is unreadable — which is the whole difficulty, because a spell
+   * checker has nothing to flag and `despell` is a distance search over
+   * correctly spelled input. Only position can tell these apart, so every one
+   * of them is bound to a neighbour that makes the wrong reading impossible:
+   * "for" in front of a meridiem is never the preposition, "at to" is not
+   * English, "an our" is not a phrase.
+   *
+   * The alternative — teaching each of the twenty-odd rules in the table above
+   * to also accept "ate" and "too thirty" — spreads one problem across the
+   * whole file, and every widened alternation in a first-match-wins table is a
+   * chance to steal a sentence from the intent below it. This is the same
+   * doctrine as the four corrections above, applied to the times.
+   */
+  t = t
+    // "four", heard as the preposition. Only ever directly in front of a
+    // meridiem or a clock, where "for" cannot be what was said.
+    .replace(/\bfor\s+(?=(?:a\.?m\.?|p\.?m\.?|o'?\s*clock|thirty|fifteen)\b)/gi, "four ")
+    .replace(/\b(at|to|until|till)\s+for\b(?!\s*(?:a|an|the|me|us|him|her|them|you|it|my|our|your|his|its)\b)/gi, "$1 four")
+    // "two", heard as a preposition. Bound to the minute word behind it, so
+    // "two hours" and "book two calls" are untouched.
+    .replace(/\b(?:too|to)\s+(?=(?:thirty|fifteen|forty[\s-]?five|forty|twenty|forty-five)\b)/gi, "two ")
+    .replace(/\b(the|my|that|this|a)\s+too\b/gi, "$1 two")
+    .replace(/\btoo\s*(?=(?:a\.?m\.?|p\.?m\.?|o'?\s*clock)\b)/gi, "two ")
+    // "eight". "At ate" and "ate pm" are not sentences in any reading.
+    .replace(/\b(at|to|until|till)\s+ate\b/gi, "$1 eight")
+    .replace(/\bate\s*(?=(?:a\.?m\.?|p\.?m\.?|o'?\s*clock|thirty|fifteen|forty)\b)/gi, "eight ")
+    // "three", "six", "one" — each fenced to a position that fixes the reading.
+    .replace(/\btree\s*(?=(?:a\.?m\.?|p\.?m\.?|o'?\s*clock|thirty|fifteen)\b)/gi, "three ")
+    .replace(/\b(at|to|until|till)\s+sicks\b/gi, "$1 six")
+    .replace(/\b(at|to|until|till)\s+won\b/gi, "$1 one")
+    .replace(/\bwon\s+(?=(?:hours?|minutes?|mins?|thirty|a\.?m\.?|p\.?m\.?|o'?\s*clock)\b)/gi, "one ")
+    // "hour", heard as the possessive. "An our" is not English; "for hours"
+    // after a booking verb is four of them.
+    .replace(/\b(an|one|another)\s+ours?\b/gi, "$1 hour")
+    .replace(/\b(\d+|two|three|four|five|six|couple of|few)\s+ours\b/gi, "$1 hours")
+    .replace(/\b(block|book|schedul\w*|reserve|hold|need|want)\s+for\s+(?=hours?\b)/gi, "$1 four ")
+    // "due", heard as the verb. "Is do Friday" is not a sentence.
+    .replace(new RegExp(`\\bis\\s+do\\s+(?=(?:${SPOKEN_DAY}|next|the)\\b)`, "gi"), "is due ")
+    // "week", heard as its homophone. Never an adjective after "next"/"this".
+    .replace(/\b(next|this|last|coming)\s+weak\b/gi, "$1 week")
+    // "meet", heard as the food. Bound to a following "with", which is what
+    // makes the other reading impossible in a calendar.
+    .replace(/\bmeat\s+(?=with\b)/gi, "meet ")
+    .replace(/\bmeating\s+(?=with\b)/gi, "meeting ");
+
+  /**
+   * "Reschedule the board prep two Wednesday."
+   *
+   * Guarded on the sentence having a move verb in it, because "book two Friday
+   * slots" is a count of meetings and the same replacement would turn it into a
+   * destination. "Too" needs no guard — it is never a preposition.
+   */
+  t = t.replace(new RegExp(`\\btoo\\s+(?=(?:${SPOKEN_DAY})\\b)`, "gi"), "to ");
+  if (MOVES.test(t)) {
+    t = t.replace(new RegExp(`\\btwo\\s+(?=(?:${SPOKEN_DAY})\\b)`, "gi"), "to ");
+  }
+  return t;
 }
 
 function despell(text) {
