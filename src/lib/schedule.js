@@ -88,6 +88,19 @@ export function isWorkday(d, opts = {}) {
  */
 function windowOf(opts = {}) {
   return {
+    /**
+     * Hours already gone today are not available, and every caller has to
+     * agree about that.
+     *
+     * `distribute` set this for itself and nothing else did, so at five in the
+     * afternoon `urgencyOf` and `projectLoad` were still counting the whole
+     * 08:00–19:00 window as free. A task needing four hours by tomorrow came
+     * back "high, fits, 300 minutes of room" from one and "120 minutes short"
+     * from the other, on identical input — which is precisely the two-answers
+     * failure this function was written to end, reappearing one field lower
+     * down. Setting it here means no entry point can forget.
+     */
+    after: opts.after ?? opts.now ?? new Date(),
     minBlock: opts.minBlock ?? MIN_BLOCK_MINS,
     bufferDays: opts.bufferDays ?? BUFFER_DAYS,
     dailyCapacity: opts.dailyCapacity ?? DAILY_CAPACITY_MINS,
@@ -170,13 +183,39 @@ function eligibleDays(task, from, opts) {
     if (d > last) break;
     if (isWorkday(d, opts)) out.push(d);
   }
-  // Everything is already inside the buffer, or past due. Use what is left up
-  // to the deadline itself rather than refusing to plan at all — a late plan
-  // still beats no plan.
+  // Everything is already inside the buffer. Use what is left up to the
+  // deadline itself rather than refusing to plan at all — a late plan still
+  // beats no plan.
   if (!out.length) {
     for (let i = 0; i <= HORIZON_DAYS; i++) {
       const d = addDays(from, i);
       if (d > due) break;
+      if (isWorkday(d, opts)) out.push(d);
+    }
+  }
+
+  /**
+   * The deadline has already gone, and neither loop above could help.
+   *
+   * Both walk forward from today and stop at a date in the past, so both ended
+   * empty — and `distribute` drops any task with no eligible days. That
+   * produced the worst answer this planner is capable of: an overdue task with
+   * no block, no shortfall and no mention anywhere, while `urgencyOf` on the
+   * same task returned "critical" and triage ranked it first. Surfaced
+   * everywhere, scheduled nowhere.
+   *
+   * The same silence fell whenever the whole remaining window was non-working
+   * — a Saturday, for something due Sunday, for a Monday-to-Friday worker.
+   *
+   * Once the window has closed the question stops being "which days are left
+   * before the deadline" and becomes "when can this actually be done", so it
+   * is answered the way work with no deadline is: the next few working days.
+   * `distribute` fills the earliest first, so a short overdue task lands today
+   * and only a genuinely large one spreads.
+   */
+  if (!out.length) {
+    for (let i = 0; out.length < 5 && i <= HORIZON_DAYS; i++) {
+      const d = addDays(from, i);
       if (isWorkday(d, opts)) out.push(d);
     }
   }
@@ -615,10 +654,23 @@ export function describeLoad(load) {
   if (!load.due) {
     return `${load.name}: ${load.openCount} open, ${h(load.remainingMins)} of work left. No deadline set, so I'm not pacing it.`;
   }
-  const lead =
+  const opening =
     `${load.name}: ${load.openCount} ${load.openCount === 1 ? "task" : "tasks"}, ` +
-    `${h(load.remainingMins)} of work, due ${load.due} — ` +
-    `${load.workdays} working ${load.workdays === 1 ? "day" : "days"} left, ` +
+    `${h(load.remainingMins)} of work, due ${load.due}`;
+
+  /**
+   * A deadline already gone leaves no working days, so there is no pace to
+   * quote — and dividing by zero produced `perDayMins: null`, which fell
+   * straight through the `m >= 60` test and printed "about nullm a day" in a
+   * sentence she reads out loud. There is nothing to say about pacing work
+   * whose deadline has passed, so nothing is said.
+   */
+  if (!load.workdays) {
+    return `${opening} — that's past, and ${h(load.remainingMins)} still open.`;
+  }
+
+  const lead =
+    `${opening} — ${load.workdays} working ${load.workdays === 1 ? "day" : "days"} left, ` +
     `about ${h(load.perDayMins)} a day.`;
   if (load.fits) return `${lead} That fits, with ${h(load.slackMins)} to spare.`;
   return `${lead} It does not fit — you're ${h(Math.abs(load.slackMins))} short.`;

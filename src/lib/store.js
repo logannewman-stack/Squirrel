@@ -106,14 +106,44 @@ const update = (patch) => commit({ ...read(), ...patch });
  */
 let depth = 0;
 
-function push(label) {
-  past = [...past, { label, at: Date.now(), data: snapshot(read()) }].slice(-UNDO_LIMIT);
+/**
+ * Whether a change is worth interrupting somebody about.
+ *
+ * Every write is undoable; not every write deserves a bar across the bottom of
+ * the screen offering to take it back. Typing a project's name and tabbing out
+ * of the field does not — you are looking straight at the result, and a
+ * notification telling you what you just did is the kind of thing people learn
+ * to ignore, which is how the important one gets ignored too.
+ *
+ * Loud is the short list: anything **destructive**, anything **plural**, and
+ * anything that **moves the calendar**. Those are the three shapes of change
+ * you can make and not immediately see the whole of.
+ */
+const LOUD = "loud";
+
+function push(label, volume) {
+  past = [...past, { label, volume, at: Date.now(), data: snapshot(read()) }].slice(-UNDO_LIMIT);
 }
 
-function mutate(label, patch) {
-  if (depth === 0) push(label);
+function mutate(label, patch, volume) {
+  if (depth === 0) push(label, volume);
   commit({ ...read(), ...patch });
 }
+
+/**
+ * Did this patch actually change anything?
+ *
+ * `onBlur` fires whether or not a field was edited, so tabbing through the
+ * three inputs on a project produced three writes that changed nothing — and
+ * each one pushed an undo step, so ⌘Z had to be pressed three times before it
+ * did something visible, which reads as a broken undo. Each also re-stamped
+ * the row as dirty, queueing a pointless upload of an identical record.
+ *
+ * Stringified rather than compared by reference: `attendees` is an array, and
+ * a reference check would call every save a change.
+ */
+const same = (a, b) => a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const unchanged = (row, patch) => Object.keys(patch).every((k) => same(row[k], patch[k]));
 
 /**
  * One undo step around many writes.
@@ -124,7 +154,7 @@ function mutate(label, patch) {
  */
 export function batch(label, fn) {
   if (depth > 0) return fn();
-  push(label);
+  push(label, LOUD);
   depth++;
   try {
     return fn();
@@ -147,6 +177,15 @@ export const lastChange = () => past[past.length - 1]?.label ?? null;
  * task, then undid it, and this is the previous label surfacing".
  */
 export const undoDepth = () => past.length;
+
+/**
+ * Whether the last change is one to say out loud.
+ *
+ * Separate from `lastChange` rather than folded into it, because that returns
+ * a string the assistant reads aloud mid-sentence and widening it would mean
+ * touching every caller for the benefit of one.
+ */
+export const lastChangeLoud = () => past[past.length - 1]?.volume === "loud";
 
 /**
  * Step back one change.
@@ -298,9 +337,12 @@ export function addProject({ name, client = "", value = null, status = "active",
   return p;
 }
 
-export const updateProject = (id, patch) =>
-  mutate(`changing “${read().projects.find((p) => p.id === id)?.name || "a project"}”`,
+export function updateProject(id, patch) {
+  const was = read().projects.find((p) => p.id === id);
+  if (!was || unchanged(was, patch)) return;
+  mutate(`changing “${was?.name || "a project"}”`,
     { projects: read().projects.map((p) => (p.id === id ? stamp({ ...p, ...patch }) : p)) });
+}
 
 export function deleteProject(id) {
   const s = read();
@@ -316,7 +358,10 @@ export function deleteProject(id) {
       ...bury("projects", id),
       ...orphaned.map((t) => ({ kind: "tasks", id: t.id, deletedAt: Date.now(), dirty: true })),
     ],
-  });
+  // The loudest change in the app: it takes every task in the project with it,
+  // and the count of those is the one thing the confirmation cannot show you
+  // after the fact.
+  }, LOUD);
 }
 
 // ------------------------------------------------------------------- tasks
@@ -333,9 +378,12 @@ export function addTask({
   return t;
 }
 
-export const updateTask = (id, patch) =>
-  mutate(`changing “${read().tasks.find((t) => t.id === id)?.title || "a task"}”`,
+export function updateTask(id, patch) {
+  const was = read().tasks.find((t) => t.id === id);
+  if (!was || unchanged(was, patch)) return;
+  mutate(`changing “${was?.title || "a task"}”`,
     { tasks: read().tasks.map((t) => (t.id === id ? stamp({ ...t, ...patch }) : t)) });
+}
 
 export function toggleTask(id) {
   // The one action in the app that is worth feeling. A task ticking off is a
@@ -351,7 +399,7 @@ export function toggleTask(id) {
 
 export const deleteTask = (id) =>
   mutate(`deleting “${read().tasks.find((t) => t.id === id)?.title || "a task"}”`,
-    { tasks: read().tasks.filter((t) => t.id !== id), tombstones: bury("tasks", id) });
+    { tasks: read().tasks.filter((t) => t.id !== id), tombstones: bury("tasks", id) }, LOUD);
 
 /** Replace today's plan with an ordered list of task ids. */
 export function applyPlan(taskIds, day = dayKey()) {
@@ -370,17 +418,21 @@ export function applyPlan(taskIds, day = dayKey()) {
 // ------------------------------------------------------------------ events
 export function addEvent({ title, start, end, location = "", attendees = [], projectId = null, notes = "" }) {
   const e = stamp({ id: uid(), title: title.trim(), start, end, location, attendees, projectId, notes, createdAt: Date.now() });
-  mutate(`booking “${e.title}”`, { events: [...read().events, e] });
+  mutate(`booking “${e.title}”`, { events: [...read().events, e] }, LOUD);
   return e;
 }
 
-export const updateEvent = (id, patch) =>
-  mutate(`changing “${read().events.find((e) => e.id === id)?.title || "a meeting"}”`,
-    { events: read().events.map((e) => (e.id === id ? stamp({ ...e, ...patch }) : e)) });
+/** A meeting moving is loud: it is a change to a day you cannot see all of. */
+export function updateEvent(id, patch) {
+  const was = read().events.find((e) => e.id === id);
+  if (!was || unchanged(was, patch)) return;
+  mutate(`changing “${was?.title || "a meeting"}”`,
+    { events: read().events.map((e) => (e.id === id ? stamp({ ...e, ...patch }) : e)) }, LOUD);
+}
 
 export const deleteEvent = (id) =>
   mutate(`cancelling “${read().events.find((e) => e.id === id)?.title || "a meeting"}”`,
-    { events: read().events.filter((e) => e.id !== id), tombstones: bury("events", id) });
+    { events: read().events.filter((e) => e.id !== id), tombstones: bury("events", id) }, LOUD);
 
 export const eventsOn = (day, events = read().events) =>
   events

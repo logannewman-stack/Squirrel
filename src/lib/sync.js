@@ -82,6 +82,19 @@ export async function syncNow() {
     if (changed) applyRemote(merged);
 
     // ---- push
+    /**
+     * Stamped before the upload, not after.
+     *
+     * `markSynced` clears the dirty flag on every row whose `updatedAt` is at
+     * or before the timestamp it is handed — and it defaulted that to the
+     * moment it was called, which is *after* the round trip. So an edit made
+     * while the push was in flight always looked older than the
+     * acknowledgement, was marked clean, and was never uploaded: the change sat
+     * on this device looking saved until the next pull quietly replaced it with
+     * the server's older copy. The doc comment on `markSynced` claims this case
+     * is handled; the default argument is what made that untrue.
+     */
+    const pushedAt = Date.now();
     const sent = [];
     for (const kind of KINDS) {
       if (!outgoing[kind].length) continue;
@@ -91,7 +104,7 @@ export async function syncNow() {
       if (upErr) throw upErr;
       sent.push(...outgoing[kind].map((r) => ({ kind, id: r.id })));
     }
-    if (sent.length) markSynced(sent);
+    if (sent.length) markSynced(sent, pushedAt);
 
     // ---- cursor, from the server's clock, already rewound for safety
     localStorage.setItem(CURSOR_KEY, data.cursor);

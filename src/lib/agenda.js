@@ -79,10 +79,30 @@ export function findFreeSlots(
     ? breaksOn({ breaks }, weekday).map((b) => [atHour(day, b.start), atHour(day, b.end)])
     : [];
 
+  /**
+   * Anything that *overlaps* the day, not anything that starts on it.
+   *
+   * Matching the start day alone made every meeting that began the day before
+   * invisible — and the planner does not merely fail to notice those, it books
+   * work inside them. A red-eye landing at 09:00, an offsite spanning Tuesday
+   * to Thursday, a call running past midnight: each showed the day as entirely
+   * free and got a block laid on top of it. Real calendars produce these
+   * constantly, and `calsync.js` maps EventKit's start and end verbatim, so
+   * they arrive from the phone as readily as from typing.
+   *
+   * Each interval is clipped to the day before use, so a three-day offsite
+   * subtracts one day's worth from each of the three rather than swallowing
+   * the arithmetic whole.
+   */
+  const dayOpens = atHour(day, 0);
+  const dayCloses = atHour(day, 24);
   const booked = [
     ...events
-      .filter((e) => dayKey(new Date(e.start)) === day)
-      .map((e) => [new Date(e.start), new Date(e.end)]),
+      .filter((e) => new Date(e.end) > dayOpens && new Date(e.start) < dayCloses)
+      .map((e) => [
+        new Date(Math.max(new Date(e.start), dayOpens)),
+        new Date(Math.min(new Date(e.end), dayCloses)),
+      ]),
     ...standing,
   ].sort((a, b) => a[0] - b[0]);
 

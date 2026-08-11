@@ -13,6 +13,7 @@ import SetupCheck from "./SetupCheck";
 import DeleteAccount from "./DeleteAccount";
 import Appearance from "./Appearance";
 import Backup from "./Backup";
+import BoostCheck from "./BoostCheck";
 import Shortcuts from "./Shortcuts";
 import { Group, NavRow, SwitchRow, ValueRow, PanelRow, groupId } from "./ui";
 import { configured as canSync } from "../lib/supabase";
@@ -193,6 +194,11 @@ export default function Settings({ state, onBack, onLegal, onUpgrade, onKeyboard
               on={fallback}
               onChange={() => setSetting("fallback", !fallback)}
             />
+            {/* A failed boost is invisible by design — the message falls back
+                to the rules and she says she didn't catch it. Which means a
+                key with a typo in it looks identical to a working one, for
+                ever. This is the only way to tell them apart. */}
+            <PanelRow><BoostCheck /></PanelRow>
           </Group>
         )}
         <Group

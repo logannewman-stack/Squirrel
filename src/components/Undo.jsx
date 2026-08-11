@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { undo, lastChange, undoDepth } from "../lib/store";
+import { undo, lastChange, lastChangeLoud, undoDepth } from "../lib/store";
 import { primary, SHORTCUTS } from "../lib/keys";
 import { tap } from "../lib/native";
 
@@ -45,8 +45,18 @@ export default function Undo() {
   useEffect(() => {
     const now = undoDepth();
     if (now > depth.current) {
-      setShowing(lastChange());
-      setUndone(null);
+      /**
+       * Only the loud ones. Every write is undoable and ⌘Z reaches all of
+       * them; this bar is for the three shapes of change you can make without
+       * immediately seeing the whole of — destructive, plural, and anything
+       * that moves the calendar. Announcing a project rename you are looking
+       * straight at is how people learn to ignore the bar, which is how they
+       * come to ignore the one that mattered.
+       */
+      if (lastChangeLoud()) {
+        setShowing(lastChange());
+        setUndone(null);
+      }
     } else if (now < depth.current) {
       // An undo happened — possibly from here, possibly from the assistant.
       // Either way the offer is stale.
