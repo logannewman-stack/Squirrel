@@ -2279,6 +2279,27 @@ export async function askAsync(text, state, opts = {}) {
   opts.onFirst?.(first);
   if (!first.miss || !hasResolver()) return first;
 
+  /**
+   * Only when the *words* were the problem.
+   *
+   * There are three kinds of miss and a rewrite can only help with one of them.
+   * `NO_MATCH` means the sentence was understood perfectly and the thing it
+   * named is not there — "cancel my 4pm" with nothing at four. `UNSUPPORTED`
+   * means it was understood and the capability does not exist yet. In both
+   * cases the deterministic answer is already the correct and complete one, and
+   * no rewording can conjure a meeting that was never booked or build a feature
+   * that was never written.
+   *
+   * Sending them anyway was pure cost. Measured against the 394-sentence corpus
+   * in `coverage.test.mjs` it was most of the traffic — 69 sentences went out,
+   * and only a handful of those were phrasings the rules had genuinely never
+   * seen. The rest were people referring to things that did not exist, which is
+   * an ordinary thing to do and would have been billed every time.
+   *
+   * test/cost.test.mjs holds the measurement.
+   */
+  if (first.miss !== REASONS.UNPARSED) return first;
+
   const now = opts.now || new Date();
   const rewrite = await interpret(text, contextFor(state, now));
   if (!rewrite) return first;

@@ -32,7 +32,13 @@ const understand = (q) => {
   return null;
 };
 
-const CORPUS = {
+/**
+ * Exported so `cost.test.mjs` can measure the same sentences against the
+ * network gate. That file asks a different question of this list — not "is it
+ * understood" but "does understanding it keep it off the wire" — and the two
+ * answers are only comparable if the corpus is literally the same one.
+ */
+export const CORPUS = {
   "greetings": ["hi","hello","hey","yo","hiya","howdy","sup","hi there","hey there","hello again","hey squirrel","good morning","good afternoon","good evening","morning","evening","hey there buddy","hello!","hi!!","gm","heya","hey you"],
   "how are you": ["how are you","how are you doing","how's it going","hows it going","how are things","what's up","whats up","you good","you okay","how's your day","how do you do","you there","how's life"],
   "thanks": ["thanks","thank you","thanks so much","thx","ty","cheers","appreciate it","nice","perfect","great","awesome","amazing","you're the best","well done","good job","thank you so much","much appreciated"],

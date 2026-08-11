@@ -226,8 +226,20 @@ const backToIndex = async (p) => {
   t("and the projects", back.projects.includes("Q3 launch"), JSON.stringify(back.projects));
   t("and the meetings", back.events.includes("Call with Priya"), JSON.stringify(back.events));
   t("a restore does not put you back through the introduction", back.onboarded === true);
-  t("the app is on a real screen afterwards, not a blank one",
-    /Board deck/.test(await p.locator("body").innerText()));
+  /**
+   * Deliberately not "the task is on today's plate". Whether it is depends on
+   * the hour the suite runs at: a two-hour task with two hours left before the
+   * working day ends is correctly scheduled for tomorrow instead, so that
+   * assertion passes all morning and fails after five — a test that fails
+   * later for a reason nobody remembers. What has to be true is that the app
+   * came back up carrying the restored week, in whatever form the planner
+   * chose to show it.
+   */
+  {
+    const screen = await p.locator("body").innerText();
+    t("the app is on a real screen afterwards, not a blank one",
+      /Q3 launch|Board deck|Call with Priya/.test(screen), screen.replace(/\s+/g, " ").slice(0, 200));
+  }
 
   /**
    * The tier is a server fact, so a restore has to keep the device's and
