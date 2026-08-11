@@ -6,6 +6,7 @@ import { duration } from "../lib/format";
 import TaskRow from "./TaskRow";
 import Review from "./Review";
 import { shouldReview } from "../lib/review";
+import { Find } from "./ui";
 
 /**
  * The day, from the one plan.
@@ -23,7 +24,7 @@ import { shouldReview } from "../lib/review";
  * thing on the page now, because it is the only thing here that costs money
  * to find out late.
  */
-export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
+export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearch }) {
   const day = dayKey();
   const now = new Date();
   const events = eventsOn(day, state.events);
@@ -149,13 +150,16 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent }) {
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Today</h1>
         </div>
-        <button
-          onClick={onNewEvent}
-          className="rounded-md border border-[var(--line)] px-3.5 py-2 text-xs
-                     transition-colors hover:border-[var(--ink)]"
-        >
-          New event
-        </button>
+        <div className="flex items-center gap-2">
+          <Find onOpen={onSearch} />
+          <button
+            onClick={onNewEvent}
+            className="rounded-md border border-[var(--line)] px-3.5 py-2 text-xs
+                       transition-colors hover:border-[var(--ink)]"
+          >
+            New event
+          </button>
+        </div>
       </header>
 
       {shortfalls.length > 0 && <Shortfalls list={shortfalls} tasks={state.tasks} />}

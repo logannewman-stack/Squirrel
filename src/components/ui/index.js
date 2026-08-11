@@ -14,3 +14,6 @@ export { default as Field, Input } from "./Field";
 // The grouped inset list — the shape a settings screen has to have to read as
 // native on a phone, and a good dense layout on a desktop besides.
 export { Group, Row, NavRow, SwitchRow, ValueRow, PanelRow, groupId } from "./List";
+// The way into search from a screen header — the only route on a phone, where
+// there is no keyboard to press ⌘K on.
+export { default as Find } from "./Find";

@@ -60,7 +60,7 @@ const GROUPS = [
   { id: "data", name: "Data" },
 ];
 
-export default function Settings({ state, onBack, onLegal, onUpgrade }) {
+export default function Settings({ state, onBack, onLegal, onUpgrade, onKeyboard }) {
   const desktop = useIsDesktop();
   // Null is the index. A desktop never shows it — the rail is always there, so
   // there is nothing to go back to and no state to be in.
@@ -144,6 +144,12 @@ export default function Settings({ state, onBack, onLegal, onUpgrade }) {
         </Group>
         <Group header="Appearance" footer="System follows your Mac or phone, including when it changes at sunset.">
           <PanelRow><Appearance /></PanelRow>
+        </Group>
+        <Group
+          header="Keyboard"
+          footer="Every shortcut the app answers to. None of them fire while you're typing."
+        >
+          <NavRow label="Shortcuts" value="?" onPress={onKeyboard} />
         </Group>
         <Group
           header="The introduction"

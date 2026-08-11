@@ -13,6 +13,8 @@ import Identity from "./components/Identity";
 import Welcome from "./components/Welcome";
 import Legal from "./components/Legal";
 import CommandPalette from "./components/CommandPalette";
+import KeyboardHelp from "./components/KeyboardHelp";
+import Undo from "./components/Undo";
 import Squirrel from "./components/Squirrel";
 import { SidebarNav, BottomNav } from "./components/Nav";
 import PlanStrip from "./components/PlanStrip";
@@ -21,8 +23,10 @@ import { can } from "./lib/plans";
 import { fetchUsage } from "./lib/billing";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
-  remainingOf, toggleTask, setSetting, setPlan, setPlanTier, dayKey,
+  remainingOf, toggleTask, setSetting, setPlan, setPlanTier, dayKey, undo,
 } from "./lib/store";
+import { shortcutFor } from "./lib/keys";
+import { tap } from "./lib/native";
 import { client, configured } from "./lib/supabase";
 import { startSync, stopSync, nudge } from "./lib/sync";
 import { clearResolver } from "./lib/nlu/fallback";
@@ -61,6 +65,7 @@ export default function App() {
   const [editingEvent, setEditingEvent] = useState(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [keyHelp, setKeyHelp] = useState(false);
   // The upgrade sheet, and the wall that opened it. `null` is closed; a string
   // is the reason to lead with, because "Upgrade to Pro" answers a question
   // nobody asked and "You've used today's free turns" answers the one they hold.
@@ -242,16 +247,60 @@ export default function App() {
     syncReminders(dueReminders(state, state.settings?.reminders));
   }, [state.blocks, state.events, state.tasks, state.shortfalls, state.settings?.reminders]);
 
+  /**
+   * The keyboard, dispatched from one place.
+   *
+   * This was a single inline binding for ⌘K, with the calendar's keys bound
+   * separately inside the calendar — which is how a keyboard layer usually
+   * exists, and why it is usually undocumented and eventually self-conflicting.
+   * `lib/keys.js` holds the bindings as data and the help sheet reads the same
+   * list, so the two cannot disagree about what the app answers to.
+   *
+   * The calendar keeps its own handler, because its keys need its own state:
+   * which day is anchored, which scale is showing. What it gains from this is
+   * a guarantee that nothing global has quietly claimed one of its letters —
+   * test/keys.test.mjs fails if one ever does.
+   */
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette((p) => !p);
-      }
+      // Scope stays null: calendar-scoped bindings are dispatched by the
+      // calendar, and matching them here would run them twice.
+      const hit = shortcutFor(e, { scope: null });
+      if (!hit) return;
+
+      const go = (name) => () => setView({ name });
+      const run = {
+        search: () => setPalette((p) => !p),
+        today: go("today"),
+        calendar: go("calendar"),
+        projects: go("projects"),
+        insights: go("insights"),
+        settings: go("settings"),
+        ask: () => setAssistantOpen(true),
+        event: () => setNewEvent(true),
+        help: () => setKeyHelp((v) => !v),
+        undo: () => {
+          // Nothing to take back is not an error and not worth saying — the
+          // shortcut does nothing, the way it does in every other app.
+          if (undo()) tap("success");
+        },
+      }[hit.id];
+      if (!run) return;
+      e.preventDefault();
+      run();
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, []);
+
+  /**
+   * The one way into search, wherever it is reached from.
+   *
+   * A screen header on a phone, ⌘K or / on a keyboard, the palette's own
+   * button. One handler rather than each screen owning a copy, because the
+   * moment there are two entry points there are two behaviours to keep in step.
+   */
+  const openSearch = () => setPalette(true);
 
   function finish() {
     const f = endFocus();
@@ -366,18 +415,21 @@ export default function App() {
         onFocus={setPending}
         onNewEvent={() => setNewEvent(true)}
         onOpenEvent={setEditingEvent}
+        onSearch={openSearch}
       />
     ) : view.name === "calendar" ? (
       <Calendar
         state={state}
         onNewEvent={() => setNewEvent(true)}
         onOpenEvent={setEditingEvent}
+        onSearch={openSearch}
       />
     ) : view.name === "projects" ? (
       <Projects
         state={state}
         onOpen={(id) => setView({ name: "project", id })}
         onUpgrade={(reason) => setUpgrade(reason ?? null)}
+        onSearch={openSearch}
       />
     ) : view.name === "project" ? (
       <ProjectDetail
@@ -388,7 +440,7 @@ export default function App() {
       />
     ) : view.name === "insights" ? (
       can(state.plan, "insights") ? (
-        <Insights state={state} />
+        <Insights state={state} onSearch={openSearch} />
       ) : (
         // The real screen renders underneath, with this over it. Seeing your own
         // week measured — and being one tap from it — sells the upgrade in a way
@@ -399,7 +451,7 @@ export default function App() {
           blurb="Insights measures your meetings, focus, and what you finish — the week you planned against the week you had."
           onUpgrade={() => setUpgrade("Insights is on Pro")}
         >
-          <Insights state={state} />
+          <Insights state={state} onSearch={openSearch} />
         </Locked>
       )
     ) : view.name === "legal" ? (
@@ -410,6 +462,7 @@ export default function App() {
         onBack={() => setView({ name: "today" })}
         onLegal={(page) => setView({ name: "legal", page })}
         onUpgrade={(reason) => setUpgrade(reason ?? null)}
+        onKeyboard={() => setKeyHelp(true)}
       />
     );
 
@@ -500,6 +553,13 @@ export default function App() {
           onNewEvent={() => setNewEvent(true)}
         />
       )}
+
+      <KeyboardHelp open={keyHelp} onClose={() => setKeyHelp(false)} />
+
+      {/* The way back from whatever just happened. Above everything except the
+          sheets, because it is an offer rather than a place — and it has to be
+          reachable from the screen the change landed on. */}
+      <Undo />
     </>
   );
 }

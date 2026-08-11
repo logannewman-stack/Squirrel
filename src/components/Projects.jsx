@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { addProject, dayKey } from "../lib/store";
-import { Button, Input } from "./ui";
+import { Button, Input, Find } from "./ui";
 import { usage } from "../lib/plans";
 import { TEMPLATES, scheduleFor } from "../lib/templates";
 import { addTask } from "../lib/store";
@@ -38,7 +38,7 @@ function sayDue(due, today) {
   return `due ${new Date(`${due}T00:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}`;
 }
 
-export default function Projects({ state, onOpen, onUpgrade }) {
+export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
   const { projects, tasks, sessions } = state;
   const [name, setName] = useState("");
   const today = dayKey();
@@ -88,6 +88,8 @@ export default function Projects({ state, onOpen, onUpgrade }) {
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Projects</h1>
         </div>
+
+        <Find onOpen={onSearch} className="order-last sm:order-none" />
 
         {/* Bounded rather than full-bleed. A project name is a few words, and a
             field eleven hundred pixels wide invites a sentence. */}

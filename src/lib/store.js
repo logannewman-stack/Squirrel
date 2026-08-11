@@ -137,6 +137,18 @@ export function batch(label, fn) {
 export const lastChange = () => past[past.length - 1]?.label ?? null;
 
 /**
+ * How many steps back there are.
+ *
+ * The undo history is module state rather than part of the snapshot — it churns
+ * on every write and has no business in a sync payload — which means nothing
+ * subscribed to the store can see it *change*. A depth that went up is the only
+ * reliable signal that something just happened, and it is what the undo toast
+ * watches: `lastChange()` alone cannot tell "deleted a task" from "deleted a
+ * task, then undid it, and this is the previous label surfacing".
+ */
+export const undoDepth = () => past.length;
+
+/**
  * Step back one change.
  * @returns {string|null} what was undone, for reading back.
  */

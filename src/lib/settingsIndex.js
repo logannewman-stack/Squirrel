@@ -57,6 +57,10 @@ export const INDEX = [
     keywords: "dark mode light mode theme colour color night display contrast system",
   },
   {
+    group: "you", header: "Keyboard",
+    keywords: "keyboard shortcut shortcuts hotkey keys command cmd ctrl undo search palette",
+  },
+  {
     group: "you", header: "The introduction",
     keywords: "onboarding welcome tour intro walkthrough first run setup again replay demo",
   },

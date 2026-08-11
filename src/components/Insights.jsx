@@ -1,9 +1,10 @@
 import { dayKey } from "../lib/store";
 import { duration, money } from "../lib/format";
+import { Find } from "./ui";
 
 const DAYS_BACK = 14;
 
-export default function Insights({ state }) {
+export default function Insights({ state, onSearch }) {
   const { sessions, tasks, projects, events } = state;
 
   const days = Array.from({ length: DAYS_BACK }, (_, i) => {
@@ -47,9 +48,12 @@ export default function Insights({ state }) {
 
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">
-      <header className="mb-6">
-        <p className="label">Last {DAYS_BACK} days</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Insights</h1>
+      <header className="mb-6 flex items-end justify-between gap-4">
+        <div>
+          <p className="label">Last {DAYS_BACK} days</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Insights</h1>
+        </div>
+        <Find onOpen={onSearch} />
       </header>
 
       <div className="mb-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--line)]
