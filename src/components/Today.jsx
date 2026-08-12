@@ -490,7 +490,7 @@ function Shortfalls({ list, tasks }) {
                 {/* Store dates stay in the store. "2026-08-14" on the most
                     prominent card of the first screen, one row above a line
                     reading "tomorrow", is the app speaking two languages. */}
-                {s.due ? whenLabel(s.due, now) : "the deadline"} — <span style={{ color: "var(--alert)" }}>{sayMins(s.shortMins)} short</span>
+                {s.due ? whenLabel(s.due) : "the deadline"} — <span style={{ color: "var(--alert)" }}>{sayMins(s.shortMins)} short</span>
               </p>
               <p className="mt-1 text-xs text-[var(--muted)]">
                 {[
@@ -499,7 +499,7 @@ function Shortfalls({ list, tasks }) {
                   s.catchUpIsPossible && s.extraPerDayMins
                     ? `${sayMins(s.extraPerDayMins)} more a day would close it`
                     : null,
-                  s.fitsBy && s.fitsBy !== s.due ? `it fits by ${whenLabel(s.fitsBy, now)}` : null,
+                  s.fitsBy && s.fitsBy !== s.due ? `it fits by ${whenLabel(s.fitsBy)}` : null,
                   "or cut the scope",
                 ].filter(Boolean).join(", ")}.
               </p>
