@@ -99,6 +99,44 @@ await p.waitForTimeout(700);
     /routed /i.test(done) && !/doesn't fit/.test(done), done.slice(0, 160));
 }
 
+/* ------------------------------------ drag a block, and the plan follows */
+await p.getByRole("button", { name: "Calendar", exact: true }).first().click();
+await p.waitForTimeout(500);
+{
+  await p.getByRole("tab", { name: "Week" }).click();
+  await p.waitForTimeout(700);
+  const block = p.locator('button[title*="Small and fine"]').first();
+  t("the routed block stands on the week grid", (await block.count()) === 1);
+
+  await block.scrollIntoViewIfNeeded();
+  const box = await block.boundingBox();
+  const col = await block.evaluate((el) => {
+    const r = el.parentElement.getBoundingClientRect();
+    return { x: r.x, w: r.width };
+  });
+  // Drag one column to the right and two hours down.
+  await p.mouse.move(box.x + box.width / 2, box.y + 6);
+  await p.mouse.down();
+  await p.mouse.move(col.x + col.w * 1.5, box.y + 6 + 104, { steps: 10 });
+  await p.mouse.up();
+  await p.waitForTimeout(900);
+
+  const pinned = await p.evaluate(async () => {
+    const s = await import("/src/lib/store.js");
+    const me = s.getState().tasks.find((x) => x.title === "Small and fine");
+    const mine = s.getState().blocks.filter((b) => b.taskId === me.id);
+    return {
+      pinDay: me.pinDay, pinTime: me.pinTime,
+      onDay: mine.length > 0 && mine.every((b) => b.day === me.pinDay),
+      atTime: mine.some((b) => (b.start || "").includes(`T${me.pinTime}`)),
+    };
+  });
+  t("dropping a block pins it to that day and minute",
+    Boolean(pinned.pinDay) && /^\d{2}:\d{2}$/.test(pinned.pinTime || ""), JSON.stringify(pinned));
+  t("  and the router re-plans it exactly there",
+    pinned.onDay && pinned.atTime, JSON.stringify(pinned));
+}
+
 t("no page errors through the whole loop", errs.length === 0, errs.join(" · "));
 
 await b.close();

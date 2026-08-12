@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtTime, workOn } from "../lib/agenda";
-import { dayKey, setSetting } from "../lib/store";
+import { dayKey, setSetting, updateTask } from "../lib/store";
 import { hoursOf, breaksOn, sayMins } from "../lib/hours";
 import { UNFILED } from "./ProjectDetail";
 import {
@@ -467,6 +467,63 @@ function TimeGrid({ days, state, hours, now, single, onOpenEvent, onOpenProject 
   const events = state.events.filter((e) => keys.includes(dayKey(new Date(e.start))));
   const blocks = (state.blocks || []).filter((b) => keys.includes(b.day) && b.start);
 
+  /**
+   * Drag a planned block to reschedule it — the calendar's native verb.
+   *
+   * Dropping writes a pin (`pinDay` + `pinTime`) and nothing else: the
+   * router re-plans around the hand-placed block, so a drag can never
+   * double-book a meeting or silently orphan the rest of the week. Undo
+   * takes it back like any other change. Meetings are not draggable here —
+   * they have their own edit dialog, and other people are in them.
+   */
+  const bodyRef = useRef(null);
+  const dragRef = useRef(null);
+  const suppressClick = useRef(false);
+  const [drag, setDrag] = useState(null);
+
+  const dropPoint = (clientX, clientY) => {
+    const rect = bodyRef.current.getBoundingClientRect();
+    const colW = (rect.width - 52) / days.length;
+    const idx = Math.max(0, Math.min(days.length - 1, Math.floor((clientX - rect.left - 52) / colW)));
+    // pt-3 on the body is 12px; snap to the quarter hour, inside the grid.
+    const raw = ((clientY - rect.top - 12) / HOUR_PX) * 60 + from * 60;
+    const m = Math.max(from * 60, Math.min(to * 60 - 15, Math.round(raw / 15) * 15));
+    return {
+      k: dayKey(days[idx]),
+      tm: `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`,
+    };
+  };
+  const beginDrag = (e, b, task) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = {
+      x0: e.clientX, y0: e.clientY, moved: false,
+      taskId: b.taskId, title: task?.title || "Focus", mins: b.mins,
+    };
+  };
+  const moveDrag = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 6) return;
+    d.moved = true;
+    setDrag({ ...d, x: e.clientX, y: e.clientY, ...dropPoint(e.clientX, e.clientY) });
+  };
+  const endDrag = (e) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setDrag(null);
+    if (!d?.moved) return;
+    // A tap that turned into a drag must not also open the project.
+    suppressClick.current = true;
+    setTimeout(() => { suppressClick.current = false; }, 0);
+    const at = dropPoint(e.clientX, e.clientY);
+    const today = dayKey();
+    updateTask(d.taskId, { pinDay: at.k < today ? today : at.k, pinTime: at.tm });
+  };
+  const cancelDrag = () => {
+    dragRef.current = null;
+    setDrag(null);
+  };
+
   let from = Math.floor(hours.start);
   let to = Math.ceil(hours.end);
   for (const e of [...events, ...blocks]) {
@@ -508,7 +565,22 @@ function TimeGrid({ days, state, hours, now, single, onOpenEvent, onOpenProject 
         })}
       </div>
 
-      <div className={`relative grid ${cols} pt-3`}>
+      <div ref={bodyRef} className={`relative grid ${cols} pt-3`}>
+        {/* The block in hand: a chip riding the pointer, naming where it
+            will land — feedback is the difference between a drag and a jump. */}
+        {drag && (
+          <div
+            className="pointer-events-none fixed z-50 rounded-md border border-[var(--ink)]
+                       bg-[var(--paper)] px-2 py-1 text-[11px] shadow-[var(--float)]"
+            style={{ left: drag.x + 14, top: drag.y + 14 }}
+          >
+            <span className="font-medium">{drag.title}</span>{" "}
+            <span className="num text-[var(--muted)]">
+              {new Date(`${drag.k}T00:00`).toLocaleDateString([], { weekday: "short" })}{" "}
+              {fmtTime(`${drag.k}T${drag.tm}:00`)}
+            </span>
+          </div>
+        )}
         <div>
           {rows.map((h) => (
             <div key={h} style={{ height: HOUR_PX }} className="relative">
@@ -567,12 +639,27 @@ function TimeGrid({ days, state, hours, now, single, onOpenEvent, onOpenProject 
                    */
                   <button
                     key={`${b.taskId}-${b.start}`}
-                    onClick={() => onOpenProject?.(project?.id ?? UNFILED)}
-                    title={`${task?.title || "Work"} · ${sayMins(b.mins)}`}
+                    onClick={() => {
+                      if (suppressClick.current) return;
+                      onOpenProject?.(project?.id ?? UNFILED);
+                    }}
+                    onPointerDown={(e) => beginDrag(e, b, task)}
+                    onPointerMove={moveDrag}
+                    onPointerUp={endDrag}
+                    onPointerCancel={cancelDrag}
+                    title={`${task?.title || "Work"} · ${sayMins(b.mins)}${
+                      task?.pinDay === b.day ? " · pinned" : ""
+                    } — drag to reschedule`}
                     style={{ top: y(s), height: Math.max(6, y(en) - y(s) - 2) }}
-                    className="absolute inset-x-1 overflow-hidden rounded border border-dashed
-                               border-[var(--muted)] px-1.5 text-left text-[11px] leading-tight text-[var(--muted)]
-                               transition-colors hover:border-[var(--ink)] hover:text-[var(--ink)]"
+                    className={`absolute inset-x-1 touch-none cursor-grab overflow-hidden rounded border
+                               px-1.5 text-left text-[11px] leading-tight transition-colors
+                               active:cursor-grabbing hover:border-[var(--ink)] hover:text-[var(--ink)] ${
+                                 // A hand-placed block holds a solid line — the
+                                 // router's own suggestions stay dashed.
+                                 task?.pinDay === b.day
+                                   ? "border-solid border-[var(--ink)] text-[var(--ink)]"
+                                   : "border-dashed border-[var(--muted)] text-[var(--muted)]"
+                               }`}
                   >
                     {/* Under twenty minutes there is no room for a name without
                         it colliding with the block below. The band still shows

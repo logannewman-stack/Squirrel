@@ -488,7 +488,15 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
   const rankOf = new Map(
     mine.map((t) => [t.id, { critical: 0, high: 1, normal: 2, low: 3 }[t.priority] ?? 2]),
   );
-  const placed = placeInDay(blocks, events, o, rankOf);
+  // Hand-placed clock times: "this one, Thursday at 10". Only honoured on the
+  // pinned day itself — a past pin that fell back to ordinary days must not
+  // drag its old clock time along.
+  const pinAtOf = new Map(
+    mine
+      .filter((t) => t.pinDay && t.pinTime)
+      .map((t) => [t.id, { day: t.pinDay, tm: t.pinTime }]),
+  );
+  const placed = placeInDay(blocks, events, o, rankOf, pinAtOf);
 
   return {
     blocks: placed,
@@ -585,7 +593,7 @@ function shortfallFor(task, need, short, days, events, o, cache, committed = new
  * single remaining gap is split rather than dropped — two 45-minute halves
  * on the same day are still the work.
  */
-function placeInDay(blocks, events, o, rankOf = new Map()) {
+function placeInDay(blocks, events, o, rankOf = new Map(), pinAtOf = new Map()) {
   const byDay = new Map();
   for (const b of blocks) {
     if (!byDay.has(b.day)) byDay.set(b.day, []);
@@ -598,7 +606,7 @@ function placeInDay(blocks, events, o, rankOf = new Map()) {
 
   const out = [];
   for (const [day, list] of byDay) {
-    const gaps = findFreeSlots(day, events, {
+    let gaps = findFreeSlots(day, events, {
       minMins: Math.min(o.minBlock, 15),
       start: o.workStart,
       end: o.workEnd,
@@ -606,7 +614,59 @@ function placeInDay(blocks, events, o, rankOf = new Map()) {
       breaks: o.breaks,
     }).map((s) => ({ at: new Date(s.start), end: new Date(s.end) }));
 
+    /**
+     * Hand-placed blocks seat first, at their exact minute when it is free
+     * and at the next free minute when a meeting covers it — never displaced
+     * by priority, because a person's hand outranks the algorithm's taste.
+     * Seating mid-gap splits the gap, so the morning ahead of a 1pm pin is
+     * still offered to everything else.
+     */
+    const pinned = [];
+    const flowing = [];
     for (const b of list) {
+      const pin = pinAtOf.get(b.taskId);
+      if (pin && pin.day === day) pinned.push({ b, tm: pin.tm });
+      else flowing.push(b);
+    }
+
+    for (const { b, tm } of pinned) {
+      const [hh, mm] = String(tm).split(":").map(Number);
+      const [y, mo, dd] = day.split("-").map(Number);
+      const want = new Date(y, mo - 1, dd, hh || 0, mm || 0);
+      let left = b.mins;
+      for (const gap of [...gaps].sort((g1, g2) => g1.at - g2.at)) {
+        if (left <= 0) break;
+        const from = new Date(Math.max(gap.at, want));
+        if (from >= gap.end) continue;
+        const take = Math.min(left, Math.round((gap.end - from) / 60000));
+        if (take <= 0) continue;
+        const end = new Date(from.getTime() + take * 60000);
+        out.push({ ...b, mins: take, start: iso(from), end: iso(end) });
+        const tail = { at: end, end: gap.end };
+        gap.end = from; // the head of the gap stays free
+        if (tail.end > tail.at) gaps.push(tail);
+        left -= take;
+      }
+      // Everything after the wanted minute is taken — use the free room
+      // earlier in the day rather than dropping the commitment.
+      if (left > 0) {
+        for (const gap of gaps.sort((g1, g2) => g1.at - g2.at)) {
+          if (left <= 0) break;
+          const room = Math.round((gap.end - gap.at) / 60000);
+          if (room <= 0) continue;
+          const take = Math.min(left, room);
+          const start = new Date(gap.at);
+          const end = new Date(start.getTime() + take * 60000);
+          out.push({ ...b, mins: take, start: iso(start), end: iso(end) });
+          gap.at = end;
+          left -= take;
+        }
+      }
+      if (left > 0) out.push({ ...b, mins: left, start: null, end: null });
+    }
+    gaps = gaps.filter((g) => g.end > g.at).sort((g1, g2) => g1.at - g2.at);
+
+    for (const b of flowing) {
       let left = b.mins;
       for (const gap of gaps) {
         if (left <= 0) break;

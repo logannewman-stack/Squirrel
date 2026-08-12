@@ -487,5 +487,54 @@ const state = {
     fair.blocks.filter((b) => b.taskId === "roomy").reduce((n, b) => n + b.mins, 0) === 300);
 }
 
+// --------------------------------------------------- pinned to the minute
+{
+  // Dragged to 13:00 on a free day: it starts at exactly 13:00.
+  const r = distribute(
+    [task({ id: "at1", estimateMins: 60, pinDay: D(1), pinTime: "13:00" })],
+    [], [], { now: NOW },
+  );
+  t("a time-pinned block starts at its exact minute",
+    r.blocks[0]?.start?.endsWith("13:00:00") === true, r.blocks[0]?.start);
+
+  // A meeting covers 13:00–14:00: it starts the minute the meeting ends.
+  const bumped = distribute(
+    [task({ id: "at2", estimateMins: 60, pinDay: D(1), pinTime: "13:00" })],
+    [meeting(D(1), 13, 60)], [], { now: NOW },
+  );
+  t("  a meeting on the minute bumps it to the next free one",
+    bumped.blocks[0]?.start?.endsWith("14:00:00") === true, bumped.blocks[0]?.start);
+
+  // Priority never displaces a hand placement: the critical task takes the
+  // morning, and the pinned block keeps its 13:00 exactly.
+  const both = distribute(
+    [
+      task({ id: "vip", priority: "critical", estimateMins: 60, due: D(2), createdAt: 1 }),
+      task({ id: "hand", estimateMins: 60, pinDay: D(1), pinTime: "13:00", createdAt: 2 }),
+    ],
+    [], [], { now: NOW },
+  );
+  const hand = both.blocks.find((b) => b.taskId === "hand");
+  const vip = both.blocks.filter((b) => b.taskId === "vip");
+  t("  a person's hand outranks the algorithm's taste",
+    hand?.start?.endsWith("13:00:00") === true &&
+    vip.every((b) => b.day !== hand.day || b.start < hand.start),
+    JSON.stringify({ hand: hand?.start, vip: vip.map((b) => b.start) }));
+
+  // The morning ahead of a 1pm pin is still offered to everything else —
+  // seating mid-gap splits the gap rather than consuming it.
+  t("  and the morning before the pin is not wasted",
+    vip.some((b) => b.day === D(1) ? b.start < hand.start : true));
+
+  // A pinTime with no pinDay is meaningless and ignored.
+  const loose = distribute(
+    [task({ id: "at3", estimateMins: 60, pinTime: "13:00", due: D(5) })],
+    [], [], { now: NOW },
+  );
+  t("  a clock time without a day pins nothing",
+    loose.blocks.length > 0 && !loose.blocks[0].start?.endsWith("13:00:00"),
+    loose.blocks[0]?.start);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
