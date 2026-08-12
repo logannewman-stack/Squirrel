@@ -274,7 +274,7 @@ export function runTool(name, input) {
       // Reads the live distribution rather than running a second planner —
       // see lib/schedule.js. The plan is derived, so there is nothing to
       // "apply": it is already what the calendar shows.
-      const spread = distribute(activeTasks(s), s.events, s.sessions, planOpts(s.settings));
+      const spread = distribute(activeTasks(s), s.events, s.sessions, planOpts(s.settings, { projects: s.projects }));
       setPlan(spread);
       const mine = workOn(spread.blocks, s.tasks, input.date);
       return {

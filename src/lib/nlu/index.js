@@ -1857,7 +1857,7 @@ function answer(text, state, opts = {}) {
           let when = null;
           if (!slots.person) {
             const after = getState();
-            const spread = distribute(activeTasks(after), after.events, after.sessions, { ...work, now });
+            const spread = distribute(activeTasks(after), after.events, after.sessions, { ...work, now, projects: after.projects });
             setPlan(spread);
             when = whenTask(made, spread, { now });
           }
@@ -2474,7 +2474,7 @@ function answer(text, state, opts = {}) {
         updateTask(task.id, patch);
         const spread = distribute(
           activeTasks({ ...state, tasks: state.tasks.map((t) => (t.id === task.id ? { ...t, ...patch } : t)) }),
-          state.events, state.sessions, { ...work, now },
+          state.events, state.sessions, { ...work, now, projects: state.projects },
         );
         const mine = spread.blocks.filter((b) => b.taskId === task.id);
         if (!mine.length) {
@@ -2578,7 +2578,7 @@ function answer(text, state, opts = {}) {
       // "plan my week" and "how do I get this done" want the whole runway, not
       // just today — that is where the deadline maths actually lives.
       if (/\bweek\b|\bdeadlines?\b|\bfit\b|\bahead\b/.test(p.body.toLowerCase())) {
-        const spread = distribute(activeTasks(state), state.events, state.sessions, { ...work, now });
+        const spread = distribute(activeTasks(state), state.events, state.sessions, { ...work, now, projects: state.projects });
         if (!spread.blocks.length && !spread.shortfalls.length) {
           return reply("Nothing to lay out — no open work with time on it.");
         }
@@ -2602,7 +2602,7 @@ function answer(text, state, opts = {}) {
       // different answer from the one already on the calendar. Reading the
       // real plan back is both simpler and the only version that can be true.
       const day = dayKey(slots.dateOnly || now);
-      const spread = distribute(activeTasks(state), state.events, state.sessions, { ...work, now });
+      const spread = distribute(activeTasks(state), state.events, state.sessions, { ...work, now, projects: state.projects });
       setPlan(spread);
       const mine = workOn(spread.blocks, state.tasks, day);
       const label = slots.dateOnly ? describe(atLocal(slots.dateOnly, 9), now).split(" at ")[0] : "today";

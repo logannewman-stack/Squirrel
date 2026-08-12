@@ -144,6 +144,18 @@ function capacityOf(day, events, committed, opts) {
 }
 
 /**
+ * A pinned task uses exactly its day. Pins ignore the workday filter —
+ * pinning Saturday is the user's explicit call — but never point backwards:
+ * a past pin returns empty and the caller falls back to the ordinary rules.
+ */
+function pinnedDays(task, from) {
+  const [y, m, d] = task.pinDay.split("-").map(Number);
+  const day = new Date(y, m - 1, d);
+  day.setHours(0, 0, 0, 0);
+  return day >= from ? [day] : [];
+}
+
+/**
  * The days a task may use: from today (or its start) up to its deadline, less
  * the buffer, workdays only.
  */
@@ -230,6 +242,9 @@ function eligibleDays(task, from, opts) {
  * task due next Tuesday, and sorting by date gets that backwards.
  */
 function byUrgency(a, b) {
+  // A pin outranks everything: the person already made this decision, and
+  // the router's job is to route the rest of the week around it.
+  if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
   // Work that cannot fit goes last, however alarming its slack.
   //
   // Slack alone put the most impossible task first, and being greedy it took
@@ -307,12 +322,34 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
       ),
     }));
 
+  /**
+   * A project's deadline binds its undated tasks. A task with its own due
+   * keeps it; a task with neither is planned as ordinary undated work. The
+   * cascade is resolution, not mutation — blocks and shortfalls still name
+   * the task, they just stop pretending "the project lands Friday" and "this
+   * task has all the time in the world" can both be true.
+   */
+  const projectDue = new Map(
+    (opts.projects || [])
+      .filter((p) => p.due && !p.archived)
+      .map((p) => [p.id, p.due]),
+  );
+
   const open = mine
     .filter((t) => t.estimateMins > 0 && remainingMins(t, sessions) > 0)
-    .map((task) => {
+    .map((raw) => {
+      const due = raw.due || projectDue.get(raw.projectId) || null;
+      const task = due === raw.due ? raw : { ...raw, due };
       const need = remainingMins(task, sessions);
-      const days = eligibleDays(task, from, o);
-      return { task, need, days };
+      /**
+       * A pin is the person overriding the router: "this one, Thursday."
+       * The task gets exactly its day and everything else routes around it.
+       * A pin in the past falls back to the ordinary rules — the old silent
+       * failure mode here was a task with no days, no block and no mention.
+       */
+      const pin = task.pinDay ? pinnedDays(task, from) : null;
+      const days = pin?.length ? pin : eligibleDays(task, from, o);
+      return { task, need, days, pinned: Boolean(pin?.length) };
     })
     .filter((x) => x.days.length);
 

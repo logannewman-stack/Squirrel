@@ -269,7 +269,8 @@ export default function App() {
   // week, or the panel is decoration.
   useEffect(() => {
     // activeTasks: an archived project's work is parked, not planned.
-    const plan = distribute(activeTasks(state), state.events, state.sessions, planOpts(state.settings));
+    const plan = distribute(activeTasks(state), state.events, state.sessions,
+      planOpts(state.settings, { projects: state.projects }));
     const same =
       JSON.stringify(plan.blocks) === JSON.stringify(state.blocks) &&
       JSON.stringify(plan.shortfalls) === JSON.stringify(state.shortfalls) &&

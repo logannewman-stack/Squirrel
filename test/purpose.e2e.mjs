@@ -338,6 +338,46 @@ await p.waitForTimeout(700);
   await p.waitForTimeout(200);
 }
 
+/* -------------------------------------------------------- "this one, Thursday" */
+{
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("ArrowRight"); // Munich lease
+  await p.waitForTimeout(300);
+  await p.keyboard.press("ArrowDown"); // Sign the lease
+  await p.waitForTimeout(300);
+
+  // Pin to tomorrow — the second chip in the week row.
+  await acorn(p).getByRole("button", { name: /^Pin to /i }).nth(1).click();
+  await p.waitForTimeout(600);
+  const tomorrow = await p.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const pinned = await p.evaluate(async () =>
+    (await import("/src/lib/store.js")).getState().tasks.find((x) => x.title === "Sign the lease")?.pinDay);
+  t("a pin lands in the store, day for day", pinned === tomorrow, `${pinned} vs ${tomorrow}`);
+  t("  and the card says pinned", /pinned/i.test(await acorn(p).innerText().catch(() => "")));
+
+  const obeyed = await p.evaluate(async () => {
+    const s = await import("/src/lib/store.js");
+    const me = s.getState().tasks.find((x) => x.title === "Sign the lease");
+    const mine = s.getState().blocks.filter((b) => b.taskId === me.id);
+    return mine.length > 0 && mine.every((b) => b.day === me.pinDay);
+  });
+  t("  and the router obeys — every block on the pinned day", obeyed === true);
+
+  await acorn(p).getByRole("button", { name: "Unpin" }).click();
+  await p.waitForTimeout(500);
+  t("  unpinning hands it back to the router", (await p.evaluate(async () =>
+    (await import("/src/lib/store.js")).getState().tasks.find((x) => x.title === "Sign the lease")?.pinDay)) == null);
+
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("Escape");
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+}
+
 /* ------------------------------------------------------- meaning is written */
 {
   await p.locator("canvas").first().focus();

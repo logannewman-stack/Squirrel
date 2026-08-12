@@ -80,6 +80,7 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
       days.push({
         key,
         short: i === 0 ? "now" : d.toLocaleDateString([], { weekday: "narrow" }),
+        wd: i === 0 ? "Today" : d.toLocaleDateString([], { weekday: "short" }),
         name: i === 0 ? "today" : d.toLocaleDateString([], { weekday: "long" }),
         date: d.toLocaleDateString([], { month: "short", day: "numeric" }),
         mins: rows.reduce((n, b) => n + b.mins, 0),
@@ -660,7 +661,13 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
                   );
                 }
                 if (state.shortfalls?.some((s) => s.taskId === acornTask.id)) {
-                  return <p className="alert mt-1 text-[11px]">doesn't fit before its deadline</p>;
+                  return (
+                    <p className="alert mt-1 text-[11px]">
+                      {acornTask.pinDay
+                        ? "doesn't fit on its pinned day"
+                        : "doesn't fit before its deadline"}
+                    </p>
+                  );
                 }
                 if (!(acornTask.estimateMins > 0)) {
                   return (
@@ -703,6 +710,44 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
               Open the whole branch →
             </Button>
           </div>
+
+          {/* "This one, Thursday." A pin overrides the router for one acorn
+              and the rest of the week routes around it. Tapping the pinned
+              day again lets go. */}
+          {!acornTask.done && (
+            <div className="mt-3 border-t border-[var(--hairline)] pt-2">
+              <p className="label">{acornTask.pinDay ? "Pinned" : "Pin to a day"}</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {week.map((d) => (
+                  <button
+                    key={d.key}
+                    aria-label={`Pin to ${d.name}`}
+                    onClick={() =>
+                      updateTask(acornTask.id, {
+                        pinDay: acornTask.pinDay === d.key ? null : d.key,
+                      })
+                    }
+                    className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                      acornTask.pinDay === d.key
+                        ? "border-[var(--ink)] font-medium"
+                        : "border-[var(--line)] hover:border-[var(--ink)]"
+                    }`}
+                  >
+                    {d.wd}
+                  </button>
+                ))}
+                {acornTask.pinDay && (
+                  <button
+                    onClick={() => updateTask(acornTask.id, { pinDay: null })}
+                    className="rounded-md px-2 py-1 text-[11px] text-[var(--faint)]
+                               transition-colors hover:text-[var(--ink)]"
+                  >
+                    Unpin
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* A fallen acorn climbs straight onto a branch from here — the
               same filing the assistant does by voice, one tap instead. */}

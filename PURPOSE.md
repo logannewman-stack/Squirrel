@@ -107,6 +107,22 @@ views of that one plan (`state.blocks`). Purpose now shows it at the source:
 All of it reads `state.blocks`, the same distribution Today works from, so
 the tree can never promise a different week than the day that arrives.
 
+Two rules deepen the routing itself (`lib/schedule.js`):
+
+- **A project's deadline binds its undated tasks.** A task with its own due
+  keeps it; a task with neither is ordinary undated work. The cascade is
+  resolution, not mutation — blocks and shortfalls still name the task —
+  and an archived project's deadline binds nothing.
+- **Pins.** "This one, Thursday": an acorn card's *Pin to a day* row gives a
+  task exactly its day, ranked ahead of everything so the rest of the week
+  routes around it. Pins may land on weekends (explicit beats default), a
+  pin in the past falls back to the ordinary rules rather than vanishing,
+  and an overloaded pin is reported as a shortfall, not spilled.
+
+The everyday promise this adds up to: open the app, land on Today, and the
+day is already built — from what you put in, how long it takes, and when
+it's due.
+
 Labels place themselves: the tree claims its own space (acorns, tips, the
 length of each shoot, measured without wind so nothing flickers) and every
 name slides up until its air is clear — which is what keeps a phone-width

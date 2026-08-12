@@ -336,5 +336,103 @@ const state = {
   t("and the slackest last", order.at(-1) === "fu", order.join(","));
 }
 
+// -------------------------------------------- a project's deadline cascades
+{
+  // An undated task inside a project due Friday is not "undated" — the
+  // project's deadline binds it, buffer and all.
+  const projects = [{ id: "p1", name: "Launch", due: D(4) }];
+  const r = distribute(
+    [task({ id: "a", estimateMins: 240, projectId: "p1" })],
+    [], [], { now: NOW, projects },
+  );
+  t("an undated task inherits its project's deadline",
+    r.blocks.length > 0 && r.blocks.every((b) => b.day <= D(3)),
+    JSON.stringify(r.blocks.map((b) => b.day)));
+
+  // A task's own date always wins over the project's.
+  const own = distribute(
+    [task({ id: "b", estimateMins: 60, projectId: "p1", due: D(1) })],
+    [], [], { now: NOW, projects },
+  );
+  t("  a task's own deadline outranks the project's",
+    own.blocks.every((b) => b.day <= D(1)), JSON.stringify(own.blocks.map((b) => b.day)));
+
+  // Too much work for the project window is a shortfall, not a silence.
+  // (Four workdays before the buffer, 300 minutes each: 1500 cannot fit.)
+  const tight = distribute(
+    [task({ id: "c", estimateMins: 1500, projectId: "p1" })],
+    [], [], { now: NOW, projects },
+  );
+  t("  too much for the project window is reported short",
+    tight.shortfalls.length === 1 && tight.shortfalls[0].taskId === "c");
+
+  // An archived project's deadline binds nothing.
+  const parked = distribute(
+    [task({ id: "d", estimateMins: 60, projectId: "p2" })],
+    [], [], { now: NOW, projects: [{ id: "p2", name: "Old", due: D(1), archived: true }] },
+  );
+  t("  an archived project's deadline binds nothing",
+    parked.blocks.some((b) => b.day > D(0)) || parked.blocks.length > 0,
+    JSON.stringify(parked.blocks.map((b) => b.day)));
+  t("  and its undated work still plans like undated work",
+    parked.totals.plannedMins === 60, parked.totals.plannedMins);
+}
+
+// ------------------------------------------------------------- pinned days
+{
+  // "This one, Thursday." Every minute of a pinned task lands on its day.
+  const r = distribute(
+    [task({ id: "pin", estimateMins: 90, pinDay: D(3), due: D(10) })],
+    [], [], { now: NOW },
+  );
+  t("a pinned task lands entirely on its day",
+    r.blocks.length > 0 && r.blocks.every((b) => b.day === D(3)),
+    JSON.stringify(r.blocks.map((b) => b.day)));
+
+  // The pin holds even when a desperate monster wants the same day: pins
+  // claim capacity first, and the monster routes around them.
+  const both = distribute(
+    [
+      task({ id: "monster", estimateMins: 900, due: D(3), createdAt: 1 }),
+      task({ id: "pin", estimateMins: 120, pinDay: D(2), due: D(10), createdAt: 2 }),
+    ],
+    [], [], { now: NOW },
+  );
+  const pinBlocks = both.blocks.filter((b) => b.taskId === "pin");
+  t("  a pin holds its day against a desperate deadline",
+    pinBlocks.length > 0 && pinBlocks.every((b) => b.day === D(2)),
+    JSON.stringify(pinBlocks));
+
+  // Pinning a Saturday is the user's explicit call — the workday filter
+  // stands aside for it.
+  const sat = distribute(
+    [task({ id: "wk", estimateMins: 60, pinDay: D(5) })],
+    [], [], { now: NOW },
+  );
+  t("  a weekend pin is honoured — explicit beats default",
+    sat.blocks.length > 0 && sat.blocks.every((b) => b.day === D(5)),
+    JSON.stringify(sat.blocks.map((b) => b.day)));
+
+  // A pin in the past is not time travel: the task falls back to the
+  // ordinary rules instead of vanishing — the planner's one unforgivable
+  // answer is silence.
+  const past = distribute(
+    [task({ id: "old", estimateMins: 60, pinDay: "2020-01-01" })],
+    [], [], { now: NOW },
+  );
+  t("  a past pin falls back to the ordinary rules, never silence",
+    past.totals.plannedMins === 60 && past.blocks.every((b) => b.day >= D(0)),
+    JSON.stringify(past.blocks.map((b) => b.day)));
+
+  // More work than the pinned day can hold is a shortfall, said out loud.
+  const heavy = distribute(
+    [task({ id: "heavy", estimateMins: 600, pinDay: D(1) })],
+    [], [], { now: NOW },
+  );
+  t("  an overloaded pin is reported short, not spilled",
+    heavy.shortfalls.length === 1 && heavy.blocks.every((b) => b.day === D(1)),
+    JSON.stringify({ blocks: heavy.blocks.length, shorts: heavy.shortfalls.length }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
