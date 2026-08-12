@@ -11,6 +11,11 @@ never sign in never touch any of this — that *is* the free tier.
 Time required: about 45 minutes. Cost to start: $0 (all three services have
 free tiers that cover early usage).
 
+> **Looking for the exact clicks?** `KEYS.md` is the companion page: every
+> key, which dashboard it comes from, what it's called in Vercel, and how to
+> tell when one is wrong. This page explains why each piece exists; that one
+> gets the values into place without a typo.
+
 ---
 
 ## 1. Supabase — the users live here (~15 min)

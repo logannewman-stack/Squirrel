@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "./ui";
 import { client } from "../lib/supabase";
+import { isOwner } from "../lib/owner";
 
 /**
  * Proving the boost is alive.
@@ -15,9 +16,23 @@ import { client } from "../lib/supabase";
  * So there is a button. It makes one real call and reports what actually came
  * back, including which model answered, because "is it configured" and "does it
  * work" are different questions and only the second one matters.
+ *
+ * Shown only to the account that runs the deployment. A customer has no
+ * question this answers — whether *your* key is typed correctly is not their
+ * concern, and a button that spends a real model call to reassure somebody
+ * else is worse than no button at all.
  */
 export default function BoostCheck() {
   const [state, setState] = useState({ idle: true });
+  // Unknown until the server says. Null renders nothing, so a customer never
+  // sees the control appear and then vanish.
+  const [owner, setOwner] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    isOwner().then((yes) => live && setOwner(yes));
+    return () => { live = false; };
+  }, []);
 
   async function run() {
     setState({ busy: true });
@@ -49,6 +64,9 @@ export default function BoostCheck() {
   }
 
   const r = state.result;
+
+  // Not the owner (or not known yet): the control does not exist here.
+  if (!owner) return null;
 
   return (
     <div>

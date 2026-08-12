@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { asService, requireUser, json } from "./_lib/db.js";
+import { isOwner } from "./admin/users.js";
 
 /**
  * Does the boost actually work?
@@ -81,28 +82,31 @@ export default async function handler(req, res) {
   }
 
   /**
-   * A real model call costs money, so it is metered exactly like /api/interpret
-   * — through the same atomic claim. Without this, "signed in" was treated as
-   * "is the operator", and any free account (0 chat allowance, so /interpret
-   * always 402s them) could script this endpoint for unbounded spend against
-   * the shared key, degrading paying users to deterministic-only when the
-   * shared rate-limit bucket drained. A boost test is one chat; a free tier
-   * with no allowance cannot run it, which is correct — the boost is a paid
-   * feature and testing it is the operator's own paid account doing so.
+   * This is deployment tooling, so only the people who run the deployment may
+   * spend on it.
+   *
+   * It was gated on "is signed in", which let any free account script a real
+   * model call against the shared key. The first fix metered it against the
+   * caller's chat allowance — which closed the hole and created a worse one:
+   * a fresh owner sits on the free plan with no allowance, so the one person
+   * who needs to know whether their new key works was the one person who
+   * could not ask. And a customer testing the *deployment's* key is answering
+   * a question they never had.
+   *
+   * The allow-list settles both. Unmetered is safe when the door only opens
+   * for the one or two addresses in OWNER_EMAILS; unset means nobody, and the
+   * message says which variable to set rather than leaving a dead button.
    */
-  const db = asService();
-  const { data: allowed, error: claimErr } = await db.rpc("claim_assistant_chat", {
-    uid: auth.user.id,
-  });
-  if (claimErr) return json(res, 200, { ok: false, configured: true, model: MODEL, detail: "Could not reach the usage meter — try again." });
-  if (!allowed) {
-    return json(res, 200, {
+  if (!isOwner(auth.user.email)) {
+    return json(res, 403, {
       ok: false,
       configured: true,
       model: MODEL,
-      detail: "This account has no assistant allowance left this month, so the test can't run. The boost itself is fine — it's the meter, not the key.",
+      detail: "This check runs one real model call, so it is limited to the account that runs this deployment — set OWNER_EMAILS to your address and sign in as it.",
     });
   }
+
+  const db = asService();
 
   const started = Date.now();
   try {
