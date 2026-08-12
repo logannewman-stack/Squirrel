@@ -115,6 +115,14 @@ export const INDEX = [
     keywords: "delete account close account remove account leave quit cancel account gdpr erasure",
   },
   {
+    // Indexed for everyone, rendered for owners only — the group exists on the
+    // screen whether or not the server lets this account see anything in it,
+    // and an index that lied about that would drift the first time either side
+    // changed.
+    group: "data", header: "Your people",
+    keywords: "users customers accounts roster subscribers members signups revenue mrr paying plans overview who owner admin console",
+  },
+  {
     group: "data", header: "This build",
     keywords: "version build number diagnostics setup keys configuration environment about support",
   },

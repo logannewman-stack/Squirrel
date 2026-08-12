@@ -244,3 +244,16 @@ export const remainingChats = (plan, used) => {
   const lim = limitFor(plan, "chats");
   return lim === null ? Infinity : Math.max(0, lim - used);
 };
+
+/**
+ * Monthly recurring revenue from a count of accounts per plan.
+ *
+ * Here rather than in the API because this file is the one place a price is
+ * written; a copy on the server is a number that goes stale the first time
+ * pricing changes, and the first symptom is a dashboard quietly reporting
+ * last quarter's revenue. An unrecognised tier contributes nothing — a typo
+ * should under-report, never invent income.
+ */
+export const mrrOf = (byPlan = {}) =>
+  Object.entries(byPlan).reduce(
+    (sum, [plan, count]) => sum + (PLANS[plan]?.price || 0) * count, 0);

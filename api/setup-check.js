@@ -100,6 +100,14 @@ export default async function handler(req, res) {
       vars: { RESEND_API_KEY: has("RESEND_API_KEY"), INVITE_FROM: has("INVITE_FROM") },
       unlocks: "Teammate invitations for Studio.",
     },
+    {
+      id: "owner",
+      name: "Your console",
+      required: false,
+      ready: has("OWNER_EMAILS"),
+      vars: { OWNER_EMAILS: has("OWNER_EMAILS") },
+      unlocks: "Settings → Your people: the roster of accounts, plans and revenue. Unset, nobody can open it — including you.",
+    },
   ];
 
   const warnings = [];

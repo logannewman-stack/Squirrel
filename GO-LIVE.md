@@ -80,12 +80,94 @@ free tiers that cover early usage).
    and run down the same safe, confirmable, undoable path. Users never see a
    key, a model name, or a bill — it's just Squirrel getting smarter.
 
-## 4. Later, when you want them (each optional)
+## 4. Seeing your users (~2 min)
 
-- **Stripe (paid plans on the web):** set `STRIPE_SECRET_KEY`,
-  `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PLUS`, `STRIPE_PRICE_PRO`; point a
-  Stripe webhook at `/api/stripe-webhook`. Upgrades then flow through
-  checkout and the webhook writes the plan to the profile.
+Add one variable and the console appears in the app itself:
+
+| Variable | Value |
+| --- | --- |
+| `OWNER_EMAILS` | `you@yourdomain.com` (comma-separated for a partner) |
+
+Redeploy, then open **Settings → Data → Your people**. You get every account,
+newest and paying first: address, plan, when they joined, whether their card
+is failing, and how much of the assistant they used this month — plus totals
+across the top: people, paying, monthly revenue, assists.
+
+Two things it deliberately will not do. It will not show anybody's tasks,
+projects, notes or calendar — running the business needs to know someone is
+on Pro and used 40 assists, not what they're working on. And it will not open
+for anyone whose email is not in that list: not a customer, not a curious
+signed-in stranger, not you before you set the variable. Unset means nobody.
+
+## 5. Stripe monthly subscriptions (~20 min)
+
+The code is written and tested — checkout, the customer portal, the webhook,
+proration, failed cards, cancellations. What it needs is your Stripe account
+and four ids.
+
+1. **Create the products.** [dashboard.stripe.com](https://dashboard.stripe.com)
+   → Product catalogue → **Add product**, one per tier you sell. For each,
+   add a price: **Recurring**, **Monthly**, in your currency. The prices the
+   app advertises live in `src/lib/plans.js` — set Stripe to match, or change
+   both together.
+
+   | Product | Price in `plans.js` | Env var to hold its price id |
+   | --- | --- | --- |
+   | Squirrel Pro | $24.99/mo | `STRIPE_PRICE_PRO` |
+   | Squirrel Studio | $50/mo | `STRIPE_PRICE_STUDIO` |
+
+   Copy each **price** id (`price_…`, not the `prod_…` product id).
+
+   > `STRIPE_PRICE_PLUS` also exists in the code and the database's tier enum.
+   > It is a legacy tier the pricing page no longer sells — leave it unset
+   > unless you decide to bring a cheaper plan back, in which case add `plus`
+   > to `PLANS` in `src/lib/plans.js` first, so the app can price and describe
+   > what Stripe is charging for.
+
+2. **Add the webhook.** Developers → Webhooks → **Add endpoint**, URL
+   `https://your-domain/api/stripe-webhook`. Select exactly these events:
+
+   - `checkout.session.completed` — first purchase; links the Stripe customer
+     to the Supabase account
+   - `customer.subscription.created`, `customer.subscription.updated`,
+     `customer.subscription.deleted` — the plan itself, including upgrades,
+     downgrades and cancellations
+   - `invoice.payment_failed` — raises the card-failing flag you see in your
+     console
+   - `invoice.payment_succeeded` — clears it when the card works again
+
+   Copy the **signing secret** (`whsec_…`).
+
+3. **Set the variables** in Vercel and redeploy:
+
+   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO`,
+   `STRIPE_PRICE_STUDIO`, and `PUBLIC_URL` (checkout builds its return links
+   from it — unset, customers land nowhere after paying).
+
+4. **Test with a test-mode card.** Use Stripe's test keys first;
+   `/api/setup-check` warns you when you're in test mode so you can't mistake
+   it for live. In the app: Settings → Plan → upgrade → pay with `4242 4242
+   4242 4242`, any future expiry, any CVC. Then check three things — the app
+   shows the new plan, `Your people` shows them as paying, and Stripe shows
+   an active subscription. Cancel from Settings → Manage (the Stripe portal)
+   and watch the plan return to free at period end, not instantly: they
+   bought the month.
+
+Two behaviours worth knowing, because they're deliberate and unusual:
+
+- **A failed card doesn't lock anyone out immediately.** Stripe retries for
+  days; `past_due` keeps access and raises the flag in your console instead.
+  Locking someone out over an expired card loses a customer to an
+  inconvenience.
+- **Cancelling runs to the end of the paid period.** Access ends at
+  `plan_renews_at`, not at the click.
+
+> **iPhone note:** Apple requires In-App Purchase for subscriptions bought
+> *inside* an iOS app — Stripe is for the web. The App Store side is built
+> (`api/apple/verify`) and switches on with the native wrap. Selling on the
+> web meanwhile is both allowed and cheaper (≈2.9% vs 15%).
+
+## 6. Later, when you want them (each optional)
 - **Google Calendar sync:** create a Google Cloud project with the Calendar
   API, set the four `GOOGLE_*` variables from `.env.example`. The cron in
   `vercel.json` already pulls changes every 15 minutes once connected.

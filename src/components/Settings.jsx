@@ -10,6 +10,7 @@ import Billing from "./Billing";
 import Usage from "./Usage";
 import Calendars from "./Calendars";
 import SetupCheck from "./SetupCheck";
+import Owner from "./Owner";
 import DeleteAccount from "./DeleteAccount";
 import Appearance from "./Appearance";
 import Backup from "./Backup";
@@ -293,6 +294,18 @@ export default function Settings({ state, onBack, onLegal, onUpgrade, onKeyboard
         <Group header="Account" footer="Deleting removes the account and everything in it, on every device. There is no undo.">
           <PanelRow><DeleteAccount email={state.settings?.email || null} /></PanelRow>
         </Group>
+
+        {/* The founder's console. Renders nothing at all unless the server
+            recognises this account as an owner, so a customer never sees a
+            heading, a spinner, or a hint that it exists. */}
+        {canSync && (
+          <Group
+            header="Your people"
+            footer="Accounts and billing across every signed-in device. Never anybody's tasks, projects, or calendar."
+          >
+            <PanelRow><Owner /></PanelRow>
+          </Group>
+        )}
 
         <Group header="This build" footer="Only whether a key is set, never any part of its value.">
           <ValueRow label="Version" value={version} />

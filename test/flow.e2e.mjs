@@ -122,12 +122,30 @@ await p.waitForTimeout(700);
 }
 
 /* ------------------------------------ drag a block, and the plan follows */
+{
+  /**
+   * The overload above has done its job; leaving it in place makes this
+   * section depend on how much of the working day happens to be left when
+   * the suite runs — twenty hours of work will eat every hour it can reach,
+   * and the small task this drags may or may not get one. So the week is
+   * cleared to a single block first. A drag test should fail when dragging
+   * breaks, not when it runs after lunch.
+   */
+  await p.evaluate(async () => {
+    const s = await import("/src/lib/store.js");
+    for (const task of s.getState().tasks) s.deleteTask(task.id);
+    const day = (off) => { const d = new Date(); d.setDate(d.getDate() + off); return d.toISOString().slice(0, 10); };
+    s.addTask({ title: "Draft the agenda", estimateMins: 30, due: day(4) });
+  });
+  await p.waitForTimeout(900);
+}
+
 await p.getByRole("button", { name: "Calendar", exact: true }).first().click();
 await p.waitForTimeout(500);
 {
   await p.getByRole("tab", { name: "Week" }).click();
   await p.waitForTimeout(700);
-  const block = p.locator('button[title*="Small and fine"]').first();
+  const block = p.locator('button[title*="Draft the agenda"]').first();
   t("the routed block stands on the week grid", (await block.count()) === 1);
 
   await block.scrollIntoViewIfNeeded();
@@ -145,7 +163,7 @@ await p.waitForTimeout(500);
 
   const pinned = await p.evaluate(async () => {
     const s = await import("/src/lib/store.js");
-    const me = s.getState().tasks.find((x) => x.title === "Small and fine");
+    const me = s.getState().tasks.find((x) => x.title === "Draft the agenda");
     const mine = s.getState().blocks.filter((b) => b.taskId === me.id);
     return {
       pinDay: me.pinDay, pinTime: me.pinTime,
