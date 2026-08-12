@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutOak, hitTest, perchFor, geometryFor, findOnTree } from "../lib/oak";
 import { drawOak } from "../lib/oak-draw";
 import { whenProject } from "../lib/when";
-import { addProject, addTask, toggleTask, updateProject, dayKey } from "../lib/store";
+import {
+  addProject, addTask, toggleTask, updateProject, updateTask, setProjectArchived, dayKey,
+} from "../lib/store";
 import { resolveTheme, setTheme, onThemeChange } from "../lib/theme";
 import { duration, money } from "../lib/format";
 import { UNFILED } from "./ProjectDetail";
@@ -34,7 +36,7 @@ import { Button } from "./ui";
  * React in them — the tree is testable arithmetic, and this component is
  * only the hand holding it.
  */
-export default function Purpose({ state, onOpenProject, onStart }) {
+export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
   const wrap = useRef(null);
   const canvas = useRef(null);
   const [selection, setSelection] = useState(null);
@@ -63,6 +65,7 @@ export default function Purpose({ state, onOpenProject, onStart }) {
   const v = useRef({
     t: 0, gust: 0, dim: 0, zoom: 1, panX: 0,
     dragging: false, lastX: 0, downAt: null,
+    pts: new Map(), pinch: 0,
     drawn: { targets: [], squirrel: null, bubble: null },
     squirrel: null,
     selection: null, acorn: null, find: null, finderOpen: false,
@@ -167,13 +170,32 @@ export default function Purpose({ state, onOpenProject, onStart }) {
   /* ------------------------------------------------------- the hand */
   const onDown = (e) => {
     const s = v.current;
-    s.dragging = true;
+    s.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     e.currentTarget.setPointerCapture(e.pointerId);
+    if (s.pts.size === 2) {
+      // A second finger means pinch, not tap and not weather.
+      const [a, b] = [...s.pts.values()];
+      s.pinch = Math.hypot(a.x - b.x, a.y - b.y);
+      s.dragging = false;
+      s.downAt = null;
+      return;
+    }
+    s.dragging = true;
     s.lastX = e.clientX;
     s.downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
   };
   const onMove = (e) => {
     const s = v.current;
+    if (!s.pts.has(e.pointerId)) return;
+    s.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (s.pts.size === 2) {
+      // Pinch: the spread between two fingers scales the tree directly.
+      const [a, b] = [...s.pts.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (s.pinch > 0) s.zoom = Math.max(0.8, Math.min(1.8, s.zoom * (d / s.pinch)));
+      s.pinch = d;
+      return;
+    }
     if (!s.dragging) return;
     // Dragging is weather: the pointer's speed becomes the gust.
     s.gust = Math.max(-1.2, Math.min(1.2, s.gust + (e.clientX - s.lastX) * 0.01));
@@ -182,6 +204,8 @@ export default function Purpose({ state, onOpenProject, onStart }) {
   };
   const onUp = (e) => {
     const s = v.current;
+    s.pts.delete(e.pointerId);
+    if (s.pts.size < 2) s.pinch = 0;
     s.dragging = false;
     const d = s.downAt;
     s.downAt = null;
@@ -223,14 +247,24 @@ export default function Purpose({ state, onOpenProject, onStart }) {
     const limbs = layout.branches;
     if (!limbs.length) return;
     const idx = limbs.findIndex((b) => b.projectId === selection);
-    if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+    if (e.key === "ArrowRight" || (!selection && e.key === "ArrowUp")) {
       e.preventDefault();
       setAcornId(null);
       setSelection(limbs[Math.min(limbs.length - 1, idx < 0 ? 0 : idx + 1)].projectId);
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+    } else if (e.key === "ArrowLeft" || (!selection && e.key === "ArrowDown")) {
       e.preventDefault();
       setAcornId(null);
       setSelection(limbs[Math.max(0, idx < 0 ? limbs.length - 1 : idx - 1)].projectId);
+    } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && selection) {
+      // Down and up walk the acorns of the branch being read, one card at a
+      // time; up from the first steps back to the branch itself.
+      e.preventDefault();
+      const list = branch ? branch.acorns : layout.ground;
+      if (!list.length) return;
+      const ai = list.findIndex((a) => a.taskId === acornId);
+      if (e.key === "ArrowDown") setAcornId(list[Math.min(list.length - 1, ai + 1)].taskId);
+      else if (ai <= 0) setAcornId(null);
+      else setAcornId(list[ai - 1].taskId);
     } else if (e.key === "Escape") {
       if (acornId) setAcornId(null);
       else clear();
@@ -253,6 +287,9 @@ export default function Purpose({ state, onOpenProject, onStart }) {
   };
 
   const branch = layout.branches.find((b) => b.projectId === selection);
+  const shoots = branch && !branch.host
+    ? layout.branches.filter((x) => x.host === branch)
+    : [];
   const acornBranch = acornTask?.projectId
     ? layout.branches.find((b) => b.projectId === acornTask.projectId)
     : null;
@@ -281,12 +318,14 @@ export default function Purpose({ state, onOpenProject, onStart }) {
         aria-label={
           layout.empty
             ? "Your oak — bare until the first acorn"
-            : `Your oak — ${layout.branches.length} branches, ${layout.counts.done} of ${layout.counts.total} acorns stored away. Arrow keys walk the branches, Enter opens one, and / asks the squirrel to find anything.`
+            : `Your oak — ${layout.branches.length} branches, ${layout.counts.done} of ${layout.counts.total} acorns stored away. Left and right walk the branches, down and up walk a branch's acorns, Enter opens the whole project, and / asks the squirrel to find anything.`
         }
         tabIndex={0}
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onPointerCancel={onUp}
+        onDoubleClick={() => { v.current.zoom = 1; v.current.panX = 0; }}
         onKeyDown={onKey}
         className="absolute inset-0 h-full w-full cursor-grab touch-none outline-none
                    active:cursor-grabbing"
@@ -457,19 +496,51 @@ export default function Purpose({ state, onOpenProject, onStart }) {
             </button>
           </div>
 
-          <div className="mt-3 flex gap-2">
-            <Button variant="primary" size="sm" className="flex-1" onClick={() => toggleTask(acornTask.id)}>
-              {acornTask.done ? "Put it back" : "Store it away"}
-            </Button>
+          <div className="mt-3 flex flex-col gap-2">
+            <div className="flex gap-2">
+              <Button variant="primary" size="sm" className="flex-1" onClick={() => toggleTask(acornTask.id)}>
+                {acornTask.done ? "Put it back" : "Store it away"}
+              </Button>
+              {/* The app's core verb, reachable from the tree: pick this
+                  acorn up and work on it, right now. */}
+              {!acornTask.done && onFocus && (
+                <Button variant="ghost" size="sm" className="flex-1" onClick={() => onFocus(acornTask)}>
+                  Focus on it
+                </Button>
+              )}
+            </div>
             <Button
               variant="ghost"
               size="sm"
-              className="flex-1"
+              className="w-full"
               onClick={() => onOpenProject(acornTask.projectId ? acornTask.projectId : UNFILED)}
             >
               Open the whole branch →
             </Button>
           </div>
+
+          {/* A fallen acorn climbs straight onto a branch from here — the
+              same filing the assistant does by voice, one tap instead. */}
+          {!acornTask.projectId && layout.branches.length > 0 && (
+            <div className="mt-3 border-t border-[var(--hairline)] pt-2">
+              <p className="label">It climbs onto…</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {layout.branches.slice(0, 8).map((b) => (
+                  <button
+                    key={b.projectId}
+                    onClick={() => {
+                      updateTask(acornTask.id, { projectId: b.projectId });
+                      setSelection(b.projectId);
+                    }}
+                    className="rounded-md border border-[var(--line)] px-2 py-1 text-[11px]
+                               transition-colors hover:border-[var(--ink)]"
+                  >
+                    {b.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </aside>
       )}
 
@@ -484,12 +555,21 @@ export default function Purpose({ state, onOpenProject, onStart }) {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
+              {/* A shoot names the bough that carries it — and the name is
+                  the way back up. */}
+              {branch?.host && (
+                <button
+                  onClick={() => { setAcornId(null); setSelection(branch.host.projectId); }}
+                  className="label transition-colors hover:text-[var(--ink)]"
+                >
+                  off {branch.host.name} ›
+                </button>
+              )}
               <p className="truncate text-sm font-semibold">{branch ? branch.name : "Unfiled"}</p>
               <p className="mt-0.5 text-[11px] text-[var(--muted)]">
                 {branch
                   ? `${branch.doneCount} of ${branch.count} stored away`
                   : "fallen — not on a branch yet"}
-                {branch?.host ? ` · off ${branch.host.name}` : ""}
                 {project?.client ? ` · ${project.client}` : ""}
                 {project?.value ? ` · ${money(project.value)}` : ""}
               </p>
@@ -527,10 +607,28 @@ export default function Purpose({ state, onOpenProject, onStart }) {
 
           {unfiledOpen && (
             <p className="mt-3 text-xs leading-relaxed text-[var(--muted)]">
-              Acorns with no branch of their own yet. Say{" "}
-              <span className="text-[var(--ink)]">“file the lease under Q3 launch”</span>{" "}
-              and they climb the tree.
+              Acorns with no branch of their own yet. Open one and it can
+              climb straight onto a branch.
             </p>
+          )}
+
+          {/* The shoots growing off this bough, each one a door. */}
+          {shoots.length > 0 && (
+            <div className="mt-3 border-t border-[var(--hairline)] pt-2">
+              <p className="label">Shoots</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {shoots.map((s) => (
+                  <button
+                    key={s.projectId}
+                    onClick={() => { setAcornId(null); setSelection(s.projectId); }}
+                    className="rounded-md border border-[var(--line)] px-2 py-1 text-[11px]
+                               transition-colors hover:border-[var(--ink)]"
+                  >
+                    {s.name} · {s.doneCount}/{s.count}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <ul className="mt-3 space-y-1 border-t border-[var(--hairline)] pt-2">
@@ -605,6 +703,18 @@ export default function Purpose({ state, onOpenProject, onStart }) {
           >
             Open the whole branch →
           </Button>
+
+          {/* Done with the whole thing: off the tree, never lost. The same
+              archive Projects offers, one undo away like everything else. */}
+          {project && (
+            <button
+              onClick={() => { setProjectArchived(project.id); clear(); }}
+              className="mt-2 w-full text-center text-[11px] text-[var(--faint)]
+                         transition-colors hover:text-[var(--ink)]"
+            >
+              Shelve this branch — off the tree, never lost
+            </button>
+          )}
         </aside>
       )}
     </div>

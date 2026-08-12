@@ -190,7 +190,7 @@ await p.waitForTimeout(700);
   await p.waitForTimeout(500);
   const sub = await panel(p).innerText().catch(() => "");
   t("a sub-branch grows off it and opens",
-    /Filings/.test(sub) && /off Legal/.test(sub), sub.slice(0, 120));
+    /Filings/.test(sub) && /off Legal/i.test(sub), sub.slice(0, 120));
 
   // An acorn hung on the sub-branch, opening as itself.
   await panel(p).getByRole("button", { name: "+ Acorn" }).click();
@@ -209,6 +209,97 @@ await p.waitForTimeout(700);
   await p.keyboard.press("Escape");
   await p.keyboard.press("Escape");
   await p.waitForTimeout(300);
+}
+
+/* --------------------------------------------- the cards act, not just read */
+{
+  // Shoots: the parent lists its side shoots, and both directions are a tap.
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("ArrowRight"); // Munich lease
+  await p.waitForTimeout(150);
+  await p.keyboard.press("ArrowRight"); // Q3 launch
+  await p.waitForTimeout(150);
+  await p.keyboard.press("ArrowRight"); // Legal
+  await p.waitForTimeout(400);
+  await panel(p).getByRole("button", { name: /Filings/ }).click();
+  await p.waitForTimeout(400);
+  t("a parent's card lists its shoots, and a chip walks down one",
+    /Filings/.test(await panel(p).innerText().catch(() => "")));
+  await panel(p).getByRole("button", { name: /off Legal/i }).click();
+  await p.waitForTimeout(400);
+  const back = await panel(p).innerText().catch(() => "");
+  t("  and the shoot's kicker climbs back up",
+    /Legal/.test(back) && !/off Legal/i.test(back), back.slice(0, 100));
+
+  // Down and up walk the acorns of the branch being read.
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+  await p.keyboard.press("ArrowRight"); // Munich lease
+  await p.waitForTimeout(300);
+  await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(300);
+  t("ArrowDown opens the branch's first acorn",
+    /Sign the lease/.test(await acorn(p).innerText().catch(() => "")));
+  await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(300);
+  t("  and the next", /Survey/.test(await acorn(p).innerText().catch(() => "")));
+  await p.keyboard.press("ArrowUp");
+  await p.waitForTimeout(300);
+  t("  ArrowUp walks back", /Sign the lease/.test(await acorn(p).innerText().catch(() => "")));
+  await p.keyboard.press("ArrowUp");
+  await p.waitForTimeout(300);
+  t("  and up from the first is the branch again",
+    (await acorn(p).count()) === 0 && (await panel(p).count()) === 1);
+
+  // Focus, straight off the tree — the app's own verb.
+  await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(300);
+  await acorn(p).getByRole("button", { name: "Focus on it" }).click();
+  await p.waitForTimeout(600);
+  const focusScreen = await p.locator("body").innerText();
+  t("an acorn can be focused on from its card",
+    /Focus on/i.test(focusScreen) && /Sign the lease/.test(focusScreen), focusScreen.slice(0, 120));
+  await p.getByRole("button", { name: "Cancel" }).click();
+  await p.waitForTimeout(600);
+
+  // A fallen acorn climbs onto a branch from its card.
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("/");
+  await p.waitForTimeout(300);
+  await p.getByLabel("Ask the squirrel to find something").fill("loose");
+  await p.waitForTimeout(300);
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(400);
+  await acorn(p).getByRole("button", { name: "Munich lease", exact: true }).click();
+  await p.waitForTimeout(500);
+  const climbed = await p.evaluate(async () => {
+    const s = await import("/src/lib/store.js");
+    const lease = s.getState().projects.find((x) => x.name === "Munich lease");
+    return s.getState().tasks.find((x) => x.title === "Loose end")?.projectId === lease.id;
+  });
+  t("a fallen acorn climbs onto a branch from its card", climbed === true);
+  t("  and its card follows it up the tree",
+    /Munich lease/i.test(await acorn(p).innerText().catch(() => "")));
+
+  // Shelve a branch without leaving the room.
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(150);
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+  await p.keyboard.press("ArrowRight"); // Munich lease
+  await p.waitForTimeout(150);
+  await p.keyboard.press("ArrowRight"); // Q3 launch
+  await p.waitForTimeout(150);
+  await p.keyboard.press("ArrowRight"); // Legal
+  await p.waitForTimeout(400);
+  await p.getByRole("button", { name: /Shelve this branch/ }).click();
+  await p.waitForTimeout(500);
+  const shelved = await p.evaluate(async () =>
+    (await import("/src/lib/store.js")).getState().projects.find((x) => x.name === "Legal")?.archived);
+  t("a branch can be shelved from its own card", shelved === true);
+  t("  letting go of the reading with it", (await panel(p).count()) === 0);
 }
 
 /* ------------------------------------------------------- meaning is written */

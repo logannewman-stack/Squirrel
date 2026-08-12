@@ -72,6 +72,19 @@ in place; and every acorn — tapped on the canvas, in a branch card's list,
 or found by the squirrel — opens into its own small card, where it can be
 stored away or put back without leaving the room.
 
+The cards act, they don't just read. An acorn's card can **Focus on it** —
+the same pick-a-length flow as Today, straight off the tree — and a fallen
+acorn's card offers **It climbs onto…**, one tap to file it on any branch,
+with the squirrel running there alongside. A parent's card lists its
+**shoots** as tappable chips and a shoot's kicker climbs back up; a branch
+can be **shelved** from its own card (off the tree, never lost, one undo
+away). Selection dims strangers, not family — the selected branch stays
+full, its shoots and host half-lit.
+
+The hand gets the native grammar: drag for wind, wheel or **pinch to zoom**,
+**double-tap to reset**, and on the keys left/right walk the branches while
+**down/up walk the open branch's acorns** card by card.
+
 Labels place themselves: the tree claims its own space (acorns, tips, the
 length of each shoot, measured without wind so nothing flickers) and every
 name slides up until its air is clear — which is what keeps a phone-width

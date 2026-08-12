@@ -498,6 +498,7 @@ export default function App() {
         state={state}
         onOpenProject={(id) => setView({ name: "project", id })}
         onStart={() => setView({ name: "projects" })}
+        onFocus={setPending}
       />
     ) : view.name === "insights" ? (
       can(state.plan, "insights") ? (

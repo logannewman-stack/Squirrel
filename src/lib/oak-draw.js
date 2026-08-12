@@ -187,10 +187,22 @@ export function drawOak(ctx, w, h, layout, view, theme) {
 
   const selected = view.selection;
   const find = view.find;
+  /**
+   * Selection dims strangers, not family: the selected branch stays full,
+   * its shoots and its host stay half-lit — reading a bough should keep the
+   * work growing off it in view.
+   */
+  const sel = selected ? layout.branches.find((b) => b.projectId === selected) : null;
+  const kin = new Set();
+  if (sel) {
+    if (sel.host) kin.add(sel.host.projectId);
+    for (const b of layout.branches) if (b.host === sel) kin.add(b.projectId);
+  }
   const dimOf = (id) => {
     if (find) return find.branchIds.has(id) ? 1 : 0.14;
     if (!selected || view.dim <= 0) return 1;
-    return id === selected ? 1 : 1 - view.dim * 0.78;
+    if (id === selected) return 1;
+    return 1 - view.dim * (kin.has(id) ? 0.45 : 0.78);
   };
 
   /* --------------------------------------------------------------- trunk */
