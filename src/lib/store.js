@@ -425,9 +425,19 @@ export function toggleTask(id) {
   });
 }
 
-export const deleteTask = (id) =>
+export function deleteTask(id) {
+  /**
+   * If the task being deleted is the one being focused on, the session ends
+   * first — banked, not discarded. Without this the timer kept counting down
+   * against a ghost: the screen showed the dead task's title, "Mark done"
+   * resurrected nothing, and the minutes eventually logged against an id
+   * nothing could resolve. Deletion arrives from the assistant and from sync
+   * as easily as from a button, so the guard lives here, under every path.
+   */
+  if (read().active?.taskId === id) endFocus();
   mutate(`deleting “${read().tasks.find((t) => t.id === id)?.title || "a task"}”`,
     { tasks: read().tasks.filter((t) => t.id !== id), tombstones: bury("tasks", id) }, LOUD);
+}
 
 /** Replace today's plan with an ordered list of task ids. */
 export function applyPlan(taskIds, day = dayKey()) {
@@ -560,27 +570,89 @@ export function startFocus({ taskId = null, eventId = null, label = "", plannedM
   update({ active: { taskId, eventId, label, plannedMs, startedAt: now, endsAt: now + plannedMs, remainingMs: plannedMs } });
 }
 
-export function pauseFocus(now = Date.now()) {
+/**
+ * The `now` arguments are coerced, not trusted.
+ *
+ * These are wired straight into onClick handlers, and React hands a click
+ * handler its event — so `pauseFocus(event)` arrived with a SyntheticEvent
+ * where a timestamp belonged, `endsAt - event` came out NaN, the countdown
+ * rendered "NaN:NaN", and ending the session logged NaN focused minutes. One
+ * stray argument was quietly destroying the session it was pausing. Coercing
+ * here rather than at the call sites protects every future caller the same
+ * way.
+ */
+const clock = (now) => (Number.isFinite(now) ? now : Date.now());
+
+export function pauseFocus(now) {
+  const t = clock(now);
   const a = read().active;
-  if (a?.endsAt != null) update({ active: { ...a, endsAt: null, remainingMs: remainingOf(a, now) } });
+  if (a?.endsAt != null) update({ active: { ...a, endsAt: null, remainingMs: remainingOf(a, t) } });
 }
 
-export function resumeFocus(now = Date.now()) {
+export function resumeFocus(now) {
+  const t = clock(now);
   const a = read().active;
-  if (a && a.endsAt == null) update({ active: { ...a, endsAt: now + a.remainingMs } });
+  if (!a || a.endsAt != null) return;
+  // A session paused by the NaN bug above has no usable remainder. Restoring
+  // the full plan under-credits the minutes already spent, which is the only
+  // safe direction to be wrong in — the alternative logged the whole planned
+  // block as done work.
+  const left = Number.isFinite(a.remainingMs) ? a.remainingMs : a.plannedMs;
+  update({ active: { ...a, endsAt: t + left, remainingMs: left } });
 }
 
-export function endFocus(now = Date.now()) {
+export function endFocus(now) {
+  const t = clock(now);
   const a = read().active;
   if (!a) return null;
-  const focusedMs = focusedOf(a, now);
-  const task = read().tasks.find((t) => t.id === a.taskId);
+  const focusedMs = focusedOf(a, t);
+  const task = read().tasks.find((x) => x.id === a.taskId);
   logSession({
     taskId: a.taskId, projectId: task?.projectId ?? null,
-    label: a.label || task?.title || "", plannedMs: a.plannedMs, focusedMs, endedAt: now,
+    label: a.label || task?.title || "", plannedMs: a.plannedMs,
+    focusedMs: Number.isFinite(focusedMs) ? focusedMs : 0, endedAt: t,
   });
   update({ active: null });
   return { ...a, focusedMs };
+}
+
+/**
+ * The session's pulse, so a crash can be told from a marathon.
+ *
+ * Written from the repaint tick every few seconds. It costs one silent write,
+ * and it is the difference between two stories the app used to be unable to
+ * tell apart: a timer that ran out while somebody worked, and an app that was
+ * closed one minute in and reopened tomorrow.
+ */
+export function heartbeatFocus(now) {
+  const a = read().active;
+  if (a) update({ active: { ...a, seenAt: clock(now) } });
+}
+
+/**
+ * Settle a session the app was not awake to finish.
+ *
+ * On relaunch, a session whose timer expired long ago used to be logged as
+ * the FULL planned time, stamped with the moment of reopening — one minute of
+ * real work became 25 logged minutes on the wrong day. The heartbeat gives an
+ * honest upper bound on presence: credit runs to the last pulse, stamped at
+ * the last pulse. Sessions that expire while the app is awake never come
+ * through here — the live path ends them within a second.
+ */
+export function reconcileFocus(now) {
+  const t = clock(now);
+  const a = read().active;
+  if (!a || a.endsAt == null || t - a.endsAt < 120000) return null;
+  const lastSeen = Number.isFinite(a.seenAt) ? a.seenAt : a.startedAt;
+  const focusedMs = Math.max(0, Math.min(a.plannedMs, lastSeen - a.startedAt));
+  const task = read().tasks.find((x) => x.id === a.taskId);
+  logSession({
+    taskId: a.taskId, projectId: task?.projectId ?? null,
+    label: a.label || task?.title || "", plannedMs: a.plannedMs,
+    focusedMs, endedAt: lastSeen,
+  });
+  update({ active: null });
+  return { ...a, focusedMs, reconciled: true };
 }
 
 /** Milliseconds left, derived from the clock. Never negative. */

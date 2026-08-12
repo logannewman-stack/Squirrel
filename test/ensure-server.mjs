@@ -95,9 +95,12 @@ const healthy = async () => {
  * @returns the offending path, or null if everything matches.
  */
 async function stale() {
+  // Twelve, not six: an integration that touches ten files in one second
+  // left App.jsx seventh-newest, unchecked, and stale — and the suite failed
+  // against a server this guard had just pronounced healthy.
   const recent = sources(join(ROOT, "src"))
     .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, 6);
+    .slice(0, 12);
 
   for (const { full } of recent) {
     const url = `http://localhost:${PORT}/${relative(ROOT, full)}`;

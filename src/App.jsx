@@ -24,6 +24,7 @@ import { can } from "./lib/plans";
 import { fetchUsage } from "./lib/billing";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
+  heartbeatFocus, reconcileFocus,
   remainingOf, toggleTask, setSetting, setPlan, setPlanTier, dayKey, undo,
 } from "./lib/store";
 import { shortcutFor } from "./lib/keys";
@@ -112,14 +113,31 @@ export default function App() {
   // background tab loses frames, never time.
   useEffect(() => {
     if (!active) return;
-    const id = setInterval(() => force((n) => n + 1), 250);
+    let lastBeat = 0;
+    const id = setInterval(() => {
+      force((n) => n + 1);
+      // The session's pulse — see reconcileFocus. Every few seconds, not every
+      // repaint: it is a localStorage write, and 4Hz would be vandalism.
+      const now = Date.now();
+      if (now - lastBeat > 5000) {
+        lastBeat = now;
+        heartbeatFocus(now);
+      }
+    }, 250);
     return () => clearInterval(id);
   }, [active]);
 
   useEffect(() => {
     if (active && active.endsAt != null && remaining <= 0) {
-      const f = endFocus();
-      if (f) setDone(f);
+      /**
+       * Expired long ago means the app was closed when the timer ran out, and
+       * crediting the full block stamped "now" wrote fiction into the log —
+       * one real minute became 25, dated the next morning. Reconcile settles
+       * it at the last heartbeat instead; the fresh expiry a second ago still
+       * takes the ordinary path and the ordinary completion screen.
+       */
+      const f = reconcileFocus() || endFocus();
+      if (f && !f.reconciled) setDone(f);
     }
   }, [active, remaining]);
 
@@ -267,6 +285,14 @@ export default function App() {
    */
   useEffect(() => {
     const onKey = (e) => {
+      /**
+       * Nothing global fires during a focus session. The session screen covers
+       * the app, but the listeners underneath it stayed live — so Ctrl+Z,
+       * reflex of the hand, deleted the very task being worked on, and "n"
+       * opened a booking dialog behind a screen that exists to remove exactly
+       * that kind of thing.
+       */
+      if (getState().active) return;
       // Scope stays null: calendar-scoped bindings are dispatched by the
       // calendar, and matching them here would run them twice.
       const hit = shortcutFor(e, { scope: null });
@@ -353,7 +379,7 @@ export default function App() {
         <Squirrel size={56} className="mb-4" />
         <p className="label">{closingLine(done.focusedMs, done.plannedMs)}</p>
         <h1 className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">
-          {duration(done.focusedMs)}
+          {duration(done.focusedMs, "under a minute")}
         </h1>
         {done.label && <p className="mt-1 text-sm text-[var(--muted)]">{done.label}</p>}
         <div className="mt-8 flex w-full max-w-xs flex-col gap-2">

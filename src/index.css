@@ -493,3 +493,17 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 @media (prefers-reduced-motion: reduce) {
   .native button:active:not(:disabled) { transform: none; }
 }
+
+/**
+ * Hover-revealed controls, on machines that have no hover.
+ *
+ * A row's Focus and delete buttons are opacity-0 until the pointer passes
+ * over them — a desktop refinement that turned hostile on touch, where there
+ * is no pass-over: the buttons stayed invisible and stayed armed, and a blind
+ * tap at the end of a row deleted the task under it. Where hover does not
+ * exist, the controls simply show. An invisible button is the one kind that
+ * can never be pressed on purpose.
+ */
+@media (hover: none) {
+  .sq-hover-reveal { opacity: 1; }
+}

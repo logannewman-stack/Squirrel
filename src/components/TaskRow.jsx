@@ -94,10 +94,19 @@ export default function TaskRow({ task, project, when, onToggle, onFocus, onDele
         </p>
       </div>
 
+      {/**
+        * `sq-hover-reveal` — visible wherever hover does not exist.
+        *
+        * These controls are revealed by :hover, and a phone has no hover: on
+        * touch they were opacity-0 but still armed, so a blind tap at the end
+        * of a row deleted the task it landed on — an invisible button is the
+        * one kind that can never be pressed on purpose. On touch they simply
+        * show; the quiet-until-hovered trick stays a desktop refinement.
+        */}
       {!task.done && !task.delegatedTo && onFocus && (
         <button
           onClick={onFocus}
-          className="shrink-0 rounded border border-[var(--line)] px-2.5 py-1 text-[11px]
+          className="sq-hover-reveal shrink-0 rounded border border-[var(--line)] px-2.5 py-1 text-[11px]
                      opacity-0 transition-all hover:border-[var(--ink)] group-hover:opacity-100
                      focus:opacity-100"
         >
@@ -109,7 +118,7 @@ export default function TaskRow({ task, project, when, onToggle, onFocus, onDele
         <button
           onClick={onDelete}
           aria-label="Delete task"
-          className="shrink-0 px-1 text-[var(--faint)] opacity-0 transition-opacity
+          className="sq-hover-reveal shrink-0 px-1 text-[var(--faint)] opacity-0 transition-opacity
                      hover:text-[var(--ink)] group-hover:opacity-100"
         >
           ×
