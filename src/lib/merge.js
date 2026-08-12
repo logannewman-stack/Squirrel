@@ -24,6 +24,8 @@ const FROM_DB = {
   projects: (r) => ({
     id: r.id, name: r.name, client: r.client ?? "", value: r.value ?? null,
     status: r.status, archived: !!r.archived, meaning: r.meaning ?? "",
+    // Sub-projects: the branch this one grows off; null on the trunk.
+    parentId: r.parent_id ?? null,
     createdAt: Date.parse(r.created_at), updatedAt: Date.parse(r.updated_at),
     deletedAt: r.deleted_at ? Date.parse(r.deleted_at) : null,
   }),
@@ -33,6 +35,11 @@ const FROM_DB = {
     delegatedTo: r.delegated_to ?? "", done: !!r.done,
     doneAt: r.done_at ? Date.parse(r.done_at) : null,
     scheduledFor: r.scheduled_for, order: r.sort_order,
+    // The hand-placed day and minute, and whether the work comes back.
+    // Without these the planner on a second device silently re-decides what
+    // the person already decided.
+    pinDay: r.pin_day ?? null, pinTime: r.pin_time ?? null,
+    repeat: r.repeat ?? null,
     createdAt: Date.parse(r.created_at), updatedAt: Date.parse(r.updated_at),
     deletedAt: r.deleted_at ? Date.parse(r.deleted_at) : null,
   }),
@@ -65,6 +72,7 @@ const TO_DB = {
   projects: (r) => ({
     id: r.id, name: r.name, client: r.client ?? "", value: r.value ?? null,
     status: r.status ?? "active", archived: !!r.archived, meaning: r.meaning ?? "",
+    parent_id: r.parentId ?? null,
     updated_at: new Date(r.updatedAt ?? Date.now()).toISOString(),
     deleted_at: r.deletedAt ? new Date(r.deletedAt).toISOString() : null,
   }),
@@ -74,6 +82,8 @@ const TO_DB = {
     priority: r.priority ?? "normal", delegated_to: r.delegatedTo ?? "",
     done: !!r.done, done_at: r.doneAt ? new Date(r.doneAt).toISOString() : null,
     scheduled_for: r.scheduledFor ?? null, sort_order: r.order ?? null,
+    pin_day: r.pinDay ?? null, pin_time: r.pinTime ?? null,
+    repeat: r.repeat ?? null,
     updated_at: new Date(r.updatedAt ?? Date.now()).toISOString(),
     deleted_at: r.deletedAt ? new Date(r.deletedAt).toISOString() : null,
   }),

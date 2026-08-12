@@ -21,6 +21,11 @@ free tiers that cover early usage).
    paste the entire contents of `supabase/schema.sql` from this repo, and run
    it. One run creates every table, the row-level security that keeps each
    customer's data theirs, the plan limits, and the chat ceilings.
+
+   > `schema.sql` is generated from `supabase/migrations/` by
+   > `npm run schema:bundle`, and it is a **first-run** script — it refuses to
+   > run against a database that already has the tables. To apply a later
+   > change to a live database, run that one numbered migration on its own.
 3. **Authentication → Providers**: make sure **Email** is enabled (it is by
    default). Squirrel signs people in with a magic link — no passwords to
    store, no reset flow to build.
@@ -167,7 +172,73 @@ Two behaviours worth knowing, because they're deliberate and unusual:
 > (`api/apple/verify`) and switches on with the native wrap. Selling on the
 > web meanwhile is both allowed and cheaper (≈2.9% vs 15%).
 
-## 6. Later, when you want them (each optional)
+## 6. The data, in SQL
+
+Once someone signs in, their work lives in Postgres and you can open the
+Supabase **SQL Editor** and ask it anything. The tables:
+
+| Table | One row per | Notable columns |
+| --- | --- | --- |
+| `profiles` | account | `plan`, `stripe_customer_id`, `billing_status`, `plan_renews_at` |
+| `projects` | branch | `name`, `meaning`, `parent_id` (sub-project), `archived` |
+| `tasks` | acorn | `estimate_mins`, `due`, `priority`, `pin_day`/`pin_time`, `repeat`, `done` |
+| `events` | meeting | `starts_at`, `ends_at`, `attendees` |
+| `focus_sessions` | sitting | `planned_ms`, `focused_ms`, `task_id` |
+| `usage_counters` | account × month | `assistant_chats`, `input_tokens`, `output_tokens` |
+| `chat_messages` | assistant turn | `role`, `text` |
+
+Three things worth knowing before you write a query:
+
+- **Every table is row-level secured to its owner.** The SQL Editor runs as a
+  superuser so you see everything; the app's browser client never can. That
+  boundary is the whole security model — don't disable RLS to "make a query
+  work", write the query in the editor instead.
+- **Nothing is hard-deleted.** Rows carry `deleted_at` (tombstones), because
+  a delete on one device has to be able to travel to another. Add
+  `where deleted_at is null` or your counts will include ghosts.
+- **The plan is never computed in SQL.** `state.blocks` — what lands on which
+  day — is derived on the device from tasks, meetings and working hours. The
+  database holds the *inputs*; the schedule is the app's answer to them.
+
+Four queries that earn their keep:
+
+```sql
+-- Signups by week, and how many turned into paying accounts
+select date_trunc('week', created_at)::date as week,
+       count(*) as signups,
+       count(*) filter (where plan <> 'free') as paying
+from profiles group by 1 order by 1 desc;
+
+-- What the assistant actually cost you this month, per account
+select p.email, u.assistant_chats, u.input_tokens, u.output_tokens
+from usage_counters u join profiles p on p.id = u.user_id
+where u.period = date_trunc('month', now())::date
+order by u.input_tokens + u.output_tokens desc;
+
+-- Are people's estimates honest? Planned vs actually focused, per account.
+select p.email,
+       round(sum(s.planned_ms) / 60000.0) as planned_mins,
+       round(sum(s.focused_ms) / 60000.0) as focused_mins,
+       round(100.0 * sum(s.focused_ms) / nullif(sum(s.planned_ms), 0)) as pct
+from focus_sessions s join profiles p on p.id = s.user_id
+where s.deleted_at is null group by 1 order by 4 desc nulls last;
+
+-- Engagement: who has open work with a real deadline on it
+select p.email,
+       count(*) filter (where not t.done) as open_tasks,
+       count(*) filter (where not t.done and t.due is not null) as dated,
+       max(t.created_at) as last_added
+from tasks t join profiles p on p.id = t.user_id
+where t.deleted_at is null group by 1 order by last_added desc;
+```
+
+> **A word on reading it.** You can see everything in there — including task
+> titles and notes people wrote for themselves. The app's own console
+> deliberately shows you none of that (see §4), and it's worth holding the
+> same line by hand: query aggregates, not contents. It's their diary, not
+> your dashboard.
+
+## 7. Later, when you want them (each optional)
 - **Google Calendar sync:** create a Google Cloud project with the Calendar
   API, set the four `GOOGLE_*` variables from `.env.example`. The cron in
   `vercel.json` already pulls changes every 15 minutes once connected.

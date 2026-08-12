@@ -112,5 +112,72 @@ t("in both directions",
   t("a date-only deadline stays a plain date", rows[0].due === "2026-08-07", rows[0].due);
 }
 
+/* ------------------------------------------------- nothing may be dropped */
+/**
+ * The quiet half of a sync bug.
+ *
+ * A field added to the local store and forgotten here does not throw, does
+ * not warn, and works perfectly on the machine it was written on. It fails on
+ * the *second* device, silently, as data that simply is not there — a branch
+ * with no parent, a block that comes back unpinned, a weekly task that stops
+ * coming back. That is exactly how sub-projects, pins and repeat first
+ * shipped, so from here the round trip is asserted rather than assumed.
+ *
+ * These lists are the contract: adding a field to the store means adding it
+ * in three places — the table, the mapping, and this line — and this is the
+ * test that says so out loud.
+ */
+{
+  const TASK_FIELDS = [
+    "id", "projectId", "title", "notes", "estimateMins", "due", "priority",
+    "delegatedTo", "done", "doneAt", "scheduledFor", "order",
+    "pinDay", "pinTime", "repeat",
+  ];
+  const PROJECT_FIELDS = [
+    "id", "name", "client", "value", "status", "archived", "meaning", "parentId",
+  ];
+
+  const task = {
+    id: "t-1", projectId: "p-1", title: "Sign the lease", notes: "with the surveyor",
+    estimateMins: 90, due: "2026-08-14", priority: "high", delegatedTo: "Anders",
+    done: true, doneAt: 1760000000000, scheduledFor: "2026-08-13", order: 2,
+    pinDay: "2026-08-13", pinTime: "09:15", repeat: "week",
+    updatedAt: 1760000000000, deletedAt: null,
+  };
+  const back = decode("tasks", encode("tasks", [task]))[0];
+  const lost = TASK_FIELDS.filter((k) => String(back[k] ?? "") !== String(task[k] ?? ""));
+  t("every task field survives the round trip to the server and home",
+    lost.length === 0, `dropped or changed: ${lost.join(", ")}`);
+
+  const project = {
+    id: "p-1", name: "Munich lease", client: "Hartmann", value: 48000,
+    status: "active", archived: false, meaning: "Our first office of our own.",
+    parentId: "p-0", updatedAt: 1760000000000, deletedAt: null,
+  };
+  const pBack = decode("projects", encode("projects", [project]))[0];
+  const pLost = PROJECT_FIELDS.filter((k) => String(pBack[k] ?? "") !== String(project[k] ?? ""));
+  t("every project field survives it too", pLost.length === 0,
+    `dropped or changed: ${pLost.join(", ")}`);
+
+  /**
+   * The absent case matters as much. An unpinned task must arrive unpinned
+   * rather than carrying empty strings — "" would read as a pin to nothing
+   * and put a block at midnight.
+   */
+  const plain = decode("tasks", encode("tasks", [{ id: "x", title: "Plain", updatedAt: 1 }]))[0];
+  t("and an absent pin stays absent, not an empty string",
+    plain.pinDay === null && plain.pinTime === null && plain.repeat === null,
+    JSON.stringify({ day: plain.pinDay, time: plain.pinTime, repeat: plain.repeat }));
+
+  // What goes on the wire must be the column names the schema declares: a
+  // camelCase key is a column that does not exist and a row Postgres rejects.
+  const wire = encode("tasks", [task])[0];
+  t("the wire uses the schema's own column names",
+    "pin_day" in wire && "pin_time" in wire && "repeat" in wire && !("pinDay" in wire),
+    Object.keys(wire).join(","));
+  t("  and so does a project's parent",
+    "parent_id" in encode("projects", [project])[0]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
