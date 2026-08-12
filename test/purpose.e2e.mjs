@@ -15,8 +15,9 @@ import { chromium } from "playwright";
 import { skipOnboarding } from "./onboard.mjs";
 
 const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
-/** The reading panel, by its accessible name — the nav is an <aside> too. */
+/** The reading panels, by their accessible names — the nav is an <aside> too. */
 const panel = (page) => page.getByRole("complementary", { name: / branch$/ });
+const acorn = (page) => page.getByRole("complementary", { name: / acorn$/ });
 const out = [];
 const t = (name, ok, detail) => {
   out.push([name, !!ok]);
@@ -123,8 +124,10 @@ await p.waitForTimeout(700);
 
   await p.keyboard.press("Enter");
   await p.waitForTimeout(500);
-  t("  Enter carries you to that branch",
-    /Q3 launch/.test(await panel(p).innerText().catch(() => "")));
+  const carried = await acorn(p).innerText().catch(() => "");
+  // The kicker wears the app's label style, which uppercases — match caseless.
+  t("  Enter carries you to that very acorn, open",
+    /Board deck/.test(carried) && /Q3 launch/i.test(carried), carried.slice(0, 120));
 
   // Fallen acorns answer too — the squirrel knows the ground as well as the tree.
   await p.keyboard.press("/");
@@ -133,10 +136,77 @@ await p.waitForTimeout(700);
   await p.waitForTimeout(300);
   await p.keyboard.press("Enter");
   await p.waitForTimeout(500);
-  const ground = await panel(p).innerText().catch(() => "");
-  t("  even for what has fallen", /Unfiled/.test(ground) && /fallen — not on a branch yet/.test(ground),
+  const ground = await acorn(p).innerText().catch(() => "");
+  t("  even for what has fallen", /Loose end/.test(ground) && /Unfiled/i.test(ground),
     ground.slice(0, 120));
 
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+}
+
+/* --------------------------------------------------- every acorn opens up */
+{
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+  await p.keyboard.press("ArrowRight"); // Munich lease
+  await p.waitForTimeout(400);
+  await panel(p).getByRole("button", { name: "Sign the lease", exact: true }).click();
+  await p.waitForTimeout(400);
+  t("a task row opens its acorn", /Sign the lease/.test(await acorn(p).innerText().catch(() => "")));
+  t("  which knows it is still ripening", /ripening/.test(await acorn(p).innerText().catch(() => "")));
+
+  await acorn(p).getByRole("button", { name: "Store it away" }).click();
+  await p.waitForTimeout(400);
+  const stored = await p.evaluate(async () =>
+    (await import("/src/lib/store.js")).getState().tasks.find((x) => x.title === "Sign the lease")?.done);
+  t("  storing it away is real", stored === true);
+  t("  and the card says so", /stored away/.test(await acorn(p).innerText().catch(() => "")));
+
+  await acorn(p).getByRole("button", { name: "Put it back" }).click();
+  await p.waitForTimeout(400);
+  t("  putting it back is real too", (await p.evaluate(async () =>
+    (await import("/src/lib/store.js")).getState().tasks.find((x) => x.title === "Sign the lease")?.done)) === false);
+
+  await acorn(p).getByRole("button", { name: /Munich lease/i }).click();
+  await p.waitForTimeout(300);
+  t("  its branch is one step back, through the kicker", (await panel(p).count()) === 1);
+}
+
+/* ------------------------------------------------- the tree is grown here */
+{
+  // A new trunk branch, from the + beside the toggle.
+  await p.getByRole("button", { name: "Plant a branch" }).click();
+  await p.getByLabel("Name the new branch").fill("Legal");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(500);
+  t("planting a branch grows it and opens it",
+    /Legal/.test(await panel(p).innerText().catch(() => "")));
+
+  // A sub-branch, grown from the branch's own card.
+  await panel(p).getByRole("button", { name: "+ Sub-branch" }).click();
+  await p.getByLabel("Name the new sub-branch").fill("Filings");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(500);
+  const sub = await panel(p).innerText().catch(() => "");
+  t("a sub-branch grows off it and opens",
+    /Filings/.test(sub) && /off Legal/.test(sub), sub.slice(0, 120));
+
+  // An acorn hung on the sub-branch, opening as itself.
+  await panel(p).getByRole("button", { name: "+ Acorn" }).click();
+  await p.getByLabel("Name the new acorn").fill("Draft engagement letter");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(500);
+  const grown = await acorn(p).innerText().catch(() => "");
+  t("a new acorn hangs and opens up",
+    /Draft engagement letter/.test(grown) && /Filings/i.test(grown), grown.slice(0, 140));
+
+  const header = await p.locator("body").innerText();
+  t("  the header grew with the tree", /4 branches/.test(header),
+    header.match(/\d+ branches[^\n]*/)?.[0]);
+
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("Escape");
   await p.keyboard.press("Escape");
   await p.waitForTimeout(300);
 }

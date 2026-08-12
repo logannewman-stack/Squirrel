@@ -109,14 +109,62 @@ const grow = (opts = {}) => {
     Math.abs(branchPoint(b, 0.1, geo, 0, 1).x - branchPoint(b, 0.1, geo, 0, 0).x));
 }
 
+/* ----------------------------------------------------------- sub-branches */
+{
+  reset();
+  const trunk = store.addProject({ name: "Munich lease" });
+  const shoot = store.addProject({ name: "Permits", parentId: trunk.id });
+  store.addTask({ title: "File forms", projectId: shoot.id, estimateMins: 30 });
+  const L = grow();
+  const geo = geometryFor(1440, 900);
+  const [root, sub] = L.branches;
+  t("a sub-project grows off its parent, right after it in the walk",
+    root.projectId === trunk.id && sub.projectId === shoot.id && sub.host === root);
+  t("  socketed on the parent's wood, not the trunk",
+    sub.baseT == null && sub.socketT > 0.3 && sub.socketT < 0.95, sub.socketT);
+  const sock = branchPoint(sub, 0, geo, 0, 0);
+  const at = branchPoint(root, sub.socketT, geo, 0, 0);
+  t("  its base IS a point on the parent",
+    Math.abs(sock.x - at.x) < 0.01 && Math.abs(sock.y - at.y) < 0.01);
+  t("  and it climbs from there", branchPoint(sub, 1, geo, 0, 0).y < sock.y);
+  t("  carrying its own acorns",
+    sub.acorns.length === 1 && sub.acorns[0].title === "File forms");
+  t("  counted over the door with everything else", L.counts.total === 1);
+  t("  without raising the trunk", Number.isFinite(trunkTopT(L)) && trunkTopT(L) <= 1);
+  const f = findOnTree(L, "forms");
+  t("  the squirrel searches shoots like any branch",
+    f.results.length === 1 && f.results[0].branch === "Permits");
+  t("  and can perch on one", perchFor(shoot.id, L, geo).branch?.projectId === shoot.id);
+
+  store.setProjectArchived(trunk.id);
+  const L2 = grow();
+  t("archiving the parent lifts the shoot to the trunk — never hides it",
+    L2.branches.length === 1 && L2.branches[0].projectId === shoot.id &&
+    !L2.branches[0].host && L2.branches[0].baseT != null);
+
+  reset();
+  const a = store.addProject({ name: "A" });
+  const b = store.addProject({ name: "B", parentId: a.id });
+  const c = store.addProject({ name: "C", parentId: b.id });
+  const L3 = grow();
+  const deep = L3.branches.find((x) => x.projectId === c.id);
+  t("a shoot of a shoot climbs to the trunk — the tree is one level deep",
+    Boolean(deep) && !deep.host && deep.baseT != null);
+}
+
 /* ------------------------------------------------------------ the hand's math */
 {
   const drawn = {
     squirrel: { x: 300, y: 100 },
-    targets: [{ x: 100, y: 100, projectId: "a" }, { x: 130, y: 100, projectId: "b" }],
+    targets: [
+      { x: 100, y: 100, projectId: "a", taskId: "t1" },
+      { x: 130, y: 100, projectId: "b", taskId: "t2" },
+    ],
   };
   t("a tap lands on the nearest acorn within a fingertip",
     hitTest(drawn, 108, 102).projectId === "a");
+  t("  naming the exact acorn, so it can open up",
+    hitTest(drawn, 108, 102).taskId === "t1");
   t("  and on nothing outside one", hitTest(drawn, 200, 200) === null);
   t("the squirrel wins its own square — it is the smallest and most alive",
     hitTest(drawn, 310, 108).squirrel === true);

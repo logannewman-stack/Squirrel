@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutOak, hitTest, perchFor, geometryFor, findOnTree } from "../lib/oak";
 import { drawOak } from "../lib/oak-draw";
 import { whenProject } from "../lib/when";
-import { toggleTask, updateProject, dayKey } from "../lib/store";
+import { addProject, addTask, toggleTask, updateProject, dayKey } from "../lib/store";
 import { resolveTheme, setTheme, onThemeChange } from "../lib/theme";
 import { duration, money } from "../lib/format";
 import { UNFILED } from "./ProjectDetail";
@@ -12,18 +12,21 @@ import { Button } from "./ui";
  * Purpose: the whole of somebody's work, as one oak.
  *
  * Mighty oaks from little acorns grow — the proverb is the product. Every
- * live project is a branch, oldest lowest and thickest, the way wood works.
- * Every task is an acorn on its branch: open ones hang dim and unripe,
- * finished ones glow gold — stored away, which is what the app's own name
- * has promised all along. Unfiled work lies fallen at the roots. Wind moves
- * through the crown, and dragging feeds the gust.
+ * live project is a branch, oldest lowest and thickest, the way wood works;
+ * sub-projects are side shoots growing off their parent's bough. Every task
+ * is an acorn: an outline while it ripens, a filled dot once it is stored
+ * away. Unfiled work lies fallen at the roots. Wind moves through the crown,
+ * and dragging feeds the gust.
  *
- * And the squirrel lives here. It perches on whatever you are reading, runs
- * along the tree when you change your mind, and at its crown lookout it
- * wonders out loud — a thought bubble asking "Looking for something?".
- * Tap the thought, tap the squirrel, or press "/" and it finds things:
- * type a few letters and the acorns that answer stay lit while the rest of
- * the tree steps back into the dark.
+ * The tree is not just read here — it is grown here. The "+" by the theme
+ * toggle plants a new branch; a branch's own card grows sub-branches and
+ * hangs acorns; and every acorn opens into its own small reading, where it
+ * can be stored away or put back.
+ *
+ * And the squirrel lives here. It perches on whatever you are reading, and
+ * at its crown lookout it wonders out loud — a thought bubble asking
+ * "Looking for something?". Tap the thought, tap the squirrel, or press "/"
+ * and it finds branches and acorns alike, carrying you to the exact one.
  *
  * This began life as a DNA helix; the oak replaced it because the shape of
  * this screen should belong to the brand, not to biology. The drawing lives
@@ -35,9 +38,12 @@ export default function Purpose({ state, onOpenProject, onStart }) {
   const wrap = useRef(null);
   const canvas = useRef(null);
   const [selection, setSelection] = useState(null);
+  const [acornId, setAcornId] = useState(null); // the one acorn open in the panel
   const [mode, setMode] = useState(resolveTheme());
   const [touched, setTouched] = useState(false);
   const [finder, setFinder] = useState(null); // { q } while the squirrel listens
+  const [plant, setPlant] = useState(false); // naming a new trunk branch
+  const [grow, setGrow] = useState(null); // { kind: "sub" | "acorn" } inside the card
   const findInput = useRef(null);
 
   // The tree only re-grows when the work actually changes, not per frame.
@@ -51,26 +57,33 @@ export default function Purpose({ state, onOpenProject, onStart }) {
     : null;
   const unfiledOpen = selection === UNFILED;
   const found = finder?.q ? findOnTree(layout, finder.q) : null;
+  const acornTask = acornId ? state.tasks.find((t) => t.id === acornId) : null;
 
   /** Everything mutable per-frame lives in one ref, off React's books. */
   const v = useRef({
     t: 0, gust: 0, dim: 0, zoom: 1, panX: 0,
     dragging: false, lastX: 0, downAt: null,
-    drawn: { targets: [], squirrel: null },
+    drawn: { targets: [], squirrel: null, bubble: null },
     squirrel: null,
-    selection: null, find: null,
+    selection: null, acorn: null, find: null, finderOpen: false,
     reduced: matchMedia("(prefers-reduced-motion: reduce)").matches,
   });
   v.current.selection = unfiledOpen ? null : selection;
+  v.current.acorn = acornId;
   v.current.find = found;
   v.current.finderOpen = Boolean(finder);
 
-  const clear = () => setSelection(null);
+  const clear = () => {
+    setSelection(null);
+    setAcornId(null);
+    setGrow(null);
+  };
 
   useEffect(() => onThemeChange(() => setMode(resolveTheme())), []);
   useEffect(() => {
     if (finder) findInput.current?.focus();
   }, [finder]);
+  useEffect(() => setGrow(null), [selection]);
 
   /* ------------------------------------------------------------ the loop */
   useEffect(() => {
@@ -112,7 +125,7 @@ export default function Purpose({ state, onOpenProject, onStart }) {
       s.squirrel.side = target.side;
 
       s.drawn = drawOak(ctx, box.clientWidth, box.clientHeight, layout, {
-        t, gust: s.gust, selection: s.selection, dim: s.dim,
+        t, gust: s.gust, selection: s.selection, acorn: s.acorn, dim: s.dim,
         find: s.find, squirrel: s.squirrel, squirrelHot: Boolean(s.find),
         // The thought bubble shows while the squirrel keeps lookout — gone
         // the moment it is answered (finder open) or has a branch to show.
@@ -177,23 +190,29 @@ export default function Purpose({ state, onOpenProject, onStart }) {
     const hit = hitTest(s.drawn, e.clientX - rect.left, e.clientY - rect.top);
     if (hit?.squirrel) {
       setFinder({ q: "" });
+      setPlant(false);
       setTouched(true);
       return;
     }
     if (hit) {
+      // An acorn opens itself; wood and labels open their branch.
       setSelection(hit.projectId === "unfiled" ? UNFILED : hit.projectId);
+      setAcornId(hit.taskId || null);
       setFinder(null);
+      setPlant(false);
       setTouched(true);
-    } else if (s.selection || finder) {
+    } else if (s.selection || finder || plant) {
       clear();
       setFinder(null);
+      setPlant(false);
     }
   };
 
   /**
-   * The keyboard walks the tree: arrows step branch to branch, Enter opens
-   * the project, Escape lets go — and "/" summons the squirrel, same as
-   * tapping it, because a finder unreachable from the keys is decoration.
+   * The keyboard walks the tree: arrows step branch to branch (sub-branches
+   * in stride), Enter opens the project, Escape lets go one layer at a time
+   * — and "/" summons the squirrel, same as tapping it, because a finder
+   * unreachable from the keys is decoration.
    */
   const onKey = (e) => {
     if (e.key === "/") {
@@ -206,26 +225,53 @@ export default function Purpose({ state, onOpenProject, onStart }) {
     const idx = limbs.findIndex((b) => b.projectId === selection);
     if (e.key === "ArrowRight" || e.key === "ArrowUp") {
       e.preventDefault();
+      setAcornId(null);
       setSelection(limbs[Math.min(limbs.length - 1, idx < 0 ? 0 : idx + 1)].projectId);
     } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
       e.preventDefault();
+      setAcornId(null);
       setSelection(limbs[Math.max(0, idx < 0 ? limbs.length - 1 : idx - 1)].projectId);
     } else if (e.key === "Escape") {
-      clear();
+      if (acornId) setAcornId(null);
+      else clear();
     } else if (e.key === "Enter" && selection) {
       onOpenProject(selection);
     }
   };
 
-  /** The squirrel found it: select it, run to it, read it. */
+  /** The squirrel found it: run there and open exactly what was found. */
   const pick = (r) => {
-    setSelection(r.projectId ?? UNFILED);
+    if (r.kind === "task") {
+      setSelection(r.projectId ?? UNFILED);
+      setAcornId(r.id);
+    } else {
+      setSelection(r.id);
+      setAcornId(null);
+    }
     setFinder(null);
     canvas.current?.focus();
   };
 
   const branch = layout.branches.find((b) => b.projectId === selection);
+  const acornBranch = acornTask?.projectId
+    ? layout.branches.find((b) => b.projectId === acornTask.projectId)
+    : null;
   const results = found?.results ?? [];
+
+  /** One quiet input, shared by everything that grows something. */
+  const seedInput = (label, placeholder, onName, onClose) => (
+    <input
+      autoFocus
+      aria-label={label}
+      placeholder={placeholder}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+        if (e.key === "Enter" && e.target.value.trim()) onName(e.target.value.trim());
+      }}
+      className="w-full rounded-lg border border-[var(--hairline)] bg-transparent px-2.5 py-2
+                 text-sm outline-none placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+    />
+  );
 
   return (
     <div ref={wrap} className="relative h-full min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
@@ -235,7 +281,7 @@ export default function Purpose({ state, onOpenProject, onStart }) {
         aria-label={
           layout.empty
             ? "Your oak — bare until the first acorn"
-            : `Your oak — ${layout.branches.length} branches, ${layout.counts.done} of ${layout.counts.total} acorns stored away. Arrow keys walk the branches; press / and the squirrel finds anything.`
+            : `Your oak — ${layout.branches.length} branches, ${layout.counts.done} of ${layout.counts.total} acorns stored away. Arrow keys walk the branches, Enter opens one, and / asks the squirrel to find anything.`
         }
         tabIndex={0}
         onPointerDown={onDown}
@@ -258,17 +304,29 @@ export default function Purpose({ state, onOpenProject, onStart }) {
         )}
       </header>
 
-      {/* Light and dark, from the grove itself — the same three-state theme
-          the rest of the app follows. */}
-      <button
-        onClick={() => setTheme(resolveTheme() === "dark" ? "light" : "dark")}
-        aria-label="Toggle appearance"
-        className="absolute right-6 top-6 grid h-9 w-9 place-items-center rounded-full border
-                   border-[var(--line)] bg-[var(--paper)]/60 text-sm backdrop-blur
-                   transition-colors hover:border-[var(--ink)]"
-      >
-        {mode === "dark" ? "◐" : "◑"}
-      </button>
+      <div className="absolute right-6 top-6 flex items-center gap-2">
+        {/* Plant a branch without leaving the tree — creation lives here too. */}
+        <button
+          onClick={() => { setPlant((p) => !p); setFinder(null); }}
+          aria-label="Plant a branch"
+          className="grid h-9 w-9 place-items-center rounded-full border border-[var(--line)]
+                     bg-[var(--paper)]/60 text-base backdrop-blur transition-colors
+                     hover:border-[var(--ink)]"
+        >
+          +
+        </button>
+        {/* Light and dark, from the grove itself — the same three-state theme
+            the rest of the app follows. */}
+        <button
+          onClick={() => setTheme(resolveTheme() === "dark" ? "light" : "dark")}
+          aria-label="Toggle appearance"
+          className="grid h-9 w-9 place-items-center rounded-full border border-[var(--line)]
+                     bg-[var(--paper)]/60 text-sm backdrop-blur transition-colors
+                     hover:border-[var(--ink)]"
+        >
+          {mode === "dark" ? "◐" : "◑"}
+        </button>
+      </div>
 
       {layout.empty ? (
         <div className="absolute inset-0 grid place-items-center">
@@ -284,12 +342,34 @@ export default function Purpose({ state, onOpenProject, onStart }) {
           </div>
         </div>
       ) : (
-        !touched && !finder && (
+        !touched && !finder && !plant && (
           <p className="pointer-events-none absolute bottom-6 left-1/2 w-max max-w-[92%] -translate-x-1/2
                         text-center text-xs text-[var(--faint)]">
-            Drag for wind · tap a branch to read it · tap the squirrel to find anything
+            Tap anything — a branch, an acorn, the squirrel · drag for wind
           </p>
         )
+      )}
+
+      {/* ------------------------------------------------ plant a new branch */}
+      {plant && (
+        <div
+          className="absolute left-1/2 top-16 w-[min(24rem,calc(100%-1.5rem))] -translate-x-1/2
+                     rounded-xl border border-[var(--line)] bg-[var(--paper)]/92 p-3
+                     shadow-[var(--float)] backdrop-blur-md"
+        >
+          {seedInput(
+            "Name the new branch",
+            "Name the new branch…",
+            (name) => {
+              const p = addProject({ name });
+              setPlant(false);
+              setAcornId(null);
+              setSelection(p.id);
+              canvas.current?.focus();
+            },
+            () => { setPlant(false); canvas.current?.focus(); },
+          )}
+        </div>
       )}
 
       {/* ------------------------------------------------ ask the squirrel */}
@@ -337,8 +417,64 @@ export default function Purpose({ state, onOpenProject, onStart }) {
         </div>
       )}
 
+      {/* --------------------------------------------------- one open acorn */}
+      {acornTask && !finder && (
+        <aside
+          aria-label={`${acornTask.title} acorn`}
+          className="absolute inset-x-3 bottom-3 max-h-[62%] overflow-y-auto rounded-xl border
+                     border-[var(--line)] bg-[var(--paper)]/92 p-4 shadow-[var(--float)]
+                     backdrop-blur-md sm:inset-x-auto sm:bottom-auto sm:right-6 sm:top-20
+                     sm:max-h-[calc(100%-7rem)] sm:w-[21rem]"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <button
+                onClick={() => setAcornId(null)}
+                className="label transition-colors hover:text-[var(--ink)]"
+              >
+                {acornBranch ? acornBranch.name : "Unfiled"} ›
+              </button>
+              <p className="mt-1 text-sm font-semibold leading-snug">{acornTask.title}</p>
+              <p className="mt-1 text-[11px] text-[var(--muted)]">
+                <span className={!acornTask.done && acornTask.due && acornTask.due < dayKey() ? "alert" : ""}>
+                  {acornTask.done
+                    ? "stored away"
+                    : acornTask.due && acornTask.due < dayKey() ? "overdue" : "ripening"}
+                </span>
+                {acornTask.estimateMins ? ` · ${acornTask.estimateMins}m` : ""}
+                {acornTask.due
+                  ? ` · due ${new Date(`${acornTask.due}T00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}`
+                  : ""}
+                {acornTask.delegatedTo ? ` · with ${acornTask.delegatedTo}` : ""}
+              </p>
+            </div>
+            <button
+              onClick={clear}
+              aria-label="Close"
+              className="shrink-0 px-1 text-[var(--faint)] hover:text-[var(--ink)]"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <Button variant="primary" size="sm" className="flex-1" onClick={() => toggleTask(acornTask.id)}>
+              {acornTask.done ? "Put it back" : "Store it away"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex-1"
+              onClick={() => onOpenProject(acornTask.projectId ? acornTask.projectId : UNFILED)}
+            >
+              Open the whole branch →
+            </Button>
+          </div>
+        </aside>
+      )}
+
       {/* --------------------------------------------------- the reading panel */}
-      {(branch || unfiledOpen) && !finder && (
+      {(branch || unfiledOpen) && !finder && !acornTask && (
         <aside
           aria-label={`${branch ? branch.name : "Unfiled"} branch`}
           className="absolute inset-x-3 bottom-3 max-h-[62%] overflow-y-auto rounded-xl border
@@ -348,18 +484,12 @@ export default function Purpose({ state, onOpenProject, onStart }) {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="flex items-center gap-2 text-sm font-semibold">
-                <span
-                  aria-hidden
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: branch ? (mode === "dark" ? branch.color.dark : branch.color.light) : "var(--muted)" }}
-                />
-                <span className="truncate">{branch ? branch.name : "Unfiled"}</span>
-              </p>
+              <p className="truncate text-sm font-semibold">{branch ? branch.name : "Unfiled"}</p>
               <p className="mt-0.5 text-[11px] text-[var(--muted)]">
                 {branch
                   ? `${branch.doneCount} of ${branch.count} stored away`
                   : "fallen — not on a branch yet"}
+                {branch?.host ? ` · off ${branch.host.name}` : ""}
                 {project?.client ? ` · ${project.client}` : ""}
                 {project?.value ? ` · ${money(project.value)}` : ""}
               </p>
@@ -377,9 +507,9 @@ export default function Purpose({ state, onOpenProject, onStart }) {
             <>
               {/**
                 * What this branch is *for*. The one field on this screen that
-                * writes, because purpose is the screen's subject: a project
-                * with its meaning written down survives the week that goes
-                * badly. Saved on blur, like every inline field in the app.
+                * writes prose, because purpose is the screen's subject: a
+                * project with its meaning written down survives the week that
+                * goes badly. Saved on blur, like every inline field in the app.
                 */}
               <textarea
                 key={project.id}
@@ -414,21 +544,63 @@ export default function Purpose({ state, onOpenProject, onStart }) {
                     onClick={() => toggleTask(t.id)}
                     aria-label={t.done ? `Mark ${t.title} not done` : `Mark ${t.title} done`}
                     className={`h-3 w-3 shrink-0 rounded-full border transition-colors ${
-                      t.done ? "border-transparent" : "border-[var(--line)] hover:border-[var(--ink)]"
+                      t.done
+                        ? "border-transparent bg-[var(--ink)]"
+                        : "border-[var(--line)] hover:border-[var(--ink)]"
                     }`}
-                    style={t.done ? { background: branch ? (mode === "dark" ? branch.color.dark : branch.color.light) : "var(--muted)" } : {}}
                   />
-                  <span className={`truncate ${t.done ? "text-[var(--faint)] line-through" : ""}`}>
+                  {/* The row is a door: every acorn opens up. */}
+                  <button
+                    onClick={() => setAcornId(t.id)}
+                    className={`min-w-0 flex-1 truncate text-left transition-colors hover:text-[var(--ink)] ${
+                      t.done ? "text-[var(--faint)] line-through" : ""
+                    }`}
+                  >
                     {t.title}
-                  </span>
+                  </button>
                 </li>
               ))}
           </ul>
 
+          {/* ------------------------------------------ growing, in place */}
+          <div className="mt-3 border-t border-[var(--hairline)] pt-2.5">
+            {grow ? (
+              seedInput(
+                grow.kind === "sub" ? "Name the new sub-branch" : "Name the new acorn",
+                grow.kind === "sub" ? "Name the sub-branch…" : "Name the acorn…",
+                (name) => {
+                  if (grow.kind === "sub") {
+                    const p = addProject({ name, parentId: selection });
+                    setGrow(null);
+                    setSelection(p.id);
+                  } else {
+                    const t = addTask(
+                      unfiledOpen ? { title: name } : { title: name, projectId: selection },
+                    );
+                    setGrow(null);
+                    setAcornId(t.id);
+                  }
+                },
+                () => setGrow(null),
+              )
+            ) : (
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" className="flex-1" onClick={() => setGrow({ kind: "acorn" })}>
+                  + Acorn
+                </Button>
+                {branch && !branch.host && (
+                  <Button variant="ghost" size="sm" className="flex-1" onClick={() => setGrow({ kind: "sub" })}>
+                    + Sub-branch
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
           <Button
             variant="ghost"
             size="sm"
-            className="mt-3 w-full"
+            className="mt-2 w-full"
             onClick={() => onOpenProject(selection)}
           >
             Open the whole branch →

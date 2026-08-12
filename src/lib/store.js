@@ -333,11 +333,17 @@ export const dayKey = (d = new Date()) =>
 export const PRIORITIES = ["critical", "high", "normal", "low"];
 
 // ---------------------------------------------------------------- projects
-export function addProject({ name, client = "", value = null, status = "active", due = null, meaning = "" }) {
+export function addProject({
+  name, client = "", value = null, status = "active", due = null, meaning = "",
+  // A sub-project: this one grows off another. One nullable field rather than
+  // a tree structure, so every reader that doesn't care — planner, search,
+  // quotas — keeps treating projects as the flat list they are.
+  parentId = null,
+}) {
   // A project deadline is not the same as its last task's. It is the date the
   // whole thing is judged on, and it is what makes pacing arithmetic possible
   // at all — see projectLoad in lib/schedule.js.
-  const p = stamp({ id: uid(), name: name.trim() || "Untitled", client, value, status, due, meaning, createdAt: Date.now() });
+  const p = stamp({ id: uid(), name: name.trim() || "Untitled", client, value, status, due, meaning, parentId, createdAt: Date.now() });
   mutate(`creating the project “${p.name}”`, { projects: [...read().projects, p] });
   return p;
 }

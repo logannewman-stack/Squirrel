@@ -20,17 +20,6 @@ const hex = (c, a) => {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 };
 
-/** Deterministic fireflies — the dark room's dust, warmed up. */
-function makeFlies(count = 34, seed = 11) {
-  let s = seed;
-  const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  return Array.from({ length: count }, () => ({
-    x: rand(), y: rand() * 0.8, r: 0.7 + rand() * 1.4,
-    dx: (rand() - 0.5) * 0.012, wob: rand() * Math.PI * 2,
-  }));
-}
-const FLIES = makeFlies();
-
 /**
  * The squirrel, as three strokes of a brush.
  *
@@ -152,8 +141,10 @@ function taper(ctx, pts, w0, w1, color) {
 /**
  * Draw one frame.
  *
- * @param view {t, gust, selection, dim, find, squirrel:{x,y,side}, thought,
- *              zoom, panX, reduced} — `thought` shows the squirrel's bubble.
+ * @param view {t, gust, selection, acorn, dim, find, squirrel:{x,y,side},
+ *              thought, zoom, panX, reduced} — `thought` shows the squirrel's
+ *              bubble; `acorn` is the taskId open in the reading panel, drawn
+ *              with a steady ring.
  * @returns {{targets, squirrel, bubble}} screen-space hit records.
  */
 export function drawOak(ctx, w, h, layout, view, theme) {
@@ -164,36 +155,10 @@ export function drawOak(ctx, w, h, layout, view, theme) {
   const bark = dark ? "#eef0f5" : "#18181b";
   const barkDim = dark ? "#5f5f68" : "#a1a1aa";
 
-  /* ------------------------------------------------------------- the night */
-  const vg = ctx.createRadialGradient(w / 2, h * 0.35, 0, w / 2, h * 0.45, Math.max(w, h) * 0.8);
-  if (dark) {
-    vg.addColorStop(0, "#0a0c14");
-    vg.addColorStop(0.6, "#05060c");
-    vg.addColorStop(1, "#010102");
-  } else {
-    vg.addColorStop(0, "#fdfdfa");
-    vg.addColorStop(0.65, "#f6f5f0");
-    vg.addColorStop(1, "#ecebe3");
-  }
-  ctx.fillStyle = vg;
+  /* ------------------------------------------------------------- the room */
+  // Flat, like every other screen in the app — the paper itself, not a set.
+  ctx.fillStyle = dark ? "#08080a" : "#ffffff";
   ctx.fillRect(0, 0, w, h);
-
-  // A breath of warmth where the ground meets the dark.
-  const hz = ctx.createLinearGradient(0, geo.groundY - 60, 0, geo.groundY + 40);
-  hz.addColorStop(0, "rgba(0,0,0,0)");
-  hz.addColorStop(1, dark ? "rgba(250,250,250,0.05)" : "rgba(10,10,10,0.04)");
-  ctx.fillStyle = hz;
-  ctx.fillRect(0, geo.groundY - 60, w, 100);
-
-  for (const f of FLIES) {
-    const fx = ((f.x + (view.reduced ? 0 : t * 0.000006) + Math.sin(t / 2400 + f.wob) * 0.004) % 1) * w;
-    const fy = f.y * h + Math.sin(t / 1700 + f.wob) * 6;
-    const tw = view.reduced ? 0.5 : 0.3 + 0.35 * Math.sin(t / 800 + f.wob);
-    ctx.fillStyle = dark ? hex("#e7eaf2", 0.06 + 0.1 * tw) : hex("#8b8b94", 0.05 + 0.05 * tw);
-    ctx.beginPath();
-    ctx.arc(fx, fy, f.r, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
   // The ground: one long quiet stroke, swelling under the trunk.
   ctx.strokeStyle = hex(bark, dark ? 0.35 : 0.5);
@@ -232,60 +197,36 @@ export function drawOak(ctx, w, h, layout, view, theme) {
   const topT = trunkTopT(layout);
   const trunkPts = [];
   for (let i = 0; i <= 24; i++) trunkPts.push(trunkPoint((i / 24) * topT, geo));
-  if (dark) {
-    ctx.globalCompositeOperation = "lighter";
-    taper(ctx, trunkPts, 30, 9, hex(bark, 0.1));
-    ctx.globalCompositeOperation = "source-over";
-  }
-  taper(ctx, trunkPts, 24, 6, hex(bark, dark ? 0.95 : 1));
+  // One clean tapered line — no glow underlay. The tree is a drawing now,
+  // not a light fixture; restraint is what makes it the app's.
+  taper(ctx, trunkPts, 13, 4, hex(bark, dark ? 0.95 : 1));
   // The fork at the top: two short fingers, so the wood ends like wood.
   const tip = trunkPoint(topT, geo);
   for (const d of [-1, 1]) {
     taper(ctx, [tip, { x: tip.x + d * 16, y: tip.y - 20 }, { x: tip.x + d * 24, y: tip.y - 34 }],
-      4.4, 1.4, hex(bark, 0.9));
+      2.8, 1.1, hex(bark, 0.9));
   }
   // Root flare: two short strokes anchoring it into the ground.
   for (const d of [-1, 1]) {
     ctx.strokeStyle = hex(bark, 0.85);
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(geo.baseX + d * 4, geo.groundY - 14);
-    ctx.quadraticCurveTo(geo.baseX + d * 16, geo.groundY - 2, geo.baseX + d * 30, geo.groundY + 2);
+    ctx.moveTo(geo.baseX + d * 3, geo.groundY - 12);
+    ctx.quadraticCurveTo(geo.baseX + d * 14, geo.groundY - 2, geo.baseX + d * 26, geo.groundY + 2);
     ctx.stroke();
   }
 
   /* ------------------------------------------------------------- branches */
   const targets = [];
+  const labelJobs = [];
   for (const b of layout.branches) {
     const mul = dimOf(b.projectId);
     const pts = [];
     for (let i = 0; i <= 22; i++) pts.push(branchPoint(b, i / 22, geo, t, gust));
-    const w0 = 10 * b.thick + 3;
+    const w0 = 5.5 * b.thick + 2;
     const accent = dark ? b.color.dark : b.color.light;
 
-    if (dark && mul > 0.5) {
-      ctx.globalCompositeOperation = "lighter";
-      taper(ctx, pts, w0 * 1.7, 2.4, hex(bark, 0.07 * mul));
-      ctx.globalCompositeOperation = "source-over";
-    }
-    taper(ctx, pts, w0, 1.8, hex(mul > 0.5 ? bark : barkDim, Math.max(0.16, 0.95 * mul)));
-
-    // Two twigs, deterministic, purely for grownness.
-    for (const [tt, ang, ln] of [[0.5, -0.75, 0.14], [0.74, -0.55, 0.1]]) {
-      const p0 = branchPoint(b, tt, geo, t, gust);
-      const p1 = branchPoint(b, tt + 0.02, geo, t, gust);
-      const dx = p1.x - p0.x, dy = p1.y - p0.y;
-      const n = Math.hypot(dx, dy) || 1;
-      const twig = geo.reach * b.len * ln;
-      const a2 = ang * b.side;
-      const ux = dx / n, uy = dy / n;
-      const rx = ux * Math.cos(a2) - uy * Math.sin(a2);
-      const ry = ux * Math.sin(a2) + uy * Math.cos(a2);
-      const mid = { x: p0.x + rx * twig * 0.6, y: p0.y + ry * twig * 0.6 - 2 };
-      const end = { x: p0.x + rx * twig, y: p0.y + ry * twig - twig * 0.16 };
-      taper(ctx, [p0, mid, end], 2 * b.thick + 0.6, 0.6,
-        hex(mul > 0.5 ? bark : barkDim, 0.65 * mul));
-    }
+    taper(ctx, pts, w0, 1.2, hex(mul > 0.5 ? bark : barkDim, Math.max(0.16, 0.95 * mul)));
 
     /* -------------------------------------------------------------- acorns */
     let i = 0;
@@ -312,81 +253,127 @@ export function drawOak(ctx, w, h, layout, view, theme) {
       ctx.stroke();
       ctx.setLineDash([]);
 
+      /**
+       * The acorn is the app's own checkbox, hung on wood: a filled dot when
+       * stored away, an outline while it ripens. No cap, no halo — the same
+       * two states every list in the app draws, so the tree needs no legend.
+       */
       if (a.done) {
-        // Stored away: solid gold, softly alight.
-        if (dark) {
-          ctx.globalCompositeOperation = "lighter";
-          const g = ctx.createRadialGradient(ax, ay, 0, ax, ay, 11);
-          g.addColorStop(0, hex(body, 0.45 * aMul));
-          g.addColorStop(1, hex(body, 0));
-          ctx.fillStyle = g;
-          ctx.beginPath();
-          ctx.arc(ax, ay, 11, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalCompositeOperation = "source-over";
-        }
         ctx.fillStyle = hex(body, aMul);
         ctx.beginPath();
-        ctx.arc(ax, ay, 4.4, 0, Math.PI * 2);
+        ctx.arc(ax, ay, 4.2, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        // Still ripening: an outline waiting to be filled.
-        ctx.strokeStyle = hex(body, Math.max(0.2, 0.75 * aMul * overdueHot));
+        ctx.strokeStyle = hex(body, Math.max(0.2, 0.8 * aMul * overdueHot));
         ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.arc(ax, ay, 4.2, 0, Math.PI * 2);
+        ctx.arc(ax, ay, 4, 0, Math.PI * 2);
         ctx.stroke();
       }
-      // The cap — every acorn wears the branch's colour.
-      ctx.strokeStyle = hex(bark, 0.9 * aMul);
-      ctx.lineWidth = 2.2;
-      ctx.beginPath();
-      ctx.arc(ax, ay - 1.2, 4.6, Math.PI * 1.05, Math.PI * 1.95);
-      ctx.stroke();
 
-      if (found) {
+      // One ring, two reasons: steady around the acorn that is open in the
+      // reading panel, breathing around the ones the squirrel found.
+      const open = view.acorn === a.taskId;
+      if (found || open) {
         ctx.strokeStyle = hex(dark ? "#ffffff" : "#0a0a0a", 0.85);
         ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(ax, ay, 8.5 + Math.sin(t / 300) * 1.2, 0, Math.PI * 2);
+        ctx.arc(ax, ay, 8.5 + (found ? Math.sin(t / 300) * 1.2 : 0), 0, Math.PI * 2);
         ctx.stroke();
       }
       targets.push({ x: ax, y: ay, projectId: b.projectId, taskId: a.taskId });
     }
 
-    /* --------------------------------------------------------------- label */
-    const tip = branchPoint(b, 1, geo, t, gust);
-    const narrow = w < 560;
-    const ink = dark ? "#fafafa" : "#0a0a0a";
-    const sub = dark ? "#9a9aa3" : "#6b6b74";
+    /* ------------- label: measured now, placed after all wood is drawn */
+    // Anchored to the still tip (no wind), so names hold steady while the
+    // wood sways — they are annotations, not leaves.
+    const tip = branchPoint(b, 1, geo, 0, 0);
     const lMul = find ? (find.branchIds.has(b.projectId) ? 1 : 0.25) : (mul < 1 ? 1 - view.dim * 0.55 : 1);
-    ctx.textBaseline = "middle";
-    ctx.font = `600 ${narrow ? 11.5 : 12.5}px ${theme.font || "system-ui"}`;
+    // Sub-branches take a quieter voice — their name a step smaller.
+    ctx.font = `600 ${b.host ? 11 : w < 560 ? 11.5 : 12.5}px ${theme.font || "system-ui"}`;
+    const tw = ctx.measureText(b.name).width;
     /**
      * Clamped inside the frame. At phone width the tips reach the edges, and
      * a name sliced by the screen edge reads as a bug — so when the outward
-     * side has no room, the label tucks back over the branch instead.
+     * side has no room, the label tucks back over the branch and climbs.
      */
-    const name = b.name;
-    const tw = ctx.measureText(name).width;
     let lx = tip.x + b.side * 14;
     let align = b.side > 0 ? "left" : "right";
     let ly = tip.y;
-    // Tucking a label back over the branch lands it on the acorns hanging
-    // there, so a clamped label also climbs above the wood.
     if (b.side > 0 && lx + tw > w - 10) { lx = tip.x - 8; align = "right"; ly = tip.y - 16; }
     if (b.side < 0 && lx - tw < 10) { lx = tip.x + 8; align = "left"; ly = tip.y - 16; }
-    ctx.textAlign = align;
-    ctx.fillStyle = hex(ink, 0.95 * lMul);
-    ctx.fillText(name, lx, ly - 8);
-    ctx.font = `500 10px ${theme.font || "system-ui"}`;
-    ctx.fillStyle = hex(sub, 0.9 * lMul);
-    ctx.fillText(narrow ? `${b.doneCount}/${b.count} stored` : `${b.doneCount} of ${b.count} stored away`, lx, ly + 6);
-    targets.push({ x: lx + (align === "left" ? 30 : -30), y: ly, projectId: b.projectId });
+    labelJobs.push({ b, lx, ly, align, lMul, subText: `${b.doneCount}/${b.count} stored` });
     // A generous invisible target along the wood itself.
     for (const f of [0.35, 0.6, 0.85]) {
       const bp = branchPoint(b, f, geo, t, gust);
       targets.push({ x: bp.x, y: bp.y, projectId: b.projectId });
+    }
+  }
+
+  /* --------------------------------------------------------------- labels */
+  /**
+   * Every label claims a rectangle; one that would land on a claimed patch
+   * slides up until the air is clear. Sub-branches reach into their parents'
+   * sky — without this pass, names strike through wood and through each
+   * other the moment the tree grows shoots, worst on a phone where the sky
+   * is small. Deterministic, so nothing flickers frame to frame.
+   */
+  {
+    const narrow = w < 560;
+    const inkC = dark ? "#fafafa" : "#0a0a0a";
+    const subC = dark ? "#9a9aa3" : "#6b6b74";
+    /**
+     * The tree claims its own space first — every acorn, every branch tip,
+     * and the length of each shoot (computed still, without wind, so the
+     * resolution never flickers). Labels then slide up past wood and fruit
+     * alike, which is what keeps a phone-width crown readable.
+     */
+    const claimed = [];
+    const claim = (x, y, r) => claimed.push({ x0: x - r, x1: x + r, y0: y - r, y1: y + r });
+    for (const b of layout.branches) {
+      // The draw loop pre-increments its index, so hang depth starts at 17.
+      b.acorns.forEach((a, i) => {
+        const p = branchPoint(b, a.t, geo, 0, 0);
+        claim(p.x, p.y + ((i + 1) % 2 ? 17 : 9), 9);
+      });
+      const stops = b.host ? [0.3, 0.6, 0.85, 1] : [1];
+      for (const f of stops) {
+        const p = branchPoint(b, f, geo, 0, 0);
+        claim(p.x, p.y, 9);
+      }
+    }
+    ctx.textBaseline = "middle";
+    for (const L of labelJobs) {
+      const nameFont = `600 ${L.b.host ? 11 : narrow ? 11.5 : 12.5}px ${theme.font || "system-ui"}`;
+      const subFont = `500 10px ${theme.font || "system-ui"}`;
+      ctx.font = nameFont;
+      const wName = ctx.measureText(L.b.name).width;
+      ctx.font = subFont;
+      const wMax = Math.max(wName, ctx.measureText(L.subText).width);
+
+      let ly = L.ly;
+      const box = () => {
+        const x0 = L.align === "left" ? L.lx : L.lx - wMax;
+        return { x0: x0 - 8, x1: x0 + wMax + 8, y0: ly - 17, y1: ly + 13 };
+      };
+      let guard = 0;
+      while (
+        guard++ < 24 &&
+        claimed.some((r) => {
+          const c = box();
+          return c.x0 < r.x1 && c.x1 > r.x0 && c.y0 < r.y1 && c.y1 > r.y0;
+        })
+      ) ly -= 15;
+      claimed.push(box());
+
+      ctx.textAlign = L.align;
+      ctx.font = nameFont;
+      ctx.fillStyle = hex(inkC, 0.95 * L.lMul);
+      ctx.fillText(L.b.name, L.lx, ly - 8);
+      ctx.font = subFont;
+      ctx.fillStyle = hex(subC, 0.9 * L.lMul);
+      ctx.fillText(L.subText, L.lx, ly + 6);
+      targets.push({ x: L.lx + (L.align === "left" ? 30 : -30), y: ly, projectId: L.b.projectId });
     }
   }
 
@@ -403,12 +390,7 @@ export function drawOak(ctx, w, h, layout, view, theme) {
       ctx.beginPath();
       ctx.arc(gx, gy, 3.8, 0, Math.PI * 2);
       if (g.done) { ctx.fillStyle = hex(barkDim, 0.8 * mul2); ctx.fill(); } else ctx.stroke();
-      ctx.strokeStyle = hex(bark, 0.8 * mul2);
-      ctx.lineWidth = 1.8;
-      ctx.beginPath();
-      ctx.arc(gx, gy - 1, 4, Math.PI * 1.1, Math.PI * 1.9);
-      ctx.stroke();
-      if (found) {
+      if (found || view.acorn === g.taskId) {
         ctx.strokeStyle = hex(dark ? "#ffffff" : "#0a0a0a", 0.85);
         ctx.lineWidth = 1.1;
         ctx.beginPath();

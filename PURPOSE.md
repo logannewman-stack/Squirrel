@@ -45,16 +45,37 @@ layout data drawn as bright nodes linked by who-works-on-what, an alternate
 renderer behind the same panel. Worth doing only after the oak has earned its
 keep.
 
-## One ink
+## One ink, one clean line
 
-The first oak gave every branch its own colour, and it read as somebody
-else's app. Squirrel is monochrome everywhere — ink on paper, one alert
-accent — so the tree is too: white line-work in the dark, black ink in the
-light, and colour spent only where the rest of the app spends it, on overdue
-acorns (`--alert`). A branch is told apart by its place on the trunk and its
-name; done acorns are filled and glowing, open ones are outlines. `PALETTE`
-in `lib/oak.js` is now a single ink, kept as a list in case a second ink
-ever earns its place.
+The first oak gave every branch its own colour, plus glow underlays,
+fireflies, twigs and acorn caps — and it read as somebody else's app.
+Squirrel is monochrome and flat everywhere, so the tree is too: a flat paper
+background, one tapered line of ink per bough (white in the dark, black in
+the light), and acorns drawn as the app's own checkbox hung on wood — a
+filled dot when stored away, an outline while it ripens. Colour is spent
+only where the rest of the app spends it, on overdue acorns (`--alert`).
+`PALETTE` in `lib/oak.js` is a single ink, kept as a list in case a second
+ink ever earns its place.
+
+## Sub-branches, and growing the tree in place
+
+A project can grow off another project: `parentId` on the project (one
+nullable field, invisible to the planner, search and quotas) makes it a
+**sub-branch** — a side shoot socketed on its parent's wood, riding the
+parent's sway in the wind, one level deep by design. The rule is written to
+never hide work: a sub whose parent is archived, missing, or itself a sub
+climbs back to the trunk.
+
+The tree is grown here too, not just read: the **+** beside the theme toggle
+plants a new branch; a branch's card grows **＋ Sub-branch** and **＋ Acorn**
+in place; and every acorn — tapped on the canvas, in a branch card's list,
+or found by the squirrel — opens into its own small card, where it can be
+stored away or put back without leaving the room.
+
+Labels place themselves: the tree claims its own space (acorns, tips, the
+length of each shoot, measured without wind so nothing flickers) and every
+name slides up until its air is clear — which is what keeps a phone-width
+crown readable once shoots start growing into their parents' sky.
 
 ## The squirrel works here
 

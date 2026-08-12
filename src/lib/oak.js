@@ -76,11 +76,47 @@ export function layoutOak(projects = [], tasks = [], opts = {}) {
     return { branches: [], ground: [], counts: { done: 0, total: 0 }, empty: true };
   }
 
+  /**
+   * Sub-projects grow off their parent's branch — one level deep, the way a
+   * bough carries side shoots. The rule is written to never hide work: a
+   * project whose parent is missing, archived, or itself a sub is treated as
+   * a branch of the trunk. Ancestry is a drawing decision, not custody.
+   */
+  const liveById = new Map(live.map((p) => [p.id, p]));
+  const isRoot = (p) => {
+    const host = p.parentId ? liveById.get(p.parentId) : null;
+    if (!host) return true;
+    const grand = host.parentId ? liveById.get(host.parentId) : null;
+    return Boolean(grand); // the host is itself a sub → this one climbs to the trunk
+  };
+  const roots = live.filter(isRoot);
+  const rootIds = new Set(roots.map((p) => p.id));
+  const subsOf = new Map(roots.map((p) => [p.id, []]));
+  for (const p of live) if (!rootIds.has(p.id)) subsOf.get(p.parentId).push(p);
+
   const most = Math.max(1, ...live.map((p) => byProject.get(p.id).length));
-  const branches = live.map((p, i) => {
-    const mine = byProject.get(p.id).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const acornsFor = (mine) =>
+    mine.map((t, j) => ({
+      taskId: t.id,
+      title: t.title,
+      // Strung from mid-branch to the tip, oldest nearest the trunk.
+      t: mine.length === 1 ? 0.7 : 0.42 + (j / (mine.length - 1)) * 0.53,
+      done: !!t.done,
+      overdue: !t.done && !!t.due && t.due < today,
+      delegated: !!t.delegatedTo,
+    }));
+  const work = (id) => byProject.get(id).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+  /**
+   * The flat list is ordered the way the tree is read: each trunk branch,
+   * then the shoots growing off it, then the next branch — so the keyboard
+   * walks parent-to-children without knowing the difference.
+   */
+  const branches = [];
+  roots.forEach((p, i) => {
+    const mine = work(p.id);
     const jitter = hashOf(p.id);
-    return {
+    const root = {
       projectId: p.id,
       name: p.name,
       color: PALETTE[i % PALETTE.length],
@@ -89,23 +125,36 @@ export function layoutOak(projects = [], tasks = [], opts = {}) {
        * branch's height and lean so the tree reads grown, not plotted.
        */
       side: i % 2 === 0 ? 1 : -1,
-      baseT: live.length === 1 ? 0.55 : 0.28 + (i / (live.length - 1)) * 0.5 + (jitter - 0.5) * 0.04,
+      baseT: roots.length === 1 ? 0.55 : 0.28 + (i / (roots.length - 1)) * 0.5 + (jitter - 0.5) * 0.04,
       len: 0.5 + 0.5 * Math.sqrt((mine.length + 1) / (most + 1)),
-      thick: 1 - (i / Math.max(1, live.length)) * 0.45,
+      thick: 1 - (i / Math.max(1, roots.length)) * 0.45,
       lean: 0.26 + jitter * 0.2,
       phase: jitter * Math.PI * 2,
       count: mine.length,
       doneCount: mine.filter((t) => t.done).length,
-      acorns: mine.map((t, j) => ({
-        taskId: t.id,
-        title: t.title,
-        // Strung from mid-branch to the tip, oldest nearest the trunk.
-        t: mine.length === 1 ? 0.7 : 0.42 + (j / (mine.length - 1)) * 0.53,
-        done: !!t.done,
-        overdue: !t.done && !!t.due && t.due < today,
-        delegated: !!t.delegatedTo,
-      })),
+      acorns: acornsFor(mine),
     };
+    branches.push(root);
+    subsOf.get(p.id).forEach((s, j, arr) => {
+      const theirs = work(s.id);
+      const sj = hashOf(s.id);
+      branches.push({
+        projectId: s.id,
+        name: s.name,
+        color: PALETTE[0],
+        host: root,
+        // Spaced along the outer half of the parent, oldest nearest the trunk.
+        socketT: arr.length === 1 ? 0.62 : 0.46 + (j / (arr.length - 1)) * 0.34 + (sj - 0.5) * 0.03,
+        side: root.side,
+        len: 0.24 + 0.22 * Math.sqrt((theirs.length + 1) / (most + 1)),
+        thick: root.thick * 0.5,
+        lean: 0.48 + sj * 0.2, // side shoots climb — steeper than the bough that carries them
+        phase: sj * Math.PI * 2,
+        count: theirs.length,
+        doneCount: theirs.filter((t) => t.done).length,
+        acorns: acornsFor(theirs),
+      });
+    });
   });
 
   const all = tasks.filter((t) => byProject.has(t.projectId) || !t.projectId);
@@ -126,7 +175,11 @@ export function layoutOak(projects = [], tasks = [], opts = {}) {
  * read as weight rather than as the whole image wobbling.
  */
 export function branchPoint(b, t, geo, time = 0, gust = 0) {
-  const socket = trunkPoint(b.baseT, geo);
+  // A sub-branch's socket is a point on the wood that carries it — computed
+  // with the parent's own sway, so the shoot rides the bough in the wind.
+  const socket = b.host
+    ? branchPoint(b.host, b.socketT, geo, time, gust)
+    : trunkPoint(b.baseT, geo);
   const dir = b.side;
   const len = geo.reach * b.len;
   // A bough, not a spoke: it leaves the trunk climbing steeply, arches, and
@@ -177,9 +230,10 @@ export function geometryFor(w, h) {
   };
 }
 
-/** Where the wood stops: a little past the highest branch's socket. */
+/** Where the wood stops: a little past the highest trunk socket. Sub-branches
+ *  live on their parents, not the trunk, so they don't raise it. */
 export const trunkTopT = (layout) =>
-  Math.min(1, layout.branches.reduce((m, b) => Math.max(m, b.baseT), 0.5) + 0.1);
+  Math.min(1, layout.branches.reduce((m, b) => (b.baseT != null ? Math.max(m, b.baseT) : m), 0.5) + 0.1);
 
 /**
  * Which drawn thing, if any, is under a finger.
