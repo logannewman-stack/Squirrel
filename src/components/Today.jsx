@@ -3,6 +3,7 @@ import { dayKey, toggleTask, eventsOn } from "../lib/store";
 import { planOpts, sayMins } from "../lib/hours";
 import { projectLoad } from "../lib/schedule";
 import { whenTask } from "../lib/when";
+import { whenLabel } from "../lib/search";
 import { duration } from "../lib/format";
 import TaskRow from "./TaskRow";
 import Review from "./Review";
@@ -145,7 +146,10 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
     })),
     ...blocks.filter((b) => b.start).map((b) => ({
       kind: "work", at: new Date(b.start), end: new Date(b.end), title: b.task.title,
-      note: b.task.due ? `due ${b.task.due}` : "", id: `${b.taskId}-${b.start}`, task: b.task,
+      // "due 2026-08-18" was the only date on this screen written as the store
+      // holds it rather than as anybody says it, sitting two inches from a row
+      // reading "Aug 19".
+      note: b.task.due ? `due ${whenLabel(b.task.due, now)}` : "", id: `${b.taskId}-${b.start}`, task: b.task,
     })),
     ...gaps.map((g) => ({
       kind: "gap", at: g.start, end: g.end, mins: g.mins, id: `gap-${g.start.getTime()}`,
