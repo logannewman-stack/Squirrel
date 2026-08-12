@@ -28,6 +28,28 @@ await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: "networkidle" });
 await skipOnboarding(p);
 
+/* ------------------------------------------------ the first three acorns */
+{
+  const card = p.getByText("What needs doing this week?");
+  t("a fresh app opens asking for the first three", (await card.count()) === 1);
+  await p.getByLabel("Name the first thing").fill("Call the bank");
+  await p.getByRole("button", { name: "1h", exact: true }).click();
+  await p.getByRole("button", { name: "Tomorrow", exact: true }).click();
+  await p.getByRole("button", { name: "Plant it", exact: true }).click();
+  await p.waitForTimeout(700);
+  const made = await p.evaluate(async () => {
+    const s = await import("/src/lib/store.js");
+    return s.getState().tasks.find((x) => x.title === "Call the bank");
+  });
+  t("  planting writes a real task — size and date included",
+    Boolean(made) && made.estimateMins === 60 && Boolean(made.due), JSON.stringify(made));
+  t("  and the guide talks the plan forward",
+    /Two more/i.test(await p.locator("body").innerText()));
+  await p.getByRole("button", { name: /my own way/i }).click();
+  await p.waitForTimeout(300);
+  t("  stepping out is one tap, and it stays out", (await card.count()) === 0);
+}
+
 /* ------------------------------------------------- an overloaded week */
 await p.evaluate(async () => {
   const s = await import("/src/lib/store.js");

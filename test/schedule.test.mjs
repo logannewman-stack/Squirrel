@@ -536,5 +536,29 @@ const state = {
     loose.blocks[0]?.start);
 }
 
+// ------------------------------------------- due tomorrow, typed at night
+{
+  // 20:00, after the working day. "Due tomorrow" must plan on tomorrow —
+  // the old answer was a shortfall alarm for a task with a whole day left.
+  const evening = new Date(2026, 7, 3, 20, 0, 0);
+  const r = distribute(
+    [task({ id: "late", estimateMins: 60, due: D(1) })],
+    [], [], { now: evening },
+  );
+  t("due tomorrow, typed after hours, plans on the deadline day itself",
+    r.shortfalls.length === 0 &&
+    r.blocks.length > 0 && r.blocks.every((b) => b.day === D(1)),
+    JSON.stringify({ blocks: r.blocks.map((b) => b.day), shorts: r.shortfalls.length }));
+
+  // In the morning the buffer still holds: the same task plans today.
+  const morning = distribute(
+    [task({ id: "early", estimateMins: 60, due: D(1) })],
+    [], [], { now: NOW },
+  );
+  t("  typed in the morning, it still lands today — the buffer stands",
+    morning.blocks.every((b) => b.day === D(0)),
+    JSON.stringify(morning.blocks.map((b) => b.day)));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

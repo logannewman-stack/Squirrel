@@ -195,6 +195,20 @@ function eligibleDays(task, from, opts) {
     if (d > last) break;
     if (isWorkday(d, opts)) out.push(d);
   }
+  /**
+   * The buffer left only a day that is already over. "Due tomorrow" typed at
+   * six in the evening reduces to "do it today", and today's working hours
+   * are behind us — which used to produce an alarm ("none of it fits") for a
+   * task with a perfectly good day left. When the only day before the buffer
+   * is a today whose working window has closed, fall through to the loop
+   * below and plan on the deadline day itself.
+   */
+  if (out.length === 1 && opts.after && dayKey(out[0]) === dayKey(opts.after)) {
+    const endH = opts.workEnd ?? 19;
+    const closes = new Date(out[0]);
+    closes.setHours(Math.floor(endH), Math.round((endH % 1) * 60), 0, 0);
+    if (opts.after >= closes) out.length = 0;
+  }
   // Everything is already inside the buffer. Use what is left up to the
   // deadline itself rather than refusing to plan at all — a late plan still
   // beats no plan.

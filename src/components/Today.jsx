@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { findFreeSlots, fmtTime, workOn } from "../lib/agenda";
-import { dayKey, toggleTask, updateTask, eventsOn, activeTasks } from "../lib/store";
+import { dayKey, toggleTask, updateTask, addTask, setSetting, eventsOn, activeTasks } from "../lib/store";
 import { planOpts, sayMins } from "../lib/hours";
 import { projectLoad } from "../lib/schedule";
 import { whenTask } from "../lib/when";
@@ -211,6 +211,10 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
           New event
         </button>
       </header>
+
+      {state.tasks.length < 3 && !state.settings?.firstPlanDone && (
+        <FirstAcorns count={state.tasks.length} />
+      )}
 
       {shortfalls.length > 0 && <Shortfalls list={shortfalls} tasks={state.tasks} />}
 
@@ -480,6 +484,103 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
  * more hours a day, or a deadline of Tuesday — is a decision that can be made
  * this morning, while there is still time for it to matter.
  */
+/**
+ * The first three acorns — the guided minute where the app earns belief.
+ *
+ * A new person sees an empty day and has no reason to think this planner is
+ * different. So the first run asks for three real things — each with a size
+ * and a date, the two facts the router runs on — and lets them watch the day
+ * below build itself after every single one. No tour, no tooltips pointing
+ * at chrome: the product demonstrates the product. One tap steps out, and
+ * the card never returns (`firstPlanDone`), even if every task is deleted.
+ */
+function FirstAcorns({ count }) {
+  const [title, setTitle] = useState("");
+  const [size, setSize] = useState(30);
+  const [when, setWhen] = useState(1);
+
+  const plant = () => {
+    const name = title.trim();
+    if (!name) return;
+    let due = null;
+    if (when != null) {
+      const d = new Date();
+      d.setDate(d.getDate() + when);
+      due = dayKey(d);
+    }
+    addTask({ title: name, estimateMins: size, ...(due ? { due } : {}) });
+    setTitle("");
+    if (count + 1 >= 3) setSetting("firstPlanDone", true);
+  };
+
+  const lines = [
+    "Name it, give it a size and a day — then watch the day below build itself.",
+    "There it is, already scheduled below. Two more.",
+    "One more and you have a real morning.",
+  ];
+  const chip = (on) =>
+    `rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+      on ? "border-[var(--ink)] font-medium" : "border-[var(--line)] hover:border-[var(--ink)]"
+    }`;
+
+  return (
+    <div className="mb-8 rounded-lg border border-[var(--line)] p-5">
+      <p className="label">The first three</p>
+      <h2 className="mt-1 text-lg font-semibold tracking-tight">What needs doing this week?</h2>
+      <p className="mt-1 text-xs text-[var(--muted)]">{lines[count] || lines[0]}</p>
+
+      <div className="mt-4 flex flex-col gap-3">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && plant()}
+          aria-label="Name the first thing"
+          placeholder="e.g. Send the proposal to Hartmann"
+          className="w-full rounded-lg border border-[var(--line)] bg-transparent px-3 py-2.5
+                     text-sm outline-none placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="label mr-1">Takes</span>
+          {[[15, "15m"], [30, "30m"], [60, "1h"], [120, "2h"]].map(([m, label]) => (
+            <button key={m} onClick={() => setSize(m)} className={chip(size === m)}>{label}</button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="label mr-1">By</span>
+          {[[0, "Today"], [1, "Tomorrow"], [7, "Next week"], [null, "No date"]].map(([d, label]) => (
+            <button key={label} onClick={() => setWhen(d)} className={chip(when === d)}>{label}</button>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <button
+            onClick={plant}
+            className="rounded-md bg-[var(--ink)] px-4 py-2 text-sm font-medium text-[var(--paper)]
+                       transition-opacity hover:opacity-90"
+          >
+            Plant it
+          </button>
+          <div className="flex items-center gap-3">
+            <span aria-hidden className="flex gap-1">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className={`h-1.5 w-1.5 rounded-full ${i < count ? "bg-[var(--ink)]" : "bg-[var(--line)]"}`}
+                />
+              ))}
+            </span>
+            <button
+              onClick={() => setSetting("firstPlanDone", true)}
+              className="text-xs text-[var(--faint)] transition-colors hover:text-[var(--ink)]"
+            >
+              I'll add things my own way
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Shortfalls({ list, tasks }) {
   const total = list.reduce((n, s) => n + s.shortMins, 0);
   return (

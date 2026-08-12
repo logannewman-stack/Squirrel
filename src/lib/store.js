@@ -419,10 +419,12 @@ export function deleteProject(id) {
 export function addTask({
   projectId = null, title, estimateMins = 30, due = null,
   priority = "normal", delegatedTo = "", notes = "",
+  // "every Friday": day | week | month, advanced from `due` on completion.
+  repeat = null,
 }) {
   const t = stamp({
     id: uid(), projectId, title: title.trim(), estimateMins, due, priority,
-    delegatedTo, notes, done: false, doneAt: null,
+    delegatedTo, notes, repeat, done: false, doneAt: null,
     createdAt: Date.now(), scheduledFor: null, order: null,
   });
   mutate(`adding “${t.title}”`, { tasks: [...read().tasks, t] });
@@ -436,15 +438,55 @@ export function updateTask(id, patch) {
     { tasks: read().tasks.map((t) => (t.id === id ? stamp({ ...t, ...patch }) : t)) });
 }
 
+/** The next due date for a repeating task: day, week, or month later. */
+function advanceDue(due, repeat) {
+  const [y, m, d] = due.split("-").map(Number);
+  const next = new Date(y, m - 1, d);
+  if (repeat === "day") next.setDate(next.getDate() + 1);
+  else if (repeat === "week") next.setDate(next.getDate() + 7);
+  else if (repeat === "month") {
+    // Jan 31 + a month is the end of February, not March 3rd — JS overflows
+    // the missing days, and a monthly invoice drifting forward is a bug the
+    // person only notices in April.
+    const m0 = next.getMonth();
+    next.setMonth(m0 + 1);
+    if (next.getMonth() !== (m0 + 1) % 12) next.setDate(0);
+  } else return null;
+  return dayKey(next);
+}
+
 export function toggleTask(id) {
   // The one action in the app that is worth feeling. A task ticking off is a
   // small win, and on iOS a haptic is how a small win is acknowledged.
   tap(read().tasks.find((t) => t.id === id)?.done ? "light" : "success");
   const was = read().tasks.find((t) => t.id === id);
+
+  /**
+   * A repeating task respawns the moment it is stored away — the weekly
+   * review finished this Friday IS next Friday's review, with a fresh id and
+   * the due date advanced. Spawned in the same mutation as the tick, so one
+   * undo takes back both the done-mark and the child it hatched. Pins and
+   * delegation don't carry over: "this one, Thursday" was about that
+   * instance, and next week's copy is the router's to place.
+   */
+  const finishing = was && !was.done;
+  const nextDue = finishing && was.repeat && was.due ? advanceDue(was.due, was.repeat) : null;
+  const spawn = nextDue
+    ? [stamp({
+        id: uid(), projectId: was.projectId ?? null, title: was.title,
+        estimateMins: was.estimateMins, due: nextDue, priority: was.priority,
+        delegatedTo: "", notes: was.notes || "", repeat: was.repeat,
+        done: false, doneAt: null, createdAt: Date.now(), scheduledFor: null, order: null,
+      })]
+    : [];
+
   mutate(`marking “${was?.title || "a task"}” ${was?.done ? "not done" : "done"}`, {
-    tasks: read().tasks.map((t) =>
-      t.id === id ? stamp({ ...t, done: !t.done, doneAt: t.done ? null : Date.now() }) : t,
-    ),
+    tasks: [
+      ...read().tasks.map((t) =>
+        t.id === id ? stamp({ ...t, done: !t.done, doneAt: t.done ? null : Date.now() }) : t,
+      ),
+      ...spawn,
+    ],
   });
 }
 

@@ -4,6 +4,7 @@ import { drawOak } from "../lib/oak-draw";
 import { whenProject } from "../lib/when";
 import { workOn, fmtTime } from "../lib/agenda";
 import { planOpts } from "../lib/hours";
+import { typicalMins, estimateHint } from "../lib/estimates";
 import {
   addProject, addTask, toggleTask, updateProject, updateTask, setProjectArchived, dayKey,
 } from "../lib/store";
@@ -646,6 +647,9 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus, onToda
                     buys capacity and the morning, so it belongs in view. */}
                 {acornTask.priority && acornTask.priority !== "normal" ? ` · ${acornTask.priority}` : ""}
                 {acornTask.estimateMins ? ` · ${acornTask.estimateMins}m` : ""}
+                {acornTask.repeat
+                  ? ` · repeats ${{ day: "daily", week: "weekly", month: "monthly" }[acornTask.repeat]}`
+                  : ""}
                 {acornTask.due
                   ? ` · due ${new Date(`${acornTask.due}T00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}`
                   : ""}
@@ -707,6 +711,22 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus, onToda
                 }
                 return null;
               })()}
+              {/* History disagrees with the guess: the sessions already
+                  logged the truth, so offer it — one tap, never an override. */}
+              {!acornTask.done && (() => {
+                const hint = estimateHint(acornTask, state.tasks, state.sessions);
+                if (!hint) return null;
+                return (
+                  <button
+                    onClick={() => updateTask(acornTask.id, { estimateMins: hint.usual })}
+                    className="mt-1 block text-[11px] text-[var(--muted)] underline
+                               decoration-[var(--hairline)] underline-offset-2 transition-colors
+                               hover:text-[var(--ink)]"
+                  >
+                    usually ~{hint.usual}m here — tap to use
+                  </button>
+                );
+              })()}
             </div>
             <button
               onClick={clear}
@@ -739,6 +759,34 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus, onToda
               Open the whole branch →
             </Button>
           </div>
+
+          {/* Work that comes back: finish a weekly acorn and next week's is
+              already on the branch, due date advanced, router informed. */}
+          {!acornTask.done && (
+            <div className="mt-3 border-t border-[var(--hairline)] pt-2">
+              <p className="label">Repeats</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {[["", "Never"], ["day", "Daily"], ["week", "Weekly"], ["month", "Monthly"]].map(([v, label]) => (
+                  <button
+                    key={label}
+                    onClick={() => updateTask(acornTask.id, { repeat: v || null })}
+                    className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                      (acornTask.repeat ?? "") === v
+                        ? "border-[var(--ink)] font-medium"
+                        : "border-[var(--line)] hover:border-[var(--ink)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {acornTask.repeat && !acornTask.due && (
+                <p className="mt-1 text-[11px] text-[var(--faint)]">
+                  it respawns from its due date — give it one
+                </p>
+              )}
+            </div>
+          )}
 
           {/* "This one, Thursday." A pin overrides the router for one acorn
               and the rest of the week routes around it. Tapping the pinned
@@ -931,9 +979,16 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus, onToda
                     setGrow(null);
                     setSelection(p.id);
                   } else {
-                    const t = addTask(
-                      unfiledOpen ? { title: name } : { title: name, projectId: selection },
+                    // A new acorn starts at what tasks *actually* take here,
+                    // when history has enough finished work to say.
+                    const usual = typicalMins(
+                      state.tasks, state.sessions, unfiledOpen ? null : selection,
                     );
+                    const t = addTask({
+                      title: name,
+                      ...(unfiledOpen ? {} : { projectId: selection }),
+                      ...(usual ? { estimateMins: usual } : {}),
+                    });
                     setGrow(null);
                     setAcornId(t.id);
                   }
