@@ -17,7 +17,9 @@ const ITEMS = [
   ["today", "Today", "M4 7h16M4 12h16M4 17h10"],
   ["calendar", "Calendar", "M4 8h16M4 8a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V8zM9 4v4M15 4v4"],
   ["projects", "Projects", "M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"],
-  ["purpose", "Purpose", "M8 3c0 4.5 8 4.5 8 9s-8 4.5-8 9M16 3c0 4.5-8 4.5-8 9s8 4.5 8 9M9.2 7.5h5.6M9.2 16.5h5.6"],
+  // The oak, as the tab wears it: trunk, two staggered boughs, the ground —
+  // the same silhouette the Purpose canvas grows, one branch per side.
+  ["purpose", "Purpose", "M12 21V6M12 9.5c2 0 4.2 0 5.5-2.5M12 13c-2 0-4.2 0-5.5-2.5M12 16.5c1.6 0 3.4 0 4.5-2"],
   ["insights", "Insights", "M5 19V11M10 19V5M15 19v-6M20 19v-9"],
 ];
 

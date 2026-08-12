@@ -309,6 +309,12 @@ export default function App() {
        * that kind of thing.
        */
       if (getState().active) return;
+      /**
+       * A key a component already consumed is not ours to dispatch again —
+       * "/" on the Purpose canvas summons the squirrel there, and must not
+       * also open the palette underneath it.
+       */
+      if (e.defaultPrevented) return;
       // Scope stays null: calendar-scoped bindings are dispatched by the
       // calendar, and matching them here would run them twice.
       const hit = shortcutFor(e, { scope: null });

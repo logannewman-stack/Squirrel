@@ -48,12 +48,12 @@ export default function Insights({ state, onSearch }) {
 
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">
-      <header className="mb-6 flex items-end justify-between gap-4">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div>
           <p className="label">Last {DAYS_BACK} days</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Insights</h1>
         </div>
-        <Find onOpen={onSearch} />
+        <Find onOpen={onSearch} className="order-last sm:order-none" />
       </header>
 
       <div className="mb-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--line)]

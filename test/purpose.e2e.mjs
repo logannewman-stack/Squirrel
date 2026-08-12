@@ -3,19 +3,20 @@
  *
  * Needs the dev server on :5173.
  *
- * The strand itself is judged by eye and pinned by the math suite; what this
+ * The oak itself is judged by eye and pinned by the math suite; what this
  * checks is the screen around it — that the tab exists and opens, that the
  * room renders without a single page error at desktop and phone size, that
- * the keyboard can walk the strand and read a gene, that writing a meaning
- * survives a reload, and that the light/dark toggle actually flips the app's
- * theme rather than merely repainting the canvas.
+ * the keyboard can walk the branches and read one, that the squirrel finds
+ * what it is asked to and carries you there, that writing a meaning survives
+ * a reload, and that the light/dark toggle actually flips the app's theme
+ * rather than merely repainting the canvas.
  */
 import { chromium } from "playwright";
 import { skipOnboarding } from "./onboard.mjs";
 
 const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 /** The reading panel, by its accessible name — the nav is an <aside> too. */
-const strand = (page) => page.getByRole("complementary", { name: / strand$/ });
+const panel = (page) => page.getByRole("complementary", { name: / branch$/ });
 const out = [];
 const t = (name, ok, detail) => {
   out.push([name, !!ok]);
@@ -32,14 +33,14 @@ await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: "networkidle" });
 await skipOnboarding(p);
 
-/* ------------------------------------------------------------ an empty helix */
+/* -------------------------------------------------------------- a bare oak */
 await p.getByRole("button", { name: "Purpose", exact: true }).first().click();
 await p.waitForTimeout(700);
 {
   const body = await p.locator("body").innerText();
   t("the tab opens a room, not a report", (await p.locator("canvas").count()) >= 1);
-  t("  and an unwritten helix says so", /unwritten/.test(body), body.slice(0, 200));
-  t("  with a way to start", (await p.getByRole("button", { name: /Start the first strand/ }).count()) === 1);
+  t("  and a bare oak says so", /Your oak is bare/.test(body), body.slice(0, 200));
+  t("  with a way to start", (await p.getByRole("button", { name: /Plant the first acorn/ }).count()) === 1);
 }
 
 /* --------------------------------------------------------------- a real one */
@@ -56,8 +57,9 @@ await p.evaluate(async () => {
 await p.waitForTimeout(700);
 {
   const body = await p.locator("body").innerText();
-  t("the header counts the strand", /2 strands|3 strands/.test(body), body.match(/\d+ strands?[^\n]*/)?.[0]);
-  t("  in base pairs woven", /base pairs woven in/.test(body));
+  t("the header counts the branches", /2 branches/.test(body), body.match(/\d+ branch[^\n]*/)?.[0]);
+  t("  and the acorns stored away", /1 of 4 acorns stored away/.test(body),
+    body.match(/\d+ of \d+ acorns[^\n]*/)?.[0]);
 }
 
 /* -------------------------------------------------- the keyboard walks it */
@@ -65,21 +67,56 @@ await p.waitForTimeout(700);
   await p.locator("canvas").first().focus();
   await p.keyboard.press("ArrowRight");
   await p.waitForTimeout(500);
-  const panel = await strand(p).innerText().catch(() => "");
-  t("an arrow key selects the first gene and opens its reading",
-    /Munich lease/.test(panel), panel.slice(0, 120));
-  t("  showing the weave count", /1 of 2 woven in/.test(panel), panel.match(/\d+ of \d+[^\n]*/)?.[0]);
-  t("  the client and the money", /Hartmann/.test(panel) && /\$48k/.test(panel));
-  t("  and each base pair by name", /Sign the lease/.test(panel) && /Survey/.test(panel));
+  const read = await panel(p).innerText().catch(() => "");
+  t("an arrow key selects the first branch and opens its reading",
+    /Munich lease/.test(read), read.slice(0, 120));
+  t("  showing what it has stored", /1 of 2 stored away/.test(read), read.match(/\d+ of \d+[^\n]*/)?.[0]);
+  t("  the client and the money", /Hartmann/.test(read) && /\$48k/.test(read));
+  t("  and each acorn by name", /Sign the lease/.test(read) && /Survey/.test(read));
 
   await p.keyboard.press("ArrowRight");
   await p.waitForTimeout(500);
-  t("the next arrow steps along the strand",
-    /Q3 launch/.test(await strand(p).innerText()));
+  t("the next arrow steps up the trunk",
+    /Q3 launch/.test(await panel(p).innerText()));
 
   await p.keyboard.press("Escape");
   await p.waitForTimeout(400);
-  t("Escape lets go", (await strand(p).count()) === 0);
+  t("Escape lets go", (await panel(p).count()) === 0);
+}
+
+/* ------------------------------------------------- the squirrel finds it */
+{
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("/");
+  await p.waitForTimeout(400);
+  const ask = p.getByLabel("Ask the squirrel to find something");
+  t("\"/\" summons the squirrel", (await ask.count()) === 1);
+  t("  ready to listen", await ask.evaluate((el) => el === document.activeElement));
+
+  await ask.fill("deck");
+  await p.waitForTimeout(400);
+  const row = p.getByRole("button", { name: /Board deck/ });
+  t("  it finds the acorn by a word", (await row.count()) === 1);
+  t("  and names its branch", /Q3 launch/.test(await row.innerText().catch(() => "")));
+
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(500);
+  t("  Enter carries you to that branch",
+    /Q3 launch/.test(await panel(p).innerText().catch(() => "")));
+
+  // Fallen acorns answer too — the squirrel knows the ground as well as the tree.
+  await p.keyboard.press("/");
+  await p.waitForTimeout(300);
+  await p.getByLabel("Ask the squirrel to find something").fill("loose");
+  await p.waitForTimeout(300);
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(500);
+  const ground = await panel(p).innerText().catch(() => "");
+  t("  even for what has fallen", /Unfiled/.test(ground) && /fallen — not on a branch yet/.test(ground),
+    ground.slice(0, 120));
+
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(300);
 }
 
 /* ------------------------------------------------------- meaning is written */
@@ -87,8 +124,8 @@ await p.waitForTimeout(700);
   await p.locator("canvas").first().focus();
   await p.keyboard.press("ArrowRight");
   await p.waitForTimeout(400);
-  const field = p.getByPlaceholder(/Why does this strand exist/);
-  t("a gene asks what it is for", (await field.count()) === 1);
+  const field = p.getByPlaceholder(/Why does this branch exist/);
+  t("a branch asks what it is for", (await field.count()) === 1);
   await field.fill("Our first office of our own.");
   await p.keyboard.press("Tab");
   await p.waitForTimeout(500);
@@ -122,9 +159,9 @@ await p.waitForTimeout(600);
   await p.locator("canvas").first().focus();
   await p.keyboard.press("ArrowRight");
   await p.waitForTimeout(400);
-  await p.getByRole("button", { name: /Open the whole strand/ }).click();
+  await p.getByRole("button", { name: /Open the whole branch/ }).click();
   await p.waitForTimeout(600);
-  t("the strand opens into the real project",
+  t("the branch opens into the real project",
     (await p.locator("header input").first().inputValue().catch(() => "")) === "Munich lease");
 }
 
@@ -162,7 +199,7 @@ await ph.waitForTimeout(800);
   await ph.keyboard.press("ArrowRight");
   await ph.waitForTimeout(500);
   t("  the reading panel rises from the bottom on a phone",
-    (await strand(ph).count()) === 1);
+    (await panel(ph).count()) === 1);
   /**
    * Seven columns now share the bar with the fixed disc, and adding the tab
    * is exactly what clipped "Calendar" the first time — measured, not

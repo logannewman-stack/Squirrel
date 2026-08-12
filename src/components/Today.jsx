@@ -184,7 +184,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
        `--sunken` now and the columns below are cards on it, so the space
        between them is canvas and the space inside them belongs to something. */
     <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col px-5 py-7 sm:px-6 sm:py-8">
-      <header className="mb-6 flex items-end justify-between gap-4">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
           {/* One line each, whatever the width: the date truncates before it
               wraps, and a two-word button never breaks mid-word. "WEDNESDAY,
@@ -195,16 +195,16 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Today</h1>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Find onOpen={onSearch} />
-          <button
-            onClick={onNewEvent}
-            className="whitespace-nowrap rounded-md border border-[var(--line)] px-3.5 py-2 text-xs
-                       transition-colors hover:border-[var(--ink)]"
-          >
-            New event
-          </button>
-        </div>
+        {/* The bar drops to its own full row on a phone — iOS's search-under-
+            large-title — and rides beside "New event" where there is room. */}
+        <Find onOpen={onSearch} className="order-last sm:order-none sm:ml-auto" />
+        <button
+          onClick={onNewEvent}
+          className="shrink-0 whitespace-nowrap rounded-md border border-[var(--line)] px-3.5 py-2
+                     text-xs transition-colors hover:border-[var(--ink)]"
+        >
+          New event
+        </button>
       </header>
 
       {shortfalls.length > 0 && <Shortfalls list={shortfalls} tasks={state.tasks} />}
