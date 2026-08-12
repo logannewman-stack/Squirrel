@@ -153,9 +153,26 @@ export function whenTask(task, plan = {}, opts = {}) {
       };
     }
 
-    // Split work: the row wants the runway, not the itinerary. "tomorrow → Fri"
-    // is the shape of the commitment; the sentence underneath can afford the
-    // sitting count.
+    /**
+     * Split work: the row wants the runway, not the itinerary. "tomorrow →
+     * Fri" is the shape of the commitment; the sentence underneath can afford
+     * the sitting count.
+     *
+     * Unless the sittings share one day — "today → today" is an arrow from a
+     * place to itself, and it displaced the clock time, which on a same-day
+     * split is the only fact the reader wanted.
+     */
+    if (first.day === last.day) {
+      return {
+        state: "scheduled",
+        short: at ? `${startDay} ${at}` : startDay,
+        long: `${sayMins(total)} across ${mine.length} sittings ${startDay}${at ? `, first at ${at}` : ""}.`,
+        blocks: mine,
+        day: first.day,
+        start: first.start || null,
+        mins: total,
+      };
+    }
     return {
       state: "scheduled",
       short: `${startDay} → ${day(last.day, now)}`,

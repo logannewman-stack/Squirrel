@@ -9,7 +9,7 @@
 
 import {
   getState, addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
-  addProject, setPlan, startFocus, dayKey,
+  addProject, setPlan, startFocus, dayKey, activeTasks,
 } from "./store";
 import { findFreeSlots, fmtTime, workOn } from "./agenda";
 import { distribute } from "./schedule.js";
@@ -274,7 +274,7 @@ export function runTool(name, input) {
       // Reads the live distribution rather than running a second planner —
       // see lib/schedule.js. The plan is derived, so there is nothing to
       // "apply": it is already what the calendar shows.
-      const spread = distribute(s.tasks, s.events, s.sessions, planOpts(s.settings));
+      const spread = distribute(activeTasks(s), s.events, s.sessions, planOpts(s.settings));
       setPlan(spread);
       const mine = workOn(spread.blocks, s.tasks, input.date);
       return {

@@ -86,6 +86,28 @@ const when = (task, p = plan()) => whenTask(task, p, { now: NOW });
     new RegExp(`across ${w.blocks.length} sittings`).test(w.long), w.long);
 }
 
+/* -------------------------------------------------------- same-day sittings */
+/**
+ * "today → today" was an arrow from a place to itself — a 2h task split
+ * around a lunch meeting wore it while the clock time, the only fact the
+ * reader wanted, was displaced by it.
+ */
+{
+  reset();
+  store.addEvent({ title: "Lunch", start: iso(2026, 8, 12, 12, 0), end: iso(2026, 8, 12, 13, 0) });
+  const task = store.addTask({ title: "Around lunch", estimateMins: 300, due: "2026-08-12" });
+  const w = when(task);
+  if (w.blocks.length > 1 && w.blocks[0].day === w.blocks.at(-1).day) {
+    t("sittings sharing a day never draw an arrow to themselves",
+      !/ → /.test(w.short), w.short);
+    t("  the row leads with the clock instead", /\d+:\d\d/.test(w.short), w.short);
+    t("  and the sentence counts the sittings", /across \d+ sittings/.test(w.long), w.long);
+  } else {
+    t("(fixture did not split same-day — still no self-arrow)",
+      !/(today|tomorrow|\w{3}) → \1/.test(w.short), w.short);
+  }
+}
+
 /* ---------------------------------------------------------------- won't fit */
 /**
  * The planner already computes what *would* make it fit. A row that says only

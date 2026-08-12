@@ -364,6 +364,23 @@ export function updateProject(id, patch) {
  * what happened: "changing Munich lease" is not a thing anybody would
  * recognise afterwards as the archive they want back.
  */
+/**
+ * The tasks the planner is allowed to see.
+ *
+ * Archiving a project parks its work — that is the entire meaning of the
+ * verb — but the planner reads raw tasks, so an archived project's open task
+ * was still being booked into a working day and drawn on the calendar while
+ * the project itself read "archived" one screen away. Both dispositions were
+ * defensible; showing both at once was not. Every entry point that plans now
+ * reads through this filter, so the strand a person has deliberately set
+ * aside cannot claim their Thursday. Reopening the project puts its work
+ * straight back into the plan.
+ */
+export function activeTasks(s = read()) {
+  const parked = new Set(s.projects.filter((p) => p.archived).map((p) => p.id));
+  return parked.size ? s.tasks.filter((t) => !parked.has(t.projectId)) : s.tasks;
+}
+
 export function setProjectArchived(id, archived = true) {
   const was = read().projects.find((p) => p.id === id);
   if (!was || !!was.archived === !!archived) return;

@@ -20,6 +20,7 @@
 import { store, reset, t, report } from "./harness.mjs";
 import { usage } from "../src/lib/plans.js";
 import { whenProject } from "../src/lib/when.js";
+import { distribute } from "../src/lib/schedule.js";
 
 /* -------------------------------------------------------------- the round trip */
 {
@@ -123,6 +124,36 @@ import { whenProject } from "../src/lib/when.js";
   store.setProjectArchived(p.id);
   const w = whenProject(store.getState().projects[0], store.getState().tasks, store.getState());
   t("an archived project still answers about its own work", w && w.state !== undefined, JSON.stringify(w));
+}
+
+/* --------------------------------------------- parked means out of the plan */
+/**
+ * The other half of the verb, found by an audit: the flag folded the project
+ * off the grid while the planner went on booking its open task into a working
+ * day — "archived" one screen away from two hours of Thursday spent on it.
+ * Both dispositions were defensible; showing both at once was not.
+ */
+{
+  reset();
+  const p = store.addProject({ name: "Set aside" });
+  store.addTask({ title: "Parked work", projectId: p.id, estimateMins: 120, due: "2026-12-01" });
+  store.addTask({ title: "Live work", estimateMins: 60, due: "2026-12-01" });
+
+  const before = distribute(store.activeTasks(), store.getState().events, [], { now: new Date(2026, 7, 3, 9, 0) });
+  t("before archiving, both are planned",
+    new Set(before.blocks.map((b) => b.taskId)).size === 2);
+
+  store.setProjectArchived(p.id);
+  const after = distribute(store.activeTasks(), store.getState().events, [], { now: new Date(2026, 7, 3, 9, 0) });
+  const planned = new Set(after.blocks.map((b) => b.taskId));
+  t("archiving parks the project's work out of the plan", planned.size === 1,
+    JSON.stringify(after.blocks.map((b) => b.taskId)));
+  t("  while unrelated work keeps its booking",
+    after.blocks.some((b) => store.getState().tasks.find((x) => x.id === b.taskId)?.title === "Live work"));
+
+  store.setProjectArchived(p.id, false);
+  const back = distribute(store.activeTasks(), store.getState().events, [], { now: new Date(2026, 7, 3, 9, 0) });
+  t("and reopening puts it straight back", new Set(back.blocks.map((b) => b.taskId)).size === 2);
 }
 
 report("Archive");

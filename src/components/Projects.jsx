@@ -8,6 +8,7 @@ import { addTask } from "../lib/store";
 import { hoursOf } from "../lib/hours";
 import { duration, money } from "../lib/format";
 import { whenProject } from "../lib/when";
+import { remainingMins } from "../lib/schedule";
 
 /**
  * Every project, and how each is actually going.
@@ -55,18 +56,30 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
   const rows = projects
     .map((p) => {
       const mine = tasks.filter((t) => t.projectId === p.id);
-      const open = mine.filter((t) => !t.done);
+      /**
+       * "Open" means the same thing here as on the screen this card opens:
+       * not done and not handed over. The card used to count delegated work
+       * as open while the detail called it waiting, so "7 open" opened onto
+       * "Open 6" — the same store, two arithmetic dialects.
+       */
+      const open = mine.filter((t) => !t.done && !t.delegatedTo);
+      const waiting = mine.filter((t) => !t.done && t.delegatedTo);
+      const undone = open.length + waiting.length;
       return {
         p,
         total: mine.length,
         open: open.length,
+        waiting: waiting.length,
         overdue: open.filter((t) => t.due && t.due < today).length,
         // The nearest deadline is what tells you which project is next, and it
         // was nowhere in the table.
         due: open.map((t) => t.due).filter(Boolean).sort()[0] ?? null,
-        remaining: open.reduce((n, t) => n + (t.estimateMins || 0), 0),
+        // What is genuinely left, after the sessions already logged against
+        // it — the raw estimate sum said "1h left" moments after a 25-minute
+        // sitting that Today was already crediting.
+        remaining: open.reduce((n, t) => n + remainingMins(t, sessions), 0),
         focused: sessions.filter((s) => s.projectId === p.id).reduce((a, s) => a + s.focusedMs, 0),
-        pct: mine.length ? Math.round(((mine.length - open.length) / mine.length) * 100) : 0,
+        pct: mine.length ? Math.round(((mine.length - undone) / mine.length) * 100) : 0,
       };
     })
     // Late first, then whatever is due soonest — the order somebody would
@@ -107,6 +120,7 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
   const unfiledOpen = unfiled.filter((t) => !t.done && !t.delegatedTo);
   const unfiledWaiting = unfiled.filter((t) => !t.done && t.delegatedTo);
   const unfiledNoEstimate = unfiledOpen.filter((t) => !(t.estimateMins > 0));
+  const unfiledLate = unfiledOpen.filter((t) => t.due && t.due < today).length;
 
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">
@@ -114,8 +128,12 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
         <div>
           <p className="label">
             {live.length} active
-            {live.some((r) => r.overdue > 0) && (
-              <span className="alert"> · {live.reduce((n, r) => n + r.overdue, 0)} late</span>
+            {/* Counting the unfiled pile too — the header said "4 late" while
+                Today said five, and the missing one was simply filed nowhere.
+                A number that disagrees with the next screen's number teaches
+                people to trust neither. */}
+            {(live.reduce((n, r) => n + r.overdue, 0) + unfiledLate > 0) && (
+              <span className="alert"> · {live.reduce((n, r) => n + r.overdue, 0) + unfiledLate} late</span>
             )}
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Projects</h1>
@@ -192,7 +210,10 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
                 onClick={() => onOpen(UNFILED)}
                 className="card row-hover flex h-full w-full flex-col items-start px-4 py-4 text-left"
               >
-                <span className="label">Unfiled</span>
+                <span className="flex w-full items-center justify-between">
+                  <span className="label">Unfiled</span>
+                  {unfiledLate > 0 && <span className="alert-chip">{unfiledLate} late</span>}
+                </span>
                 <span className="mt-1 text-sm font-medium">
                   {unfiledOpen.length} open
                   {unfiledWaiting.length > 0 && ` · ${unfiledWaiting.length} with someone else`}
@@ -205,7 +226,7 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
               </button>
             </li>
           )}
-          {live.map(({ p, open, overdue, focused, pct, total, due, remaining }) => (
+          {live.map(({ p, open, waiting, overdue, focused, pct, total, due, remaining }) => (
             <li key={p.id}>
               <button
                 onClick={() => onOpen(p.id)}
@@ -232,6 +253,9 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
                     <span className="num text-lg font-semibold">{open}</span>
                     <span className="ml-1 text-xs text-[var(--muted)]">open</span>
                   </span>
+                  {waiting > 0 && (
+                    <span className="num text-xs text-[var(--muted)]">{waiting} waiting</span>
+                  )}
                   {remaining > 0 && (
                     <span className="num text-xs text-[var(--muted)]">
                       {duration(remaining * 60000)} left

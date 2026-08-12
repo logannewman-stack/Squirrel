@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { findFreeSlots, fmtTime, workOn } from "../lib/agenda";
-import { dayKey, toggleTask, eventsOn } from "../lib/store";
+import { dayKey, toggleTask, updateTask, eventsOn, activeTasks } from "../lib/store";
 import { planOpts, sayMins } from "../lib/hours";
 import { projectLoad } from "../lib/schedule";
 import { whenTask } from "../lib/when";
@@ -27,6 +28,7 @@ import { Find } from "./ui";
  * to find out late.
  */
 export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearch, onOpenUnfiled }) {
+  const [projectsAll, setProjectsAll] = useState(false);
   const day = dayKey();
   const now = new Date();
   const events = eventsOn(day, state.events);
@@ -38,11 +40,25 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
   // Estimate used up, still open. See the Spent panel below for why this is
   // its own bucket rather than something the planner can decide.
   const spent = state.spent || [];
-  const unestimated = (state.tasks || []).filter(
+  // Parked work does not nag: an archived project's tasks are out of the plan
+  // (see activeTasks), so the side panels read the same filtered world.
+  const live = activeTasks(state);
+  const unestimated = live.filter(
     (t) => !t.done && !t.delegatedTo && !(t.estimateMins > 0),
   );
 
-  const free = findFreeSlots(day, state.events, {
+  /**
+   * Room the day genuinely still has: after meetings AND after the work the
+   * planner has already booked into it. Measured against meetings alone, the
+   * tile read "4h 30m left in the day" on a day the header called fully
+   * committed — the same 4h30m the "Work planned" tile beside it was counting.
+   * Two tiles double-counting the same minutes is a dashboard arguing with
+   * itself.
+   */
+  const free = findFreeSlots(day, [
+    ...state.events,
+    ...(state.blocks || []).filter((b) => b.day === day && b.start).map((b) => ({ start: b.start, end: b.end })),
+  ], {
     start: work.workStart, end: work.workEnd, breaks: work.breaks, after: now,
   }).reduce((s, x) => s + x.mins, 0);
 
@@ -65,7 +81,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
   const focusedToday = state.sessions
     .filter((s) => dayKey(new Date(s.endedAt)) === day)
     .reduce((sum, s) => sum + s.focusedMs, 0);
-  const overdue = state.tasks.filter((t) => !t.done && t.due && t.due < day);
+  const overdue = live.filter((t) => !t.done && t.due && t.due < day);
   const next = events.find((e) => new Date(e.end) > now);
 
   // What is actually on this person today, rather than only what the planner
@@ -75,10 +91,10 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
   // from the one place that exists to say what needs doing, while the tile
   // directly above it counted it.
   const plannedTasks = [...new Map(blocks.map((b) => [b.taskId, b.task])).values()];
-  const dueToday = state.tasks.filter(
+  const dueToday = live.filter(
     (t) => !t.done && !t.delegatedTo && t.due === day && !plannedTasks.some((x) => x.id === t.id),
   );
-  const waiting = state.tasks.filter((t) => !t.done && t.delegatedTo);
+  const waiting = live.filter((t) => !t.done && t.delegatedTo);
 
   // One list, in the order a person would triage it. Deduplicated, because a
   // task that is overdue *and* planned should appear once, at its worst.
@@ -379,7 +395,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
           )}
 
           {spent.length > 0 && <Spent list={spent} tasks={state.tasks} onFocus={onFocus} />}
-          {unestimated.length > 0 && <NoEstimate list={unestimated} onOpenUnfiled={onOpenUnfiled} />}
+          {unestimated.length > 0 && <NoEstimate list={unestimated} />}
 
         </section>
 
@@ -392,24 +408,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
             <div className="mb-8">
               <h2 className="label mb-3">Waiting on</h2>
               <ul className="divide-y divide-[var(--hairline)]">
-                {waiting.slice(0, 6).map((task) => (
-                  <li key={task.id} className="flex items-baseline justify-between gap-3 py-2.5">
-                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--muted)]">
-                      {task.title}
-                    </span>
-                    <span className="shrink-0 text-xs font-medium">{task.delegatedTo}</span>
-                  </li>
-                ))}
-                {waiting.length > 6 && (
-                  <li className="pt-2">
-                    <button
-                      onClick={onOpenUnfiled}
-                      className="text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline"
-                    >
-                      +{waiting.length - 6} more
-                    </button>
-                  </li>
-                )}
+                <WaitingRows waiting={waiting} />
               </ul>
             </div>
           )}
@@ -418,7 +417,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
             <div>
               <h2 className="label mb-3">Projects</h2>
               <ul className="flex flex-col gap-3">
-                {liveProjects.slice(0, 5).map(({ project, load }) => (
+                {liveProjects.slice(0, projectsAll ? liveProjects.length : 5).map(({ project, load }) => (
                   <li key={project.id} className="card px-4 py-3">
                     <p className="truncate text-sm font-medium">{project.name}</p>
                     <p className="num mt-1 text-xs text-[var(--muted)]">
@@ -439,6 +438,19 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
                     </span>
                   </li>
                 ))}
+                {/* The sixth project used to simply not exist here — a hard
+                    cap with no indication anything was missing, on a column
+                    whose job is the honest state of every live commitment. */}
+                {!projectsAll && liveProjects.length > 5 && (
+                  <li>
+                    <button
+                      onClick={() => setProjectsAll(true)}
+                      className="text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline"
+                    >
+                      +{liveProjects.length - 5} more
+                    </button>
+                  </li>
+                )}
               </ul>
             </div>
           )}
@@ -475,7 +487,10 @@ function Shortfalls({ list, tasks }) {
               <p className="num mt-1 text-xs text-[var(--muted)]">
                 {sayMins(s.needMins)} of work,{" "}
                 {s.availableMins > 0 ? `${sayMins(s.availableMins)} fits` : "none of it fits"} before{" "}
-                {s.due || "the deadline"} — <span style={{ color: "var(--alert)" }}>{sayMins(s.shortMins)} short</span>
+                {/* Store dates stay in the store. "2026-08-14" on the most
+                    prominent card of the first screen, one row above a line
+                    reading "tomorrow", is the app speaking two languages. */}
+                {s.due ? whenLabel(s.due, now) : "the deadline"} — <span style={{ color: "var(--alert)" }}>{sayMins(s.shortMins)} short</span>
               </p>
               <p className="mt-1 text-xs text-[var(--muted)]">
                 {[
@@ -484,7 +499,7 @@ function Shortfalls({ list, tasks }) {
                   s.catchUpIsPossible && s.extraPerDayMins
                     ? `${sayMins(s.extraPerDayMins)} more a day would close it`
                     : null,
-                  s.fitsBy && s.fitsBy !== s.due ? `it fits by ${s.fitsBy}` : null,
+                  s.fitsBy && s.fitsBy !== s.due ? `it fits by ${whenLabel(s.fitsBy, now)}` : null,
                   "or cut the scope",
                 ].filter(Boolean).join(", ")}.
               </p>
@@ -544,13 +559,22 @@ function Spent({ list, tasks, onFocus }) {
                 >
                   Finished
                 </button>
-                {task && onFocus && (
+                {task && (
                   <button
-                    onClick={() => onFocus(task)}
+                    /**
+                      * Grants what it says. This used to reopen the focus
+                      * timer, which changed no estimate — so the task stayed
+                      * outside the plan and the same question came back the
+                      * next morning, a loop wearing the costume of an answer.
+                      * Growing the estimate past what was spent is the actual
+                      * answer, and the planner re-books it before the panel
+                      * has closed.
+                      */
+                    onClick={() => updateTask(x.taskId, { estimateMins: x.spentMins + 30 })}
                     className="rounded border border-[var(--line)] px-2 py-1 text-[11px]
                                transition-colors hover:border-[var(--ink)]"
                   >
-                    Needs longer
+                    Needs 30m more
                   </button>
                 )}
               </span>
@@ -562,7 +586,51 @@ function Spent({ list, tasks, onFocus }) {
   );
 }
 
-function NoEstimate({ list, onOpenUnfiled }) {
+/**
+ * Delegated work, capped at six with the rest a press away — in place.
+ *
+ * The "+N more" here used to open the Unfiled screen, whose own Waiting tab
+ * read zero: all eight hidden rows were filed under projects, so the only way
+ * in led to the one place they were not. A cap's affordance has to contain
+ * the capped.
+ */
+function WaitingRows({ waiting }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? waiting : waiting.slice(0, 6);
+  return (
+    <>
+      {shown.map((task) => (
+        <li key={task.id} className="flex items-baseline justify-between gap-3 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-sm text-[var(--muted)]">
+            {task.title}
+          </span>
+          <span className="shrink-0 text-xs font-medium">{task.delegatedTo}</span>
+        </li>
+      ))}
+      {!all && waiting.length > 6 && (
+        <li className="pt-2">
+          <button
+            onClick={() => setAll(true)}
+            className="text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline"
+          >
+            +{waiting.length - 6} more
+          </button>
+        </li>
+      )}
+    </>
+  );
+}
+
+function NoEstimate({ list }) {
+  /**
+   * "+N more" expands here, in place. It used to open the Unfiled screen —
+   * a destination that contained none of the hidden rows, since work needing
+   * an estimate is usually filed under a project already. A truncation's only
+   * affordance pointing somewhere its items are not is worse than no
+   * affordance: it teaches that the door lies.
+   */
+  const [all, setAll] = useState(false);
+  const shown = all ? list : list.slice(0, 5);
   return (
     <div className="mt-5 rounded-md border border-dashed border-[var(--line)] p-4">
       <p className="label mb-1">Needs an estimate</p>
@@ -571,16 +639,16 @@ function NoEstimate({ list, onOpenUnfiled }) {
         outside the plan. Tell me how long — “the lease is about 45 minutes”.
       </p>
       <ul className="space-y-1">
-        {list.slice(0, 5).map((t) => (
+        {shown.map((t) => (
           <li key={t.id} className="flex items-baseline justify-between gap-3 text-sm">
             <span className="truncate">{t.title}</span>
-            {t.due && <span className="num shrink-0 text-xs text-[var(--muted)]">due {t.due}</span>}
+            {t.due && <span className="num shrink-0 text-xs text-[var(--muted)]">due {whenLabel(t.due)}</span>}
           </li>
         ))}
-        {list.length > 5 && (
+        {!all && list.length > 5 && (
           <li>
             <button
-              onClick={onOpenUnfiled}
+              onClick={() => setAll(true)}
               className="text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline"
             >
               +{list.length - 5} more

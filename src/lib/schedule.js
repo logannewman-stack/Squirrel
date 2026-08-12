@@ -427,7 +427,7 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     }
 
     if (left > 0) {
-      shortfalls.push(shortfallFor(task, need, left, days, events, o, capacityCache));
+      shortfalls.push(shortfallFor(task, need, left, days, events, o, capacityCache, committed));
     }
   }
 
@@ -459,23 +459,34 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
  * the first, and reporting only the gap leaves the user to do the arithmetic
  * that the planner just did and threw away.
  */
-function shortfallFor(task, need, short, days, events, o, cache) {
+function shortfallFor(task, need, short, days, events, o, cache, committed = new Map()) {
   const workdays = days.length;
   const fresh = (day) => {
     if (!cache.has(day)) cache.set(day, capacityOf(day, events, new Map(), o));
     return cache.get(day);
   };
 
-  // The first date by which the work would fit, ignoring the buffer — the
-  // answer to "so when could this be done?"
+  /**
+   * The first date by which the work would fit — the answer to "so when
+   * could this be done?"
+   *
+   * Counted against the week as it actually stands, not an empty one. The
+   * running sum used raw capacity and ignored everything the plan had just
+   * committed, so the banner contradicted itself in adjacent clauses: "none
+   * of it fits before the 15th — it fits by the 12th." Both clauses were
+   * arithmetic; only one was about this person's week. Days the deadline has
+   * already passed count for nothing either, or the promise can land before
+   * the miss it is consoling.
+   */
   let fitsBy = null;
   let running = 0;
   for (let i = 0; i <= HORIZON_DAYS; i++) {
     const d = addDays(days[0] || new Date(), i);
     if (!isWorkday(d, o)) continue;
-    running += fresh(dayKey(d));
+    const k = dayKey(d);
+    running += Math.max(0, fresh(k) - (committed.get(k) || 0));
     if (running >= need) {
-      fitsBy = dayKey(d);
+      fitsBy = k;
       break;
     }
   }

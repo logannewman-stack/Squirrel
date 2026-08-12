@@ -25,7 +25,7 @@ import { fetchUsage } from "./lib/billing";
 import {
   subscribe, getState, startFocus, pauseFocus, resumeFocus, endFocus,
   heartbeatFocus, reconcileFocus,
-  remainingOf, toggleTask, setSetting, setPlan, setPlanTier, dayKey, undo,
+  remainingOf, toggleTask, setSetting, setPlan, setPlanTier, dayKey, undo, activeTasks,
 } from "./lib/store";
 import { shortcutFor } from "./lib/keys";
 import { tap } from "./lib/native";
@@ -268,7 +268,8 @@ export default function App() {
   // for exactly that reason — changing your finish time has to re-plan the
   // week, or the panel is decoration.
   useEffect(() => {
-    const plan = distribute(state.tasks, state.events, state.sessions, planOpts(state.settings));
+    // activeTasks: an archived project's work is parked, not planned.
+    const plan = distribute(activeTasks(state), state.events, state.sessions, planOpts(state.settings));
     const same =
       JSON.stringify(plan.blocks) === JSON.stringify(state.blocks) &&
       JSON.stringify(plan.shortfalls) === JSON.stringify(state.shortfalls) &&
