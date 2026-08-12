@@ -196,4 +196,71 @@ const say = (line) => ask(line, store.getState(), { now: NOW });
   }
 }
 
+/* ------------------------------------- deadlines without the word "project" */
+/**
+ * The synthesis pass measured the natural phrasings and found the guard the
+ * first fix missed: "set the Q3 Launch deadline to Friday" — no word
+ * "project" — still routed to the task editor, which wrote the date on the
+ * fuzziest task while the project's own deadline stayed empty. The project
+ * now wins whenever it outscores every task reading, and a sentence genuinely
+ * about a task keeps beating it.
+ */
+{
+  for (const line of [
+    "set the Q3 Launch deadline to next friday",
+    "the Q3 Launch deadline is next friday",
+    "set the deadline for Q3 Launch to next friday",
+  ]) {
+    reset();
+    const q = store.addProject({ name: "Q3 Launch" });
+    store.addTask({ title: "write launch email", projectId: q.id, estimateMins: 30 });
+    say(line);
+    const s = store.getState();
+    t(`\u201c${line}\u201d sets the project`, Boolean(s.projects[0].due), JSON.stringify(s.projects[0].due));
+    t("  and no task", s.tasks.every((x) => !x.due));
+  }
+  reset();
+  const q = store.addProject({ name: "Munich lease" });
+  store.addTask({ title: "draft the lease addendum", projectId: q.id, estimateMins: 30 });
+  say("the lease addendum is due next friday");
+  const s = store.getState();
+  t("a sentence about a task still sets the task",
+    Boolean(s.tasks[0].due) && !s.projects[0].due,
+    `task ${s.tasks[0].due} project ${s.projects[0].due}`);
+}
+
+/* --------------------------------------------------------- delete by voice */
+{
+  reset();
+  store.setSetting("confirm", false);
+  store.addProject({ name: "Munich sale" });
+  store.addProject({ name: "Q3 Launch" });
+  store.addTask({ title: "commission the survey", projectId: store.getState().projects[0].id, estimateMins: 30 });
+  store.addEvent({ title: "Munich sale review", start: "2026-08-13T10:00:00", end: "2026-08-13T11:00:00" });
+
+  const out = say("delete the Munich sale project");
+  const s = store.getState();
+  t("deleting a project deletes the project", s.projects.length === 1 && s.projects[0].name === "Q3 Launch", out.text);
+  t("  its tasks go with it, said aloud", /1 task/.test(out.text) && s.tasks.length === 0, out.text);
+  t("  the calendar is untouched — this used to route THERE", s.events.length === 1);
+  t("  and the way back is offered", /undo/.test(out.text), out.text);
+}
+
+/* -------------------------------------------------------- bare-verb archive */
+{
+  reset();
+  store.addProject({ name: "Q3 Launch" });
+  say("archive Q3 Launch");
+  t("“archive Q3 Launch” works without the word project",
+    store.getState().projects[0].archived === true);
+
+  reset();
+  store.addProject({ name: "Q3 Launch" });
+  store.addTask({ title: "the lease addendum", estimateMins: 30 });
+  const b = say("archive the lease addendum");
+  t("a task name after the bare verb gets the honest miss",
+    /couldn't find that project/.test(b.text) && !store.getState().projects.some((x) => x.archived),
+    b.text);
+}
+
 report("Project verbs");

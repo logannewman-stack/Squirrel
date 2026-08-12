@@ -22,7 +22,7 @@ import {
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
   deleteTask, addProject, setMemory, setPlan, batch, undo, lastChange, getState, activeTasks,
-  updateProject, setProjectArchived,
+  updateProject, setProjectArchived, deleteProject,
 } from "../store.js";
 import { record as recordMiss, resolve as pairMiss, REASONS } from "../misses.js";
 import { interpret, hasResolver, contextFor } from "./fallback.js";
@@ -1073,6 +1073,29 @@ function answer(text, state, opts = {}) {
       });
     }
 
+    case INTENTS.DELETE_PROJECT: {
+      /**
+       * "Delete the Munich sale project" used to route to the calendar and
+       * answer "I couldn't find that on your calendar" — a project verb
+       * bouncing off the one surface it has nothing to do with. Deletion is
+       * the app's only unrecoverable verb, so the confirmation names what
+       * goes with it.
+       */
+      const named = namedProject(p.body, slots.project, state.projects);
+      if (!named) return dead("I couldn't find that project.", REASONS.NO_MATCH);
+      const count = state.tasks.filter((t) => t.projectId === named.id).length;
+      return gate(
+        `deleting \u201c${named.name}\u201d${count ? ` and its ${count} ${count === 1 ? "task" : "tasks"}` : ""} \u2014 archiving keeps the history instead`,
+        () => {
+          deleteProject(named.id);
+          return reply(
+            `\u201c${named.name}\u201d is gone${count ? `, with its ${count} ${count === 1 ? "task" : "tasks"}` : ""}. If that was the wrong call, say \u201cundo\u201d.`,
+            [{ summary: `Deleted ${named.name}` }], { entity: null },
+          );
+        },
+      );
+    }
+
     case INTENTS.PROJECT_DUE: {
       /**
        * "Set the Munich sale project deadline to Friday" was writing a due
@@ -1081,7 +1104,7 @@ function answer(text, state, opts = {}) {
        * against — stayed empty, and the reply never mentioned which of the
        * two it had touched.
        */
-      const named = namedProject(p.body, slots.project, state.projects);
+      const named = p.projectDue || namedProject(p.body, slots.project, state.projects);
       if (!named) return dead("Which project's deadline? Name it and I'll set it.", REASONS.NO_MATCH);
       if (!slots.dateOnly) {
         return named.due
@@ -1289,6 +1312,28 @@ function answer(text, state, opts = {}) {
     case INTENTS.EDIT_TASK: {
       const b = p.body.toLowerCase();
       const place = placeIn(p.body, now);
+
+      /**
+       * "Set the Q3 launch deadline to Friday" — no word "project", so it
+       * routes here, and the task resolver found the fuzziest task and wrote
+       * the date on THAT while the project's own deadline stayed empty. When
+       * the sentence carries a date and its subject resolves more strongly to
+       * a project than to any task, the project wins: measured on the natural
+       * phrasings, the scores separate cleanly (project 3.0 vs task 1.0), and
+       * a sentence genuinely about a task ("the lease addendum is due
+       * Friday") keeps beating the project (2.0 vs 1.5).
+       */
+      if (slots.dateOnly && !place) {
+        const projHit = resolveProject(slots.title || p.body, state.projects);
+        const taskHit = resolveTask(p.body, openTasks);
+        if (
+          projHit.length && isConfident(projHit) &&
+          projHit[0].score > (taskHit[0]?.score ?? 0)
+        ) {
+          p = { ...p, intent: INTENTS.PROJECT_DUE, projectDue: projHit[0].item };
+          return run();
+        }
+      }
 
       // "The Meridian call is on Zoom" is almost always a meeting, so places
       // look at the calendar first. A task can carry one too — some work has

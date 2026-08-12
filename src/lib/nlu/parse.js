@@ -39,6 +39,7 @@ export const INTENTS = {
   ARCHIVE_PROJECT: "archive_project",
   REOPEN_PROJECT: "reopen_project",
   PROJECT_DUE: "project_due",
+  DELETE_PROJECT: "delete_project",
   FILE_TASK: "file_task",
   HELP: "help",
   UNKNOWN: "unknown",
@@ -1161,8 +1162,13 @@ const RULES = [
    */
   [INTENTS.WHICH_PROJECT, /\b(?:which|what) project\b/],
   [INTENTS.RENAME_PROJECT, /\brenam\w+[^.]*\bproject\b|\bproject\b[^.]*\brenam\w+/],
-  [INTENTS.ARCHIVE_PROJECT, /\b(?:archiv\w+|shelve|mothball)\b[^.]*\bproject\b|\bproject\b[^.]*\b(?:archiv\w+|shelved|mothball\w*)\b/],
-  [INTENTS.REOPEN_PROJECT, /\b(?:re-?open\w*|un-?archiv\w+)\b[^.]*\bproject\b|\bproject\b[^.]*\b(?:re-?open\w*|un-?archiv\w+)\b/],
+  [INTENTS.DELETE_PROJECT, /\b(?:delete|remove|get rid of|scrap|kill)\b[^.]*\bproject\b/],
+  // The bare openers ("archive Q3 launch") route here too; the handler
+  // resolves the trailing phrase against real projects and answers honestly
+  // when it is not one — rules cannot see the store, so the guard lives
+  // where the store does.
+  [INTENTS.ARCHIVE_PROJECT, /\b(?:archiv\w+|shelve|mothball)\b[^.]*\bproject\b|\bproject\b[^.]*\b(?:archiv\w+|shelved|mothball\w*)\b|^\s*(?:please\s+)?archive\s+\S/i],
+  [INTENTS.REOPEN_PROJECT, /\b(?:re-?open\w*|un-?archiv\w+)\b[^.]*\bproject\b|\bproject\b[^.]*\b(?:re-?open\w*|un-?archiv\w+)\b|^\s*(?:please\s+)?un-?archive\s+\S/i],
   [INTENTS.PROJECT_DUE, /\bproject\b[^.]*\b(?:deadline|due)\b|\b(?:deadline|due)\b[^.]*\bproject\b/],
   [INTENTS.EDIT_TASK, isTaskEdit],
   // Two meetings changing places. Ahead of MOVE because "swap X and Y" has no

@@ -509,7 +509,11 @@ function shortfallFor(task, need, short, days, events, o, cache, committed = new
     // Whether that extra is a thing a person could actually do. "Ten more
     // hours a day" is arithmetic, not advice, and offering it as an option
     // makes the rest of the sentence untrustworthy.
-    catchUpIsPossible: perDay != null && perDay <= o.dailyCapacity,
+    // And never offered for a deadline already behind us: "3m more a day
+    // would close it" about last Tuesday is arithmetic wearing a straight
+    // face. fitsBy stays — a landing date is still real advice.
+    catchUpIsPossible: perDay != null && perDay <= o.dailyCapacity &&
+      (!task.due || task.due >= dayKey(o.from ?? new Date())),
     // The date it *would* fit by, if the deadline could move.
     fitsBy,
   };
@@ -582,7 +586,11 @@ const iso = (d) =>
 export function projectLoad(project, tasks, sessions = [], events = [], opts = {}) {
   const now = opts.now || new Date();
   const mine = tasks.filter((t) => t.projectId === project.id);
-  const open = mine.filter((t) => !t.done);
+  // Open means not done AND not handed over — the same definition the cards,
+  // the detail screen and the planner use. This was the last holdout, which
+  // made Today's project column the sole surface still counting Dana's work
+  // as yours.
+  const open = mine.filter((t) => !t.done && !t.delegatedTo);
 
   const estimated = open.filter((t) => t.estimateMins > 0);
   const avg = estimated.length

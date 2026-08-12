@@ -759,7 +759,7 @@ language sql immutable set search_path = public as $$
     when resource = 'tasks'    then case when p = 'free' then 15   else null end
     when resource = 'chats'    then case p
                                       when 'free'   then 0
-                                      when 'plus'   then 200
+                                      when 'plus'   then 1000
                                       when 'pro'    then 1000
                                       when 'studio' then 3000
                                     end

@@ -28,7 +28,14 @@ fail=0
 for t in "$HERE"/[0-9][0-9]_*.sql; do
   case "$(basename "$t")" in 00_*) continue;; esac
   echo "── $(basename "$t")"
-  if ! run -f "$t" 2>&1 | grep -vE '^\s*$'; then fail=1; fi
+  # The assertions report by printing PASS/FAIL notices rather than raising,
+  # so the exit status alone says nothing. The old pipeline took grep's exit
+  # status — zero whenever ANY line printed — which meant a screen full of
+  # FAIL lines walked out under "all checks passed". A test suite that cannot
+  # fail is a costume.
+  out=$(run -f "$t" 2>&1) || fail=1
+  printf '%s\n' "$out"
+  if printf '%s' "$out" | grep -q 'FAIL'; then fail=1; fi
 done
 
 echo
