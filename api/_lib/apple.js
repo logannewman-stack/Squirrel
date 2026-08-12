@@ -147,7 +147,16 @@ export function entitlementFrom(tx, { products = {}, now = Date.now() } = {}) {
     : Boolean((expires && now < expires) || (grace && now < grace));
 
   return {
-    plan: entitled ? planForProduct(tx.productId, products) ?? "pro" : "free",
+    /**
+     * An unknown product grants nothing — never a default upgrade. This read
+     * `?? "pro"`, so any Apple-signed subscription whose productId this app
+     * did not recognise (a subscription to some *other* app on the same Apple
+     * account) mapped straight to the paid tier. With verify.js not checking
+     * the bundle either, that was a free Pro for anyone holding any App Store
+     * receipt. An entitled transaction we cannot place is treated as free;
+     * verify.js separately rejects a foreign bundle before we get here.
+     */
+    plan: entitled ? (planForProduct(tx.productId, products) ?? "free") : "free",
     // The subscription's identity across every renewal it will ever have.
     originalTransactionId: tx.originalTransactionId ?? null,
     transactionId: tx.transactionId ?? null,

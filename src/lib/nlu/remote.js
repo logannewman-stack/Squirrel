@@ -74,7 +74,16 @@ async function translate(text, context) {
  * worst this can do is cost a round trip and land back on the answer the rules
  * would have given anyway.
  */
-export const enableRemote = () => setResolver(translate);
+export const enableRemote = () => {
+  // Clear the "no key configured" latch every time the boost is enabled. A
+  // 501 earlier in the session — before a key was added, or from a
+  // since-redeployed backend — must not keep the fallback dark for the life
+  // of the tab. Toggling Boost off and on is precisely how someone says "try
+  // again", and the 501 path re-latches in a single round trip if the
+  // deployment genuinely still has no key.
+  unavailable = false;
+  setResolver(translate);
+};
 
 export const disableRemote = () => clearResolver();
 

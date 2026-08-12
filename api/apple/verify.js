@@ -32,6 +32,20 @@ export default async function handler(req, res) {
   const tx = verifyJws(signedTransaction);
   if (!tx) return json(res, 400, { error: "bad_signature" });
 
+  /**
+   * A valid Apple signature proves the receipt is real — not that it is *this
+   * app's* receipt. Every App Store subscription is signed by the same Apple
+   * chain, so without a bundle check a genuine receipt from another app on
+   * the customer's account would verify here and (with the old default-to-pro)
+   * grant Pro. Pin it to our bundle. APPLE_BUNDLE_ID unset skips the check
+   * with the receipt still verified — set it in production so a foreign
+   * bundle is refused outright.
+   */
+  const bundle = process.env.APPLE_BUNDLE_ID?.trim();
+  if (bundle && tx.bundleId && tx.bundleId !== bundle) {
+    return json(res, 400, { error: "wrong_bundle" });
+  }
+
   // Sandbox transactions must not grant a paid plan in production, or every
   // TestFlight build is a free subscription generator.
   const wantSandbox = process.env.APPLE_ALLOW_SANDBOX === "true";

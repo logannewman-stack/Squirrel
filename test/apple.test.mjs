@@ -114,11 +114,16 @@ const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
   t("a refund revokes immediately", refunded.plan === "free", refunded.plan);
   t("and is marked as one", refunded.revoked === true);
 
+  // A subscription this app doesn't recognise grants nothing. It used to
+  // default to "pro" — which, with no bundle check in verify.js, meant any
+  // Apple-signed receipt from any *other* app was a free Pro. An unplaceable
+  // product is treated as free; verify.js also pins the bundle before we get
+  // here.
   const unknown = entitlementFrom(
-    { productId: "com.squirrel.mystery", expiresDate: NOW + 86400000, originalTransactionId: "o1" },
+    { productId: "com.someone-else.app", expiresDate: NOW + 86400000, originalTransactionId: "o1" },
     { products: PRODUCTS, now: NOW });
-  t("an unrecognised product falls back rather than granting nothing",
-    unknown.plan === "pro", unknown.plan);
+  t("an unrecognised product grants no plan — never a default upgrade",
+    unknown.plan === "free", unknown.plan);
 
   t("nothing at all is null, not an exception", entitlementFrom(null) === null);
 }

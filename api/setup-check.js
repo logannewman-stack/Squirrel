@@ -38,7 +38,10 @@ export default async function handler(req, res) {
       id: "stripe",
       name: "Stripe — web subscriptions",
       required: false,
-      ready: all("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO"),
+      // Studio is a real paid tier — checkout.js and the webhook both need its
+      // price id, so "ready" must require it too, or Stripe reads green and
+      // every Studio upgrade 500s at checkout for a price that was never set.
+      ready: all("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO", "STRIPE_PRICE_STUDIO"),
       vars: {
         STRIPE_SECRET_KEY: has("STRIPE_SECRET_KEY"),
         STRIPE_WEBHOOK_SECRET: has("STRIPE_WEBHOOK_SECRET"),

@@ -38,6 +38,13 @@ const MAX_TOKENS = 120;
 /** A sentence, not an essay. Longer than this is not somebody talking to a calendar. */
 const MAX_INPUT = 500;
 
+/**
+ * The context is ten events and ten tasks — see contextFor in nlu/fallback.js.
+ * 8 kB is many times that and still trivial to bill. Past it, the payload is
+ * dropped rather than charged for.
+ */
+const MAX_CONTEXT = 8000;
+
 /** The literal the model returns when a request cannot be expressed at all. */
 const NONE = "NONE";
 
@@ -170,6 +177,18 @@ export default async function handler(req, res) {
   if (!request) return json(res, 400, { error: "no text" });
   if (request.length > MAX_INPUT) return json(res, 413, { say: null });
 
+  /**
+   * The meter counts requests, not tokens, so an unbounded context would let
+   * one claimed chat carry a megabyte into the prompt and bill hundreds of
+   * thousands of input tokens against a flat plan. The context the client is
+   * meant to send is ten events and ten tasks — a couple of kB. Anything past
+   * a generous ceiling is not that, so it is dropped rather than paid for:
+   * the model still gets the sentence, just without a payload nobody sent on
+   * purpose. Bounded before the claim, so an oversized body costs nothing.
+   */
+  const contextJson = JSON.stringify(context ?? {});
+  const safeContext = contextJson.length > MAX_CONTEXT ? "{}" : contextJson;
+
   // Metered against the account's plan, and locked at the row so two requests
   // in flight cannot both pass the check. This is the only per-message cost in
   // the product, so it is the one thing that must not be uncapped.
@@ -214,7 +233,7 @@ export default async function handler(req, res) {
       messages: [
         {
           role: "user",
-          content: `Request: ${request}\nContext: ${JSON.stringify(context ?? {})}\nOutput:`,
+          content: `Request: ${request}\nContext: ${safeContext}\nOutput:`,
         },
       ],
     });

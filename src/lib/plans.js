@@ -19,7 +19,21 @@ export const PLANS = {
     price: 0,
     projects: 2,
     tasks: 15,
-    chats: 25,
+    /**
+     * Zero model-backed chats — and this number is the one the database
+     * enforces (plan_limit('free','chats') in migration 0009). It read 25
+     * here while the server allowed 0, so the in-app meter promised a "free
+     * taste" that every request 402'd on: the client lied to the free user
+     * on their first miss. The two now agree.
+     *
+     * This is deliberately the cost-safe default: the whole planner — the
+     * auto-scheduler, the deterministic assistant, everything on-device —
+     * costs the owner nothing, and the paid model boost is the only thing
+     * behind the wall. To offer a metered free taste later, raise this AND
+     * plan_limit('free','chats') to the same number; the meter is already
+     * built to count and warn.
+     */
+    chats: 0,
     tagline: "Get organized",
     blurb: "The whole planner on one device, capped at two projects.",
     features: [

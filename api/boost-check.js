@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { requireUser, json } from "./_lib/db.js";
+import { asService, requireUser, json } from "./_lib/db.js";
 
 /**
  * Does the boost actually work?
@@ -80,6 +80,30 @@ export default async function handler(req, res) {
     });
   }
 
+  /**
+   * A real model call costs money, so it is metered exactly like /api/interpret
+   * — through the same atomic claim. Without this, "signed in" was treated as
+   * "is the operator", and any free account (0 chat allowance, so /interpret
+   * always 402s them) could script this endpoint for unbounded spend against
+   * the shared key, degrading paying users to deterministic-only when the
+   * shared rate-limit bucket drained. A boost test is one chat; a free tier
+   * with no allowance cannot run it, which is correct — the boost is a paid
+   * feature and testing it is the operator's own paid account doing so.
+   */
+  const db = asService();
+  const { data: allowed, error: claimErr } = await db.rpc("claim_assistant_chat", {
+    uid: auth.user.id,
+  });
+  if (claimErr) return json(res, 200, { ok: false, configured: true, model: MODEL, detail: "Could not reach the usage meter — try again." });
+  if (!allowed) {
+    return json(res, 200, {
+      ok: false,
+      configured: true,
+      model: MODEL,
+      detail: "This account has no assistant allowance left this month, so the test can't run. The boost itself is fine — it's the meter, not the key.",
+    });
+  }
+
   const started = Date.now();
   try {
     const client = new Anthropic({ apiKey: key });
@@ -87,6 +111,13 @@ export default async function handler(req, res) {
       model: MODEL,
       max_tokens: 16,
       messages: [{ role: "user", content: "Reply with the single word: ready" }],
+    });
+    // Count the tokens the test really spent, same as the interpret path.
+    const u = message.usage || {};
+    await db.rpc("record_assistant_tokens", {
+      uid: auth.user.id,
+      tin: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+      tout: u.output_tokens ?? 0,
     });
     const said = message.content?.find((c) => c.type === "text")?.text?.trim() ?? "";
     return json(res, 200, {
