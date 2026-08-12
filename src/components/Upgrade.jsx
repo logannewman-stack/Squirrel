@@ -31,10 +31,17 @@ export default function Upgrade({ open, onClose, reason, plan = "free", email, o
     try {
       await startCheckout(id);
     } catch (e) {
+      /**
+       * "Failed to fetch" is a browser talking to a developer. The person who
+       * pressed Pay while offline needs the two facts that matter: nothing was
+       * charged, and the rest of the app has not stopped working.
+       */
       setError(
         e.message === "not signed in"
           ? "Create an account first — a subscription needs somewhere to live."
-          : e.message,
+          : /fetch|network/i.test(e.message || "")
+            ? "You're offline, so the checkout can't open — nothing was charged. Everything else keeps working; try again when you're connected."
+            : e.message,
       );
       setBusy(null);
     }

@@ -207,8 +207,23 @@ export default function App() {
     let live = true;
     const load = () =>
       fetchUsage()
-        .then((u) => { if (live) setPlanTier(u?.plan ?? "free"); })
-        .catch(() => { if (live) setPlanTier("free"); });
+        .then((u) => {
+          // Only an actual answer changes the tier. A response with no plan in
+          // it is a server mid-deploy, not a customer mid-cancel.
+          if (live && u?.plan) setPlanTier(u.plan);
+        })
+        /**
+         * A failed fetch keeps the cached tier — it must never downgrade.
+         *
+         * This catch used to write "free", which turned every network wobble
+         * into a repossession: a paying subscriber on a plane was locked out
+         * of creating projects and shown an upgrade screen for the plan they
+         * already pay for, in an app whose promise is that it works offline.
+         * The tier is cached in the store precisely so the last real answer
+         * outlives the connection; the server stays the only thing that can
+         * genuinely revoke it.
+         */
+        .catch(() => {});
     load();
 
     // Coming back from a checkout that happened somewhere else.

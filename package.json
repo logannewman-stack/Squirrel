@@ -11,7 +11,7 @@
     "test:e2e": "node test/ensure-server.mjs && node test/onboarding.e2e.mjs && node test/theme.e2e.mjs && node test/settings.e2e.mjs && node test/settings-actions.e2e.mjs && node test/keyboard.e2e.mjs && node test/unfiled.e2e.mjs && node test/chain.e2e.mjs && node test/purpose.e2e.mjs && node test/assistant.e2e.mjs && node test/voice.e2e.mjs && node test/calendar.e2e.mjs && node test/siri.e2e.mjs && node test/upgrade.e2e.mjs",
     "test:schema": "supabase/tests/run.sh",
     "schema:bundle": "node scripts/bundle-schema.mjs",
-    "test:build": "vite build && node test/build.e2e.mjs"
+    "test:build": "vite build && node test/build.e2e.mjs && node test/offline.e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

@@ -187,7 +187,9 @@ export default function Settings({ state, onBack, onLegal, onUpgrade, onKeyboard
         {canSync && (
           <Group
             header="Boost"
-            footer="When she can't parse something, that one message is sent to be reworded and then run through the ordinary path — same confirmation, same undo. Messages she already understands never leave the device."
+/* The whole truth: the rewording request carries context, and a privacy
+   sentence that undersells what leaves the device is worse than none. */
+            footer="When she can't parse something, that message is sent to be reworded — along with the names of your next few events and open tasks, which is what makes the rewording accurate. Then it runs through the ordinary path: same confirmation, same undo. Messages she already understands never leave the device."
           >
             <SwitchRow
               label="Give her a boost when she gets stuck"
