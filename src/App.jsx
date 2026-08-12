@@ -559,7 +559,7 @@ export default function App() {
             // A little room at the bottom so the last row clears the raised
             // Squirrel button rather than tucking under it. Full-height views
             // manage their own scroll.
-            style={fullHeight ? undefined : { paddingBottom: "1.75rem" }}
+            style={fullHeight ? undefined : { paddingBottom: "3.25rem" }}
           >
             {body}
           </div>

@@ -96,7 +96,9 @@ export default function Welcome({ onDone }) {
   }
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[1.05fr_1fr]">
+    /* sq-safe-top: the first screen a new iOS user ever sees was the one
+       screen without a safe-area hook, so the wordmark sat under the notch. */
+    <div className="sq-safe-top min-h-dvh lg:grid lg:grid-cols-[1.05fr_1fr]">
       {/* ---------------------------------------------------------- the pitch */}
       <section
         className="relative flex flex-col justify-between overflow-hidden bg-[var(--brand)]

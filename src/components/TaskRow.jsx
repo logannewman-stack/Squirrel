@@ -46,11 +46,18 @@ export default function TaskRow({ task, project, when, onToggle, onFocus, onDele
 
   return (
     <li className="group relative flex items-center gap-3 py-2.5">
-      {note}
+      {/**
+        * Where the badge lives depends on what else is visible. On desktop the
+        * row's buttons only appear under the pointer, so the top-right corner
+        * is free and the badge floats there. On touch the buttons are always
+        * shown (see sq-hover-reveal), and the floated badge sat exactly on top
+        * of the Focus button — so there it joins the meta line instead.
+        */}
+      {note && <span className="pointer-events-none absolute right-0 top-3 hidden sm:block">{note}</span>}
       <button
         onClick={onToggle}
         aria-label={task.done ? "Mark not done" : "Mark done"}
-        className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[5px] border transition-colors ${
+        className={`sq-hit grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[5px] border transition-colors ${
           task.done ? "border-[var(--ink)] bg-[var(--ink)]" : "border-[var(--line)] hover:border-[var(--ink)]"
         }`}
       >
@@ -71,6 +78,7 @@ export default function TaskRow({ task, project, when, onToggle, onFocus, onDele
           {task.title}
         </p>
         <p className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-[var(--faint)]">
+          {note && <span className="sm:hidden">{note}</span>}
           {showProject && project && <span className="truncate">{project.name}</span>}
           {/* "120m" was the app's own arithmetic read back at somebody. Every
               other surface says "2h", and a row is the last place to make a

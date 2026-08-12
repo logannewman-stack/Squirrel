@@ -185,17 +185,21 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
        between them is canvas and the space inside them belongs to something. */
     <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col px-5 py-7 sm:px-6 sm:py-8">
       <header className="mb-6 flex items-end justify-between gap-4">
-        <div>
-          <p className="label">
+        <div className="min-w-0">
+          {/* One line each, whatever the width: the date truncates before it
+              wraps, and a two-word button never breaks mid-word. "WEDNESDAY,
+              AUGUST / 12" over two lines read like a layout accident on the
+              first screen of every phone morning. */}
+          <p className="label truncate">
             {now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Today</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Find onOpen={onSearch} />
           <button
             onClick={onNewEvent}
-            className="rounded-md border border-[var(--line)] px-3.5 py-2 text-xs
+            className="whitespace-nowrap rounded-md border border-[var(--line)] px-3.5 py-2 text-xs
                        transition-colors hover:border-[var(--ink)]"
           >
             New event
@@ -248,8 +252,12 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
           the working day is over — and once. */}
       {shouldReview(state, now) && <Review state={state} onDone={() => {}} />}
 
-      <div className="grid flex-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-[1.15fr_1fr_0.8fr]">
-        <section className="card flex flex-col px-5 py-4">
+      {/* min-w-0 on every column: a grid item's default min-width is `auto`,
+          which lets one long task title push the track — and the whole phone
+          screen — 216px past the right edge. The truncation inside the rows
+          only works once the column itself is allowed to shrink. */}
+      <div className="grid min-w-0 flex-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-[1.15fr_1fr_0.8fr]">
+        <section className="card flex min-w-0 flex-col px-5 py-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="label">The day</h2>
             {committed.length > 0 && (
@@ -344,7 +352,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
           )}
         </section>
 
-        <section className="card flex flex-col px-5 py-4">
+        <section className="card flex min-w-0 flex-col px-5 py-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="label">On your plate</h2>
             {focusedToday > 0 && (
@@ -382,7 +390,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
                      one reads the same as the one merely planned. */
                   note={why !== "planned" && (
                     <span
-                      className={`absolute right-0 top-3 text-[10px] font-semibold uppercase tracking-wider ${
+                      className={`text-[10px] font-semibold uppercase tracking-wider ${
                         why === "overdue" ? "alert" : "text-[var(--faint)]"
                       }`}
                     >
@@ -403,7 +411,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
             this hour: work that is somebody else's move, and how each project
             is actually going. Both were visible nowhere on the screen people
             open every morning. */}
-        <section className="card flex flex-col px-5 py-4 lg:col-span-2 xl:col-span-1">
+        <section className="card flex min-w-0 flex-col px-5 py-4 lg:col-span-2 xl:col-span-1">
           {waiting.length > 0 && (
             <div className="mb-8">
               <h2 className="label mb-3">Waiting on</h2>

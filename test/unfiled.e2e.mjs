@@ -110,19 +110,26 @@ await p.waitForTimeout(600);
 
 /* --------------------------------------------------- the rows that led nowhere */
 /**
- * "+6 more" was a plain list item: a label naming a number of things the screen
- * was refusing to show, with nothing to press. It is the way in now.
+ * "+6 more" was a plain list item: a label naming a number of things the
+ * screen was refusing to show, with nothing to press. Its second draft made
+ * it a door to the Unfiled screen — which a later audit caught leading to the
+ * wrong room whenever the hidden rows were filed under projects, since a cap
+ * hides by *count*, not by filedness. So it expands in place now: wherever the
+ * hidden rows live, pressing the cap shows exactly them.
  */
 await p.getByRole("button", { name: "Today", exact: true }).first().click();
 await p.waitForTimeout(700);
 {
   const today = await p.locator("body").innerText();
   t("Today still caps its waiting list", /\+\d+ more/.test(today), today.match(/\+\d+ more/)?.[0]);
+  t("  hiding the eighth delegate", !/Delegated 8/.test(today));
 
   await p.getByRole("button", { name: /^\+\d+ more$/ }).first().click();
   await p.waitForTimeout(700);
-  t("  and the cap is now a door rather than a label",
-    /Work with no project on it/.test(await p.locator("body").innerText()));
+  const opened = await p.locator("body").innerText();
+  t("  and pressing it shows the hidden rows themselves, in place",
+    /Delegated 8/.test(opened), opened.match(/Delegated \d/g)?.join(" "));
+  t("  every one of them", /Delegated 7/.test(opened) && /Waiting on legal/.test(opened));
 }
 
 /* ------------------------------------------------------- and it can be emptied */
@@ -131,6 +138,10 @@ await p.waitForTimeout(700);
  * here has to remove it from here.
  */
 {
+  await p.getByRole("button", { name: "Projects", exact: true }).first().click();
+  await p.waitForTimeout(500);
+  await p.getByRole("button", { name: /unfiled/i }).first().click();
+  await p.waitForTimeout(600);
   const before = await p.evaluate(async () =>
     (await import("/src/lib/store.js")).getState().tasks.filter((x) => !x.projectId).length);
   await p.evaluate(async () => {

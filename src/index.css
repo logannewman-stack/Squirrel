@@ -507,3 +507,13 @@ input[type="date"], input[type="time"] { color-scheme: light; }
 @media (hover: none) {
   .sq-hover-reveal { opacity: 1; }
 }
+
+/**
+ * A finger-sized target on a control drawn small.
+ *
+ * The task checkbox is 18px because 44px of ink would shout; but 18px of
+ * *target* on glass is a miss half the time. The pseudo-element grows the
+ * touchable area to Apple's 44px floor without growing the drawing.
+ */
+.sq-hit { position: relative; }
+.sq-hit::after { content: ""; position: absolute; inset: -13px; }

@@ -131,6 +131,7 @@ export default function Calendar({ state, onNewEvent, onOpenEvent, onOpenProject
             now={now}
             single={scale === "day"}
             onOpenEvent={onOpenEvent}
+            onOpenProject={onOpenProject}
           />
         ) : scale === "month" ? (
           <MonthGrid
@@ -202,7 +203,7 @@ const Arrow = ({ dir, onClick, scale }) => (
   <button
     onClick={onClick}
     aria-label={`${dir === "prev" ? "Previous" : "Next"} ${scale}`}
-    className="rounded px-2 py-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--ink)]"
+    className="sq-hit rounded px-2 py-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--ink)]"
   >
     <svg viewBox="0 0 16 16" className="h-4 w-4 fill-none stroke-current stroke-[1.7]">
       <path d={dir === "prev" ? "M10 3L5 8l5 5" : "M6 3l5 5-5 5"} strokeLinecap="round" strokeLinejoin="round" />
@@ -461,7 +462,7 @@ function relativeDay(d, now) {
  * flight or an 8pm dinner simply was not on the calendar — a meeting hidden by
  * the view is worse than no view.
  */
-function TimeGrid({ days, state, hours, now, single, onOpenEvent }) {
+function TimeGrid({ days, state, hours, now, single, onOpenEvent, onOpenProject }) {
   const keys = days.map(dayKey);
   const events = state.events.filter((e) => keys.includes(dayKey(new Date(e.start))));
   const blocks = (state.blocks || []).filter((b) => keys.includes(b.day) && b.start);
@@ -482,7 +483,7 @@ function TimeGrid({ days, state, hours, now, single, onOpenEvent }) {
   const cols = single ? "grid-cols-[52px_1fr]" : "grid-cols-[52px_repeat(7,minmax(0,1fr))]";
 
   return (
-    <div className={single ? "mx-auto max-w-3xl" : "min-w-[760px]"}>
+    <div className={single ? "mx-auto max-w-3xl" : "sm:min-w-[760px]"}>
       <div className={`sticky top-0 z-20 grid ${cols} border-b border-[var(--line)] bg-[var(--paper)]`}>
         <div />
         {days.map((d) => {
@@ -555,19 +556,29 @@ function TimeGrid({ days, state, hours, now, single, onOpenEvent }) {
                 const s = new Date(b.start);
                 const en = new Date(b.end);
                 const task = state.tasks.find((t) => t.id === b.taskId);
+                const project = state.projects.find((x) => x.id === task?.projectId);
                 return (
-                  <div
+                  /**
+                   * A button, like its agenda twin. These were inert divs with
+                   * the title in a hover tooltip — on touch that is a block
+                   * which cannot be pressed, whose name cannot be read: time
+                   * visibly spoken for by nothing sayable. It opens the
+                   * project the hour belongs to.
+                   */
+                  <button
                     key={`${b.taskId}-${b.start}`}
+                    onClick={() => onOpenProject?.(project?.id ?? UNFILED)}
                     title={`${task?.title || "Work"} · ${sayMins(b.mins)}`}
                     style={{ top: y(s), height: Math.max(6, y(en) - y(s) - 2) }}
-                    className="pointer-events-none absolute inset-x-1 overflow-hidden rounded border border-dashed
-                               border-[var(--muted)] px-1.5 text-[11px] leading-tight text-[var(--muted)]"
+                    className="absolute inset-x-1 overflow-hidden rounded border border-dashed
+                               border-[var(--muted)] px-1.5 text-left text-[11px] leading-tight text-[var(--muted)]
+                               transition-colors hover:border-[var(--ink)] hover:text-[var(--ink)]"
                   >
                     {/* Under twenty minutes there is no room for a name without
                         it colliding with the block below. The band still shows
                         the time is spoken for; the title lives in the tooltip. */}
                     {b.mins >= 20 && <span className="block truncate py-0.5">{task?.title || "Focus"}</span>}
-                  </div>
+                  </button>
                 );
               })}
 

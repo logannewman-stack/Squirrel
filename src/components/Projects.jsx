@@ -200,7 +200,7 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
             : "No projects yet. A project groups work — a deal, a launch, a function."}
         </p>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {/* Deliberately first and deliberately plain. It is a holding pen
               rather than an achievement, and the point of showing it is that
               somebody notices the number and empties it. */}
@@ -227,7 +227,7 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
             </li>
           )}
           {live.map(({ p, open, waiting, overdue, focused, pct, total, due, remaining }) => (
-            <li key={p.id}>
+            <li key={p.id} className="min-w-0">
               <button
                 onClick={() => onOpen(p.id)}
                 className="card flex h-full w-full flex-col px-5 py-4 text-left transition-colors hover:border-[var(--ink)]"
