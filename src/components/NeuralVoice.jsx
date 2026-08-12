@@ -158,7 +158,12 @@ export default function NeuralVoice({ state, voice, onChange, onUpgrade }) {
       </p>
       {status.state === "failed" && (
         <p className="mt-2 text-xs text-[var(--alert)]">
-          {status.error} The device voice is still working — nothing has changed.
+          {/* "Failed to fetch" is a browser talking to a developer; the person
+              needs the situation, not the exception. */}
+          {/fetch|network/i.test(status.error || "")
+            ? "The download needs a connection and couldn't get one."
+            : status.error}{" "}
+          The device voice is still working — nothing has changed.
         </p>
       )}
       <Button variant="primary" size="sm" className="mt-3" onClick={() => download(DEFAULT_NEURAL_VOICE)}>

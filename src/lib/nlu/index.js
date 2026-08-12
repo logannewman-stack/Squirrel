@@ -1753,9 +1753,31 @@ function answer(text, state, opts = {}) {
     }
 
     case INTENTS.CREATE_TASK: {
-      const title = slots.title;
+      let title = slots.title;
       if (!title) return needs("What's the task?");
       const projectHit = resolveProject(p.text, state.projects);
+      /**
+       * The filing phrase is not part of the name. "add a task to the Munich
+       * lease project to chase the notary" filed correctly and then created a
+       * task literally titled "Munich lease project to chase the notary" —
+       * the instruction embalmed in the record it created. Only the filing
+       * SHAPE is cut (to/in/under <name> project), so a title that genuinely
+       * contains the project's name — "chase the Munich lease notary" —
+       * keeps it.
+       */
+      if (projectHit.length && isConfident(projectHit)) {
+        const esc = projectHit[0].item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        // Two shapes, one rule: a preposition OR the word "project" marks a
+        // filing phrase; a bare mid-sentence mention marks a name in use.
+        const cut = title
+          .replace(new RegExp(`(?:^|\\s)(?:to|in|under|into|for)\\s+(?:the\\s+)?${esc}(?:\\s+project)?(?:\\s+to)?(?=\\s|$)`, "i"), " ")
+          .replace(new RegExp(`(?:^|\\s)(?:the\\s+)?${esc}\\s+project(?:\\s+to)?(?=\\s|$)`, "i"), " ")
+          .replace(/\s{2,}/g, " ")
+          .trim();
+        if (cut && cut.toLowerCase() !== "project") {
+          title = cut[0].toUpperCase() + cut.slice(1);
+        }
+      }
       const due = slots.dateOnly || (slots.hadDate ? null : topicDay(memory, now));
       const bits = [];
       if (due) bits.push(`due ${describe(atLocal(due, 9), now).split(" at ")[0]}`);

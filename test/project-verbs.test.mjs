@@ -171,4 +171,29 @@ const say = (line) => ask(line, store.getState(), { now: NOW });
   t("and asking reads it back", /due/.test(q.text) && !/no deadline/.test(q.text), q.text);
 }
 
+/* ------------------------------------------------- filing words stay out of names */
+/**
+ * "add a task to the Munich lease project to chase the notary" filed
+ * correctly and then created a task literally titled "Munich lease project to
+ * chase the notary" — the instruction embalmed in the record it created. Only
+ * the filing SHAPE is cut; a title that genuinely contains the project's name
+ * keeps it.
+ */
+{
+  const cases = [
+    ["add a task to the Munich lease project to chase the notary", "Chase the notary"],
+    ["add a task to sign the deed under Munich lease", "Sign the deed"],
+    ["add chase the Munich lease notary, 30 minutes", "Chase the Munich lease notary"],
+  ];
+  for (const [line, want] of cases) {
+    reset();
+    store.addProject({ name: "Munich lease" });
+    say(line);
+    const made = store.getState().tasks[0];
+    t(`\u201c${line.slice(0, 44)}\u2026\u201d names it \u201c${want}\u201d`,
+      made?.title === want, made?.title);
+    t("  and files it", Boolean(made?.projectId));
+  }
+}
+
 report("Project verbs");
