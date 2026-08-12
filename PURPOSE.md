@@ -129,6 +129,12 @@ Three rules deepen the routing itself (`lib/schedule.js`):
   pin in the past falls back to the ordinary rules rather than vanishing,
   and an overloaded pin is reported as a shortfall, not spilled.
 
+And the advice acts. When work doesn't fit, the planner's own arithmetic —
+"it fits by Aug 19" — is a button, not homework: one tap on Today's
+shortfall banner or on the acorn's card moves the deadline to the date it
+fits, the plan reflows, and undo covers the regret. The week dock's warning
+walks straight to Today's details. One plan, many doors, every door open.
+
 The everyday promise this adds up to: open the app, land on Today, and the
 day is already built — from what you put in, how long it takes, and when
 it's due.

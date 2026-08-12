@@ -38,7 +38,7 @@ import { Button } from "./ui";
  * React in them — the tree is testable arithmetic, and this component is
  * only the hand holding it.
  */
-export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
+export default function Purpose({ state, onOpenProject, onStart, onFocus, onToday }) {
   const wrap = useRef(null);
   const canvas = useRef(null);
   const [selection, setSelection] = useState(null);
@@ -601,7 +601,18 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
               {state.shortfalls.length === 1
                 ? "1 task doesn't fit before its deadline"
                 : `${state.shortfalls.length} tasks don't fit before their deadlines`}
-              {" — Today has the details."}
+              {" — "}
+              {onToday ? (
+                <button
+                  onClick={onToday}
+                  className="underline decoration-current underline-offset-2 transition-opacity hover:opacity-80"
+                >
+                  Today has the details
+                </button>
+              ) : (
+                "Today has the details"
+              )}
+              .
             </p>
           )}
         </aside>
@@ -663,13 +674,28 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
                     <p className="mt-1 text-[11px] text-[var(--muted)]">{label}</p>
                   );
                 }
-                if (state.shortfalls?.some((s) => s.taskId === acornTask.id)) {
+                const short = state.shortfalls?.find((s) => s.taskId === acornTask.id);
+                if (short) {
                   return (
-                    <p className="alert mt-1 text-[11px]">
-                      {acornTask.pinDay
-                        ? "doesn't fit on its pinned day"
-                        : "doesn't fit before its deadline"}
-                    </p>
+                    <div className="mt-1">
+                      <p className="alert text-[11px]">
+                        {acornTask.pinDay
+                          ? "doesn't fit on its pinned day"
+                          : "doesn't fit before its deadline"}
+                      </p>
+                      {/* The fix the planner already computed, one tap away. */}
+                      {short.fitsBy && short.fitsBy !== acornTask.due && !acornTask.pinDay && (
+                        <button
+                          onClick={() => updateTask(acornTask.id, { due: short.fitsBy })}
+                          className="alert mt-1 rounded-md border border-current px-2 py-0.5
+                                     text-[11px] transition-opacity hover:opacity-80"
+                        >
+                          move the deadline to{" "}
+                          {new Date(`${short.fitsBy}T00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}
+                          {" "}— it fits
+                        </button>
+                      )}
+                    </div>
                   );
                 }
                 if (!(acornTask.estimateMins > 0)) {

@@ -164,8 +164,13 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
       kind: "work", at: new Date(b.start), end: new Date(b.end), title: b.task.title,
       // "due 2026-08-18" was the only date on this screen written as the store
       // holds it rather than as anybody says it, sitting two inches from a row
-      // reading "Aug 19".
-      note: b.task.due ? `due ${whenLabel(b.task.due, now)}` : "", id: `${b.taskId}-${b.start}`, task: b.task,
+      // reading "Aug 19". A pinned task says so — the one row the router
+      // didn't choose deserves to explain itself.
+      note: [
+        b.task.pinDay === day ? "pinned" : null,
+        b.task.due ? `due ${whenLabel(b.task.due, now)}` : null,
+      ].filter(Boolean).join(" · "),
+      id: `${b.taskId}-${b.start}`, task: b.task,
     })),
     ...gaps.map((g) => ({
       kind: "gap", at: g.start, end: g.end, mins: g.mins, id: `gap-${g.start.getTime()}`,
@@ -511,6 +516,19 @@ function Shortfalls({ list, tasks }) {
                   "or cut the scope",
                 ].filter(Boolean).join(", ")}.
               </p>
+              {/* The advice is a button, not homework: the planner already
+                  computed the date this fits by, so applying it is one tap —
+                  undoable like every other change, and the plan reflows the
+                  moment the deadline moves. */}
+              {s.fitsBy && s.fitsBy !== s.due && (
+                <button
+                  onClick={() => updateTask(s.taskId, { due: s.fitsBy })}
+                  className="mt-2 rounded-md border px-2.5 py-1 text-xs transition-colors"
+                  style={{ borderColor: "var(--alert)", color: "var(--alert)" }}
+                >
+                  Move the deadline to {whenLabel(s.fitsBy)} — it fits
+                </button>
+              )}
             </li>
           );
         })}

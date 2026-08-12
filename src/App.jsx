@@ -500,6 +500,7 @@ export default function App() {
         onOpenProject={(id) => setView({ name: "project", id })}
         onStart={() => setView({ name: "projects" })}
         onFocus={setPending}
+        onToday={() => setView({ name: "today" })}
       />
     ) : view.name === "insights" ? (
       can(state.plan, "insights") ? (
