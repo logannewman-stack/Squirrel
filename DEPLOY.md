@@ -36,32 +36,43 @@ You may link out to web billing from the app, but the rules around wording and
 placement are specific and have been litigated. Read the current guideline text
 before relying on it.
 
-### 2. Your assistant pricing has thin margins — measure before you launch
+### 2. The assistant's real cost — much smaller than it first looks
 
-Per-chat cost with prompt caching on (the system prompt and tool definitions are
-identical every request and dominate the input, so caching them is the single
-biggest lever — cached reads bill at roughly a tenth):
+An earlier version of this section warned about thin margins, quoting $0.02–
+$0.12 per chat. Those figures describe a *conversational agent*: a multi-turn
+loop carrying tool definitions, transcript history, and long prose answers.
+That is not what got built, and leaving them here nearly caused a bad pricing
+decision.
 
-| Effort | Rough cost/chat | 200 chats (Plus) | Margin on Plus (nets $17) |
-| --- | --- | --- | --- |
-| `low` | ~$0.02 | ~$4 | ~$13 |
-| `medium` (default) | ~$0.05–0.08 | ~$10–16 | ~$1–7 |
-| `high` | ~$0.12+ | ~$24+ | **negative** |
+What actually runs is one narrow call. A fixed ~1,000-token system prompt, a
+few hundred tokens of context, and **at most 120 tokens out** — one short
+command, never prose. On Haiku 4.5 ($1/M in, $5/M out):
 
-These are estimates from token shape, not measured traffic. The schema records
-real `input_tokens` and `output_tokens` per user per month in `usage_counters` —
-**run a hundred real chats and read that table before you commit to the price.**
+| | Per call | At the plan's hard ceiling |
+| --- | --- | --- |
+| Fallback rewrite | **≈ $0.0017** | Pro (1,000 chats): **≈ $1.65/mo** |
+| | | Studio (3,000 chats): **≈ $4.94/mo** |
 
-Two consequences worth deciding on now:
+Against $24.99 and $50 subscriptions — netting roughly $23.95 and $48.25 after
+Stripe — the worst a single customer can inflict is under 7% of Pro and under
+10% of Studio. And that is the *ceiling*, not the expectation: the
+deterministic parser answers the overwhelming majority of messages at zero
+marginal cost, so the model only bills on the tail it misses.
 
-- **`high` effort loses money on Plus.** `ASSISTANT_EFFORT` defaults to `medium`.
-  Raise it only if the assistant starts mis-resolving requests, and re-check the
-  numbers if you do.
-- **"Unlimited" Pro needs a real ceiling.** At medium effort, $42.50 net breaks
-  even somewhere around 600–800 chats/month. `FAIR_USE_CHATS` in
-  `src/lib/plans.js` currently sits at 2000, which loses money on a heavy user.
-  Either lower it to ~750 or accept the tail as a cost of acquisition — but pick
-  deliberately rather than discovering it on a bill.
+Two things remain true and worth keeping:
+
+- **Measure anyway.** `usage_counters` records real `input_tokens` and
+  `output_tokens` per user per month. The arithmetic above is derived from
+  token shape; after a hundred real chats, replace it with fact.
+- **The ceiling is the point.** Free 0, Pro 1,000, Studio 3,000 — enforced in
+  the database (`plan_limit`), not the client, so no enthusiastic user and no
+  scripted one can turn a flat subscription into an unbounded bill. The
+  numbers above are why those ceilings can be generous rather than stingy.
+
+The one thing that would change this arithmetic is pointing the fallback at a
+larger model, or letting it write long answers. Both are one environment
+variable away (`ANTHROPIC_MODEL`), so redo the sum before either becomes a
+habit.
 
 ---
 
