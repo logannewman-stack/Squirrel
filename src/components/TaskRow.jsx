@@ -1,6 +1,21 @@
 import { dayKey } from "../lib/store";
+import { sayMins } from "../lib/hours";
 
 const PRIORITY_MARK = { critical: "▲▲", high: "▲", normal: "", low: "▽" };
+
+/**
+ * How the schedule line reads.
+ *
+ * `scheduled` is the ordinary answer and deliberately looks like the rest of
+ * the row — a fact, not an alert. The two states that need somebody to act
+ * are the two that get the ink: work that will not fit, and work the planner
+ * cannot place because nobody said how long it takes.
+ */
+const WHEN_TONE = {
+  short: "font-semibold text-[var(--ink)]",
+  unestimated: "text-[var(--muted)]",
+  spent: "text-[var(--muted)]",
+};
 
 function dueLabel(due) {
   if (!due) return null;
@@ -20,8 +35,13 @@ function dueLabel(due) {
  * wrapper around it: Today used to wrap this in a second `<li>` to position the
  * badge, which put a list item inside a list item. Invalid HTML, and assistive
  * technology announces the nesting.
+ *
+ * `when` is the answer from `lib/when.js` — passed in rather than computed
+ * here, because a row that plans for itself is planning against a slightly
+ * different `now` than the screen around it, and two answers about the same
+ * Thursday is the failure that module exists to end.
  */
-export default function TaskRow({ task, project, onToggle, onFocus, onDelete, showProject, note }) {
+export default function TaskRow({ task, project, when, onToggle, onFocus, onDelete, showProject, note }) {
   const late = task.due && task.due < dayKey() && !task.done;
 
   return (
@@ -52,13 +72,25 @@ export default function TaskRow({ task, project, onToggle, onFocus, onDelete, sh
         </p>
         <p className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-[var(--faint)]">
           {showProject && project && <span className="truncate">{project.name}</span>}
-          <span className="tabular-nums">{task.estimateMins}m</span>
+          {/* "120m" was the app's own arithmetic read back at somebody. Every
+              other surface says "2h", and a row is the last place to make a
+              reader divide by sixty. */}
+          {task.estimateMins > 0 && <span className="tabular-nums">{sayMins(task.estimateMins)}</span>}
           {task.due && (
             <span className={`tabular-nums ${late ? "font-semibold text-[var(--ink)]" : ""}`}>
               {dueLabel(task.due)}
             </span>
           )}
           {task.delegatedTo && <span>→ {task.delegatedTo}</span>}
+          {/* The answer the app already had and never gave: an estimate and a
+              deadline are what you told it, and this is what it decided. The
+              separator marks it as the app talking back rather than a fourth
+              thing you typed. */}
+          {when?.short && !task.delegatedTo && (
+            <span className={WHEN_TONE[when.state] || "text-[var(--muted)]"} title={when.long}>
+              · {when.short}
+            </span>
+          )}
         </p>
       </div>
 

@@ -21,12 +21,13 @@ import {
 } from "./context.js";
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
-  deleteTask, addProject, setMemory, setPlan, batch, undo, lastChange,
+  deleteTask, addProject, setMemory, setPlan, batch, undo, lastChange, getState,
 } from "../store.js";
 import { record as recordMiss, resolve as pairMiss, REASONS } from "../misses.js";
 import { interpret, hasResolver, contextFor } from "./fallback.js";
 import { findFreeSlots, fmtTime, workOn } from "../agenda.js";
 import { distribute, describePlan, projectLoad, describeLoad, triage, isWorkday } from "../schedule.js";
+import { whenTask } from "../when.js";
 import { planOpts, hoursOf, describeHours, sayMins, saySpan, sayHour, weeklyMins } from "../hours.js";
 import { duration, money } from "../format.js";
 
@@ -1630,8 +1631,31 @@ function answer(text, state, opts = {}) {
             priority: slots.priority || "normal",
             delegatedTo: slots.person || "",
           });
+          /**
+           * And when it will actually be done.
+           *
+           * "Added 'Draft the lease redlines' — due Friday." was the whole
+           * reply, to somebody who had just said how long it takes and when it
+           * is owed — the two facts the planner needs to decide the answer,
+           * given in the same breath. It decided, immediately and correctly,
+           * and said nothing: the booking existed only in the store, and the
+           * only way to discover it was to go and look at the calendar.
+           *
+           * Planned from the state *after* the write, so the sentence accounts
+           * for the task it is describing. Delegated work is skipped — it is
+           * not on this person's calendar to book.
+           */
+          let when = null;
+          if (!slots.person) {
+            const after = getState();
+            const spread = distribute(after.tasks, after.events, after.sessions, { ...work, now });
+            setPlan(spread);
+            when = whenTask(made, spread, { now });
+          }
+          const lands = when && when.state !== "done" ? ` ${when.long}` : "";
+
           return reply(
-            `Added “${title}”${bits.length ? ` — ${bits.join(", ")}` : ""}.`,
+            `Added “${title}”${bits.length ? ` — ${bits.join(", ")}` : ""}.${lands}`,
             [{ summary: `Added task “${title}”` }],
             { entity: { kind: "task", id: made.id }, day: due ? dayKey(due) : null },
           );

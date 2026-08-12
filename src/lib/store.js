@@ -349,6 +349,29 @@ export function updateProject(id, patch) {
     { projects: read().projects.map((p) => (p.id === id ? stamp({ ...p, ...patch }) : p)) });
 }
 
+/**
+ * Put a project away, or bring it back.
+ *
+ * `archived` was read in eight places — the grid filtered on it, Today
+ * filtered on it, the plan quota counted against it, search ranked it down —
+ * and written in none. Nothing in the app could set the flag, so every one of
+ * those readers was branching on a value that was permanently false, and a
+ * finished deal had exactly two fates: clutter the grid forever, or be deleted
+ * along with every task and every hour ever logged against it. For work that
+ * is simply *over*, both are wrong, and the second is unrecoverable.
+ *
+ * Its own function rather than a `updateProject` call, so the undo entry says
+ * what happened: "changing Munich lease" is not a thing anybody would
+ * recognise afterwards as the archive they want back.
+ */
+export function setProjectArchived(id, archived = true) {
+  const was = read().projects.find((p) => p.id === id);
+  if (!was || !!was.archived === !!archived) return;
+  mutate(`${archived ? "archiving" : "reopening"} “${was.name}”`, {
+    projects: read().projects.map((p) => (p.id === id ? stamp({ ...p, archived: !!archived }) : p)),
+  });
+}
+
 export function deleteProject(id) {
   const s = read();
   const orphaned = s.tasks.filter((t) => t.projectId === id);

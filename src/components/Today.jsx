@@ -2,6 +2,7 @@ import { findFreeSlots, fmtTime, workOn } from "../lib/agenda";
 import { dayKey, toggleTask, eventsOn } from "../lib/store";
 import { planOpts, sayMins } from "../lib/hours";
 import { projectLoad } from "../lib/schedule";
+import { whenTask } from "../lib/when";
 import { duration } from "../lib/format";
 import TaskRow from "./TaskRow";
 import Review from "./Review";
@@ -96,6 +97,23 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
     ...dueToday.map((task) => ({ task, why: "today" })),
     ...plannedTasks.map((task) => ({ task, why: "planned" })),
   ].filter(({ task }) => (seen.has(task.id) ? false : seen.add(task.id)));
+
+  /**
+   * The first thing booked after today.
+   *
+   * An empty plate is not the same as an empty plan, and this screen used to
+   * report both with "Nothing due and nothing planned. Add work with a
+   * deadline and an estimate, and it lays itself out." Add work at six in the
+   * evening — a deadline, an estimate, exactly as instructed — and the planner
+   * books it for tomorrow morning, correctly, and then that sentence appears:
+   * the app telling somebody to do the thing they have just done, on the
+   * screen that exists to show them it worked.
+   */
+  const ahead = (state.blocks || [])
+    .filter((b) => b.day > day)
+    .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))[0];
+  const aheadTask = ahead && state.tasks.find((t) => t.id === ahead.taskId);
+  const aheadWhen = aheadTask && whenTask(aheadTask, state, { now });
 
   /**
    * The next thing, for a day with nothing on it.
@@ -316,8 +334,17 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
 
           {plate.length === 0 && unestimated.length === 0 && waiting.length === 0 && spent.length === 0 ? (
             <p className="py-4 text-sm text-[var(--muted)]">
-              Nothing due and nothing planned. Add work with a deadline and an estimate,
-              and it lays itself out.
+              {aheadWhen ? (
+                <>
+                  Nothing left today. Next is{" "}
+                  <span className="text-[var(--ink)]">{aheadTask.title}</span> — {aheadWhen.long}
+                </>
+              ) : (
+                <>
+                  Nothing due and nothing planned. Add work with a deadline and an estimate,
+                  and it lays itself out.
+                </>
+              )}
             </p>
           ) : (
             <ul className="divide-y divide-[var(--hairline)]">
@@ -326,6 +353,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
                   key={task.id}
                   task={task}
                   project={state.projects.find((x) => x.id === task.projectId)}
+                  when={whenTask(task, state, { now })}
                   showProject
                   onToggle={() => toggleTask(task.id)}
                   onFocus={() => onFocus(task)}

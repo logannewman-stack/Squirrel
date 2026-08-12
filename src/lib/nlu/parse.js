@@ -1103,7 +1103,17 @@ const RULES = [
   // booking; and ahead of invite, because "invite Bob to the standup" is a
   // request to put Bob on the invitation. Sending it is a separate thing, and
   // the one Squirrel cannot do.
-  [INTENTS.EDIT_ATTENDEES, (body) => Boolean(parseAttendees(body))],
+  /**
+   * `add|create|new` vetoes this the same way it vetoes COMPLETE_TASK below.
+   *
+   * "add talk to legal about the lease" reads as an attendee change — "to
+   * legal" is exactly the shape of adding somebody to a meeting — and it went
+   * looking for a meeting to put legal into, found none, and created nothing.
+   * The sentence opened with the word for what was wanted.
+   */
+  [INTENTS.EDIT_ATTENDEES, (body) =>
+    !/^\s*(?:please\s+)?(?:can you\s+|could you\s+)?(?:add|create|new)\s+(?!\w+\s+(?:to|into)\s+(?:the|my|our)\b)/i.test(body) &&
+    Boolean(parseAttendees(body))],
   [INTENTS.INVITE, /\b(invite|send (?:an? )?invit|email .* about|send .* (?:the )?(?:invite|calendar))\b/],
   // Very early, and deliberately narrow. "Finish" belongs to completing a task
   // and "how many hours" to progress, so both are only surrendered when the
@@ -1269,7 +1279,24 @@ const RULES = [
    * It falls through to whatever else the sentence looks like; a miss is the
    * honest answer for "nearly finished the deck", and closing the task is not.
    */
+  /**
+   * And a second veto: you cannot be asking to tick off the thing you are in
+   * the same breath asking to create.
+   *
+   * "add finish the deck, 2 hours" reached here — the rule above it wants the
+   * literal word "task" ("add a task to…"), and a bare "add" carries none —
+   * so the sentence was read as a completion, went looking for an open task
+   * called "the deck", found none, and answered "I couldn't find an open task
+   * matching that." Nothing was created. Somebody dictating work into an empty
+   * app got a refusal and an empty list, and the word they had used to say
+   * what they wanted was the first one in the sentence.
+   *
+   * A leading create verb is about as explicit as intent gets, so it wins
+   * outright. "make" is deliberately not in the list: "make it done" is a
+   * completion, and it is the one of these that is genuinely ambiguous.
+   */
   [INTENTS.COMPLETE_TASK, (body) =>
+    !/^\s*(?:please\s+)?(?:can you\s+|could you\s+)?(?:add|create|new)\b/i.test(body) &&
     !/\b(?:almost|nearly|not quite|not fully|half|halfway|partly|partially|mostly|kind of|kinda|sort of|nowhere near|far from|still)\s+(?:done|finished|finish|complete|completed|there|wrapped)\b/i.test(body) &&
     COMPLETES.test(body)],
   // `give (?!me)`: "give me something to do" is someone asking for work, not
@@ -1930,8 +1957,20 @@ function stripVerbs(text) {
       "",
     )
     .replace(/\b(?:a|an|the)\s+(?:task|meeting|call|event|reminder|appointment|sync|standup|stand-up|catch ?up|chat|block|slot|interview|review|1:1|one on one)\s+(?:to|for|called|named)?\s*/i, "")
-    // "new task review the deck" — the noun with no article in front of it.
-    .replace(/^\s*(?:task|meeting|call|event|reminder)\s+(?:to|for|called|named)?\s*/i, "")
+    /**
+     * "new task review the deck" — the noun with no article in front of it.
+     *
+     * Guarded against the word being a verb instead. "call the bank" opens
+     * with the same five letters as "call with Priya", and stripping it left
+     * "the bank", which the connector peel below then reduced to a task called
+     * "Bank" — the verb silently deleted from something somebody dictated.
+     * An article after it is what separates the two: nobody names a meeting
+     * "the bank", and nobody rings a noun.
+     */
+    .replace(
+      /^\s*(?:task|meeting|call|event|reminder)\s+(?:(?:to|for|called|named)\s+|(?!(?:a|an|the|my|our|his|her|their|this|that)\b))/i,
+      "",
+    )
     // "make time for the letter" — the object of the verb is the time itself.
     .replace(/^\s*(?:some\s+)?time\s+(?:for|on|to)\s+/i, "")
     // "Monday is a bank holiday" names the holiday, not the sentence.
@@ -2088,6 +2127,10 @@ const PHRASAL_ON = new Set([
   "crack", "cracking", "crank", "cranking",
 ]);
 
+/** The words that name an appointment rather than describe an action. */
+const MEETING_NOUN =
+  /^(?:meetings?|calls?|events?|syncs?|chats?|1:1|appointments?|catch-?ups?|blocks?|lunch|dinner|breakfast|coffee|drinks|standups?|stand-ups?|interviews?|reviews?)$/i;
+
 function extractSubject(text, people = []) {
   const m = text.match(/\b(about|regarding|re:?|to discuss|to go over|covering|on)\s+(.+)$/i);
   if (!m) return null;
@@ -2097,6 +2140,26 @@ function extractSubject(text, people = []) {
     const before = text.slice(0, m.index).trim().split(/\s+/).pop() || "";
     if (PHRASAL_ON.has(before.toLowerCase().replace(/[^\w]/g, ""))) return null;
   }
+  /**
+   * "think about the rebrand" has no subject — it has an object.
+   *
+   * A subject is the topic of an appointment, and every real one has something
+   * in front of it saying what the appointment is: "meeting about the merger",
+   * "lunch with Sam about the raise". A lone verb in front of "about" is a
+   * different grammar entirely, and treating it as a subject cut the object
+   * out of the title — "think about the rebrand" became a task called "Think",
+   * and "talk to legal about the lease" became no task at all. The app deleted
+   * the thing being described and kept the word describing the shape of it.
+   *
+   * Meeting nouns are exempt, because a one-word "call about the lease" really
+   * is the lease.
+   *
+   * Counted after the command verb is removed, or the word somebody opens with
+   * does the hiding: "add think about the rebrand" leads with two words and
+   * "think about the rebrand" with one, and they are the same request.
+   */
+  const lead = stripVerbs(text.slice(0, m.index)).trim().split(/\s+/).filter(Boolean);
+  if (lead.length === 1 && !MEETING_NOUN.test(lead[0])) return null;
   const cleaned = stripTemporal(m[2])
     .replace(withPhrase(people), " ")
     .replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "")
@@ -2140,7 +2203,20 @@ function cleanTitle(text, people = [], subject = null) {
      * correct, and lets the caller compose a name from whatever it resolved.
      */
     .replace(/\s*(?:-{1,2}>|=>|→|⟶|›|»)[^]*$/, " ")
-    .replace(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+.+$/i, " ")
+    /**
+     * "meeting about the merger" is the merger — the subject is the name, and
+     * the wording in front of it is scaffolding.
+     *
+     * Unless the scaffolding is the whole verb. "think about the rebrand" is
+     * not a task called "Think", and "talk to legal about the lease" is not a
+     * task called nothing at all, which is what these produced: for a verb that
+     * takes "about" as its object, cutting there deletes the object and leaves
+     * the app holding the word somebody used to describe the *shape* of the
+     * work rather than the work. One word in front of "about" is the tell —
+     * there is no meeting whose entire name is a single verb.
+     */
+    .replace(/\b(?:about|regarding|re:?|to discuss|to go over|covering)\s+.+$/i, (m, off, whole) =>
+      whole.slice(0, off).trim().split(/\s+/).filter(Boolean).length <= 1 ? m : " ")
     // Cut the exact subject that was extracted rather than everything after a
     // preposition — "on" is far too common to truncate a title on.
     .replace(subject ? new RegExp(`\\b(?:on\\s+)?${esc(subject)}\\b`, "i") : /$^/, " ")
@@ -2158,6 +2234,16 @@ function cleanTitle(text, people = [], subject = null) {
   // "Bob asked for time" says who and roughly how long. None of it is a name.
   t = t.replace(/^\s*[\w'’-]+\s+asked\s+(?:me\s+)?for\s+(?:time|\d+\s*\w+|an? \w+|half an hour)?/i, " ");
   t = t.replace(/\s{2,}/g, " ").trim();
+  /**
+   * Punctuation left standing where a phrase used to be.
+   *
+   * Everything above cuts from the middle of the sentence, and the peel at the
+   * end of this function only tidies the two ends — so "sign the lease, 1 hour,
+   * for Anders" lost its duration and kept both of the commas that had been
+   * holding it, producing a task genuinely named "Sign the lease, , for
+   * Anders". A stray comma reads as a typo the user made.
+   */
+  t = t.replace(/\s*,(?:\s*,)+/g, ",").replace(/\s+([,;:])/g, "$1");
   // Peel connectors, articles, and stranded pronouns off both ends until
   // nothing changes: "for the board deck" is a phrase from the command,
   // "Board deck" is the thing itself, and "it for" is nothing at all.

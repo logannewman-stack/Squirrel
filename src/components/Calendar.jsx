@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fmtTime, workOn } from "../lib/agenda";
 import { dayKey, setSetting } from "../lib/store";
 import { hoursOf, breaksOn, sayMins } from "../lib/hours";
+import { UNFILED } from "./ProjectDetail";
 import {
   SCALES, isScale, rangeOf, shiftBy, titleOf, subtitleOf,
   monthMatrix, monthsIn, loadIndex, loadOf,
@@ -17,7 +18,7 @@ const HOUR_PX = 52;
  * and a dropdown costs two clicks and a menu every time. Five labels sitting
  * in the header cost one, and the keyboard shortcuts underneath cost none.
  */
-export default function Calendar({ state, onNewEvent, onOpenEvent }) {
+export default function Calendar({ state, onNewEvent, onOpenEvent, onOpenProject }) {
   const stored = state.settings?.calendarScale;
   // Agenda by default: it is the one scale that is legible the instant the
   // calendar opens, on the screen most people open it on. A returning user's
@@ -120,6 +121,7 @@ export default function Calendar({ state, onNewEvent, onOpenEvent }) {
             now={now}
             onOpenEvent={onOpenEvent}
             onNewEvent={onNewEvent}
+            onOpenProject={onOpenProject}
           />
         ) : scale === "day" || scale === "week" ? (
           <TimeGrid
@@ -231,7 +233,7 @@ const LoadKey = () => (
  * simply left out. It is the default because it is the one view that answers
  * "what's next" without a single sideways scroll.
  */
-function AgendaList({ range, state, now, onOpenEvent, onNewEvent }) {
+function AgendaList({ range, state, now, onOpenEvent, onNewEvent, onOpenProject }) {
   const today = dayKey(now);
   const from = range.from.getTime();
   const to = range.to.getTime();
@@ -337,18 +339,40 @@ function AgendaList({ range, state, now, onOpenEvent, onNewEvent }) {
                 </li>
               ))}
 
+              {/**
+                * Planned work, which is now a way back to what it is for.
+                *
+                * These were inert `<div>`s: a browser walk found twenty
+                * elements mentioning the task and not one of them pressable.
+                * The calendar could tell you that two hours of Thursday belong
+                * to "Draft the lease redlines" and had no way to tell you it
+                * belongs to the Munich lease, or to take you there — so the
+                * screen that shows where your week went was the one screen you
+                * could not act from.
+                */}
               {work.map((b) => {
                 const task = state.tasks.find((t) => t.id === b.taskId);
+                const project = state.projects.find((x) => x.id === task?.projectId);
                 return (
                   <li key={`${b.taskId}-${b.start}`}>
-                    <div className="flex items-baseline gap-3 rounded-lg px-2 py-2">
+                    <button
+                      onClick={() => onOpenProject?.(project?.id ?? UNFILED)}
+                      className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2 text-left
+                                 transition-colors hover:bg-[var(--hairline)]"
+                    >
                       <span className="num w-16 shrink-0 text-xs text-[var(--faint)]">{fmtTime(b.start)}</span>
                       <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full border border-dashed border-[var(--muted)]" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-[var(--muted)]">{task?.title || "Focus"}</span>
-                        <span className="mt-0.5 block text-xs text-[var(--faint)]">{sayMins(b.mins)} of focus</span>
+                        <span className="mt-0.5 block truncate text-xs text-[var(--faint)]">
+                          {sayMins(b.mins)} of focus
+                          {/* Which deal this hour is actually for. A week of
+                              bare task titles hides the only grouping anybody
+                              reports on. */}
+                          {project ? ` · ${project.name}` : ""}
+                        </span>
                       </span>
-                    </div>
+                    </button>
                   </li>
                 );
               })}

@@ -7,6 +7,7 @@ import { TEMPLATES, scheduleFor } from "../lib/templates";
 import { addTask } from "../lib/store";
 import { hoursOf } from "../lib/hours";
 import { duration, money } from "../lib/format";
+import { whenProject } from "../lib/when";
 
 /**
  * Every project, and how each is actually going.
@@ -76,6 +77,22 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
       b.open - a.open);
 
   const live = rows.filter((r) => !r.p.archived);
+  /**
+   * The projects that have been put away.
+   *
+   * Archiving without anywhere to see the result is a delete with extra steps
+   * — the grid filters `archived` out, so a project that gained the flag left
+   * the only screen that lists projects and could be reached afterwards by
+   * nothing but the ⌘K palette. Behind a count rather than beside the live
+   * work: finished projects are the ones you look for on purpose.
+   */
+  const shelved = rows.filter((r) => r.p.archived);
+
+  // Every project's landing date, read from the same blocks the calendar
+  // draws, so a card and the screen it opens cannot name different days.
+  const lands = Object.fromEntries(
+    rows.map((r) => [r.p.id, whenProject(r.p, tasks, state)]),
+  );
 
   /**
    * Work with no project on it, which until now had nowhere to be.
@@ -157,7 +174,12 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
 
       {live.length === 0 && unfiled.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          No projects yet. A project groups work — a deal, a launch, a function.
+          {/* "No projects yet" to somebody who has archived all of theirs is
+              the same sentence as to somebody on their first morning, and only
+              one of them is true. "Yet" is the word that does the lying. */}
+          {shelved.length > 0
+            ? `Nothing open. ${shelved.length === 1 ? "One project is" : `${shelved.length} projects are`} archived below.`
+            : "No projects yet. A project groups work — a deal, a launch, a function."}
         </p>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -231,17 +253,61 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
                   </span>
                 </div>
 
-                {due && (
+                {(due || lands[p.id]?.short) && (
                   <p className={`num mt-2 text-[11px] ${
-                    due < today ? "alert" : "text-[var(--muted)]"
+                    due && due < today ? "alert" : "text-[var(--muted)]"
                   }`}>
-                    {sayDue(due, today)}
+                    {due ? sayDue(due, today) : ""}
+                    {/* When the work is actually booked to finish, beside the
+                        date it is owed by. A deadline on its own is a wish;
+                        the pair is the thing worth knowing, and it comes from
+                        the same blocks the calendar draws. */}
+                    {lands[p.id]?.short && (
+                      <span className={lands[p.id].state === "short" || lands[p.id].state === "late"
+                        ? "text-[var(--ink)]" : "text-[var(--faint)]"}>
+                        {due ? " · " : ""}{lands[p.id].short}
+                      </span>
+                    )}
                   </p>
                 )}
               </button>
             </li>
           ))}
         </ul>
+      )}
+
+      {/**
+        * The projects that have been put away.
+        *
+        * Folded, and only present when there are any: finished work is looked
+        * for on purpose, and a permanent empty section teaches people to skip
+        * the bottom of the screen. Each one opens the ordinary detail screen,
+        * which is where Reopen lives — so the way back is the same door as the
+        * way in, rather than a second set of controls that can disagree.
+        */}
+      {shelved.length > 0 && (
+        <details className="mt-10 border-t border-[var(--hairline)] pt-4">
+          <summary className="cursor-pointer text-xs text-[var(--muted)] hover:text-[var(--ink)]">
+            Archived {shelved.length}
+          </summary>
+          <ul className="mt-3 divide-y divide-[var(--hairline)]">
+            {shelved.map(({ p, total, focused }) => (
+              <li key={p.id}>
+                <button
+                  onClick={() => onOpen(p.id)}
+                  className="flex w-full items-baseline justify-between gap-4 py-2.5 text-left
+                             text-sm text-[var(--muted)] transition-colors hover:text-[var(--ink)]"
+                >
+                  <span className="truncate">{p.name}</span>
+                  <span className="num shrink-0 text-[11px] text-[var(--faint)]">
+                    {total} {total === 1 ? "task" : "tasks"}
+                    {focused > 0 ? ` · ${duration(focused)}` : ""}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

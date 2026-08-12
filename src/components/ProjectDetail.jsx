@@ -4,10 +4,11 @@ import PersonPicker from "./PersonPicker";
 import { Button, Chip, Field } from "./ui";
 import { roster, workOf, keyOf } from "../lib/people";
 import {
-  addTask, deleteProject, toggleTask, deleteTask, updateProject, dayKey,
+  addTask, deleteProject, toggleTask, deleteTask, updateProject, setProjectArchived, dayKey,
 } from "../lib/store";
 import { PRIORITIES } from "../lib/store";
 import { duration } from "../lib/format";
+import { whenTask, whenProject } from "../lib/when";
 
 const ESTIMATES = [15, 30, 60, 120];
 
@@ -42,6 +43,16 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
   const [due, setDue] = useState("");
   const [delegate, setDelegate] = useState("");
   const [tab, setTab] = useState("open");
+  /**
+   * The id of the thing just added, so the screen can answer for it.
+   *
+   * Adding work used to be silent: the row appeared, and the fact that the
+   * planner had just booked it into tomorrow morning existed only in the
+   * store. This holds on to which task the person is owed an answer about
+   * until they add another one — the plan recomputes underneath, so the
+   * sentence stays live rather than being a snapshot of the moment.
+   */
+  const [added, setAdded] = useState(null);
 
   if (!project) return null;
 
@@ -54,6 +65,12 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
   const overdue = open.filter((t) => t.due && t.due < dayKey()).length;
 
   const shown = tab === "open" ? open : tab === "waiting" ? waiting : done;
+
+  // One plan, read by the header, the confirmation and every row, so they
+  // cannot end up describing different weeks.
+  const lands = unfiled ? null : whenProject(project, state.tasks, state);
+  const justAdded = added && state.tasks.find((t) => t.id === added);
+  const addedWhen = justAdded ? whenTask(justAdded, state) : null;
 
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">
@@ -98,19 +115,39 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
             />
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            if (confirm(`Delete "${project.name}" and its ${tasks.length} tasks?`)) {
-              deleteProject(project.id);
-              onBack();
-            }
-          }}
-          className="shrink-0 !text-[var(--muted)] hover:!text-[var(--alert)]"
-        >
-          Delete
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {/**
+            * Finished, not deleted.
+            *
+            * Delete was the only way to get a project off the grid, and it
+            * takes every task and every logged hour with it — so the ordinary
+            * end of a piece of work, finishing it, was served by the one
+            * irreversible button on the screen. Archiving is what somebody
+            * actually means, and it is the flag the grid, Today, search and
+            * the plan quota were already reading.
+            */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setProjectArchived(project.id, !project.archived)}
+            className="!text-[var(--muted)] hover:!text-[var(--ink)]"
+          >
+            {project.archived ? "Reopen" : "Archive"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (confirm(`Delete "${project.name}" and its ${tasks.length} tasks?`)) {
+                deleteProject(project.id);
+                onBack();
+              }
+            }}
+            className="!text-[var(--muted)] hover:!text-[var(--alert)]"
+          >
+            Delete
+          </Button>
+        </div>
         </>
         )}
       </header>
@@ -123,14 +160,33 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
         <Stat label="Focused" value={duration(focused)} />
       </div>
 
+      {/**
+        * When the whole thing lands.
+        *
+        * Four counters say how much is left and none of them say when it ends,
+        * which is the number somebody repeats to a client. It comes from the
+        * same blocks as every row below it, so the project's finish date can
+        * never be a day its own tasks disagree with.
+        */}
+      {lands?.long && lands.state !== "clear" && (
+        <p className={`-mt-6 mb-8 text-xs ${
+          lands.state === "short" || lands.state === "late"
+            ? "font-medium text-[var(--ink)]"
+            : "text-[var(--muted)]"
+        }`}>
+          {lands.long}
+        </p>
+      )}
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
           if (!title.trim()) return;
-          addTask({
+          const made = addTask({
             projectId: unfiled ? null : projectId, title, estimateMins: estimate, priority,
             due: due || null, delegatedTo: delegate.trim(),
           });
+          setAdded(made?.id || null);
           setTitle("");
           setDue("");
           setDelegate("");
@@ -207,6 +263,35 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
         </div>
       </form>
 
+      {/**
+        * What just happened to the thing you just added.
+        *
+        * This is the whole point of the form having a "Takes" row and a "Due"
+        * row: between them the planner can decide when the work will actually
+        * be done, and it does, immediately. Before this the decision was made
+        * and never mentioned — you added two hours of high-priority work due
+        * Friday and the app replied with a list row reading "120m 3d".
+        *
+        * It names the task because by the time you read it the field is empty
+        * and the row is one of twelve.
+        */}
+      {addedWhen && (
+        <p
+          role="status"
+          className="-mt-6 mb-8 flex flex-wrap items-baseline gap-x-2 text-xs text-[var(--muted)]"
+        >
+          <span className="font-medium text-[var(--ink)]">{justAdded.title}</span>
+          <span>— {addedWhen.long}</span>
+          <button
+            onClick={() => setAdded(null)}
+            className="ml-auto text-[var(--faint)] hover:text-[var(--ink)]"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </p>
+      )}
+
       <div className="mb-3 flex gap-4 border-b border-[var(--line)]">
         {[
           ["open", `Open ${open.length}`],
@@ -256,6 +341,7 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
                   <TaskRow
                     key={t.id}
                     task={t}
+                    when={whenTask(t, state)}
                     onToggle={() => toggleTask(t.id)}
                     onFocus={() => onFocus(t)}
                     onDelete={() => deleteTask(t.id)}
@@ -271,6 +357,7 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
             <TaskRow
               key={t.id}
               task={t}
+              when={whenTask(t, state)}
               onToggle={() => toggleTask(t.id)}
               onFocus={() => onFocus(t)}
               onDelete={() => deleteTask(t.id)}

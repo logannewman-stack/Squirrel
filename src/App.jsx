@@ -426,6 +426,7 @@ export default function App() {
         state={state}
         onNewEvent={() => setNewEvent(true)}
         onOpenEvent={setEditingEvent}
+        onOpenProject={(id) => setView({ name: "project", id })}
         onSearch={openSearch}
       />
     ) : view.name === "projects" ? (
