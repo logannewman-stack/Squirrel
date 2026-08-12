@@ -24,6 +24,17 @@ for m in "$HERE"/../migrations/*.sql; do
   run -f "$m"
 done
 
+# What Supabase does automatically and this stand-in must not forget.
+#
+# A hosted project grants anon/authenticated table access by default and lets
+# RLS decide the rows; without the same grants here every policy test dies on
+# "permission denied" instead of exercising the policy. That is not a passing
+# test — it is a test that never ran, which is how a screen of errors once sat
+# under "all checks passed" while the privacy rules went unproven.
+run -c "grant usage on schema public to anon, authenticated;
+        grant all on all tables in schema public to anon, authenticated;
+        grant all on all sequences in schema public to anon, authenticated;"
+
 fail=0
 for t in "$HERE"/[0-9][0-9]_*.sql; do
   case "$(basename "$t")" in 00_*) continue;; esac
@@ -35,7 +46,13 @@ for t in "$HERE"/[0-9][0-9]_*.sql; do
   # fail is a costume.
   out=$(run -f "$t" 2>&1) || fail=1
   printf '%s\n' "$out"
-  if printf '%s' "$out" | grep -q 'FAIL'; then fail=1; fi
+  # FAIL is an assertion that ran and disagreed. ERROR is an assertion that
+  # never ran — a missing grant, a renamed column, a typo — and it is the more
+  # dangerous of the two, because the check silently did not happen. This
+  # suite printed a screenful of "permission denied" under "all checks passed"
+  # once, and the unproven checks were the ones asserting that an employer
+  # cannot read an employee's work. Both count as failure.
+  if printf '%s' "$out" | grep -qE 'FAIL|ERROR'; then fail=1; fi
 done
 
 echo
