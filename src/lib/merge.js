@@ -23,7 +23,7 @@
 const FROM_DB = {
   projects: (r) => ({
     id: r.id, name: r.name, client: r.client ?? "", value: r.value ?? null,
-    status: r.status, archived: !!r.archived,
+    status: r.status, archived: !!r.archived, meaning: r.meaning ?? "",
     createdAt: Date.parse(r.created_at), updatedAt: Date.parse(r.updated_at),
     deletedAt: r.deleted_at ? Date.parse(r.deleted_at) : null,
   }),
@@ -64,7 +64,7 @@ const FROM_DB = {
 const TO_DB = {
   projects: (r) => ({
     id: r.id, name: r.name, client: r.client ?? "", value: r.value ?? null,
-    status: r.status ?? "active", archived: !!r.archived,
+    status: r.status ?? "active", archived: !!r.archived, meaning: r.meaning ?? "",
     updated_at: new Date(r.updatedAt ?? Date.now()).toISOString(),
     deleted_at: r.deletedAt ? new Date(r.deletedAt).toISOString() : null,
   }),

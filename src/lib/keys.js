@@ -59,6 +59,7 @@ export const SHORTCUTS = [
   { id: "calendar", keys: ["mod+2"], label: "Calendar", group: "Getting around" },
   { id: "projects", keys: ["mod+3"], label: "Projects", group: "Getting around" },
   { id: "insights", keys: ["mod+4"], label: "Insights", group: "Getting around" },
+  { id: "purpose", keys: ["mod+5"], label: "Purpose", group: "Getting around" },
   // The Mac convention, and one of about four shortcuts everybody knows without
   // being told.
   { id: "settings", keys: ["mod+,"], label: "Settings", group: "Getting around" },

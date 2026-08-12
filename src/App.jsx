@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Today from "./components/Today";
 import Calendar from "./components/Calendar";
 import Projects from "./components/Projects";
+import Purpose from "./components/Purpose";
 import ProjectDetail, { UNFILED } from "./components/ProjectDetail";
 import Insights from "./components/Insights";
 import AssistantSheet from "./components/AssistantSheet";
@@ -278,6 +279,7 @@ export default function App() {
         calendar: go("calendar"),
         projects: go("projects"),
         insights: go("insights"),
+        purpose: go("purpose"),
         settings: go("settings"),
         ask: () => setAssistantOpen(true),
         event: () => setNewEvent(true),
@@ -442,6 +444,12 @@ export default function App() {
         projectId={view.id}
         onBack={() => setView({ name: "projects" })}
         onFocus={setPending}
+      />
+    ) : view.name === "purpose" ? (
+      <Purpose
+        state={state}
+        onOpenProject={(id) => setView({ name: "project", id })}
+        onStart={() => setView({ name: "projects" })}
       />
     ) : view.name === "insights" ? (
       can(state.plan, "insights") ? (

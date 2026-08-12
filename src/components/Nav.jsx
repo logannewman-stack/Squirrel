@@ -17,6 +17,7 @@ const ITEMS = [
   ["today", "Today", "M4 7h16M4 12h16M4 17h10"],
   ["calendar", "Calendar", "M4 8h16M4 8a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V8zM9 4v4M15 4v4"],
   ["projects", "Projects", "M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"],
+  ["purpose", "Purpose", "M8 3c0 4.5 8 4.5 8 9s-8 4.5-8 9M16 3c0 4.5-8 4.5-8 9s8 4.5 8 9M9.2 7.5h5.6M9.2 16.5h5.6"],
   ["insights", "Insights", "M5 19V11M10 19V5M15 19v-6M20 19v-9"],
 ];
 
@@ -46,7 +47,11 @@ export function BottomNav({ isActive, settingsActive, onNavigate, onAskSquirrel,
       key={name}
       onClick={() => onNavigate(name)}
       aria-current={isActive(name)}
-      className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5 transition-colors sm:max-w-[76px] sm:px-3 ${
+      /* Zero side padding below sm: with Purpose the bar holds seven columns,
+         and the fixed 64px disc leaves six flexible ones about 50px each —
+         8px of button padding was exactly the difference between "Calendar"
+         fitting and clipping. The label's truncate stays as the safety net. */
+      className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-0 py-1.5 transition-colors sm:max-w-[76px] sm:px-3 ${
         isActive(name) ? "text-[var(--ink)]" : "text-[var(--faint)] hover:text-[var(--muted)]"
       }`}
     >
@@ -56,7 +61,7 @@ export function BottomNav({ isActive, settingsActive, onNavigate, onAskSquirrel,
   );
 
   return (
-    <nav className="flex shrink-0 items-end justify-center gap-0.5 border-t border-[var(--line)] bg-[var(--paper)] px-2 pb-2 pt-1.5 sm:gap-1 sm:px-4">
+    <nav className="flex shrink-0 items-end justify-center gap-0 border-t border-[var(--line)] bg-[var(--paper)] px-1 pb-2 pt-1.5 sm:gap-1 sm:px-4">
       {ITEMS.slice(0, 2).map(tab)}
 
       <button

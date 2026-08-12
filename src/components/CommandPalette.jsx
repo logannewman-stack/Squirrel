@@ -28,6 +28,7 @@ export default function CommandPalette({ state, onClose, onNavigate, onFocusTask
       { id: "v-cal", label: "Calendar", hint: "View", run: () => onNavigate({ name: "calendar" }) },
       { id: "v-proj", label: "Projects", hint: "View", run: () => onNavigate({ name: "projects" }) },
       { id: "v-ins", label: "Insights", hint: "View", run: () => onNavigate({ name: "insights" }) },
+      { id: "v-pur", label: "Purpose", hint: "View", run: () => onNavigate({ name: "purpose" }) },
       { id: "v-ask", label: "Assistant", hint: "View", run: () => onNavigate({ name: "assistant" }) },
       { id: "a-event", label: "New event", hint: "Action", run: onNewEvent },
       ...state.projects.map((p) => ({
