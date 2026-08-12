@@ -302,6 +302,42 @@ await p.waitForTimeout(700);
   t("  letting go of the reading with it", (await panel(p).count()) === 0);
 }
 
+/* ---------------------------------------------- the week, routed and shown */
+{
+  const body = await p.locator("body").innerText();
+  t("the header owns the promise — work is routed to the week",
+    /routed this week/.test(body), body.match(/[^\n]*routed[^\n]*/)?.[0]);
+  t("the week dock stands at the foot of the tree",
+    (await p.getByRole("button", { name: /today — /i }).count()) === 1);
+
+  // The acorn card knows when its work happens — and the line is a door.
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("ArrowRight"); // Munich lease
+  await p.waitForTimeout(300);
+  await p.keyboard.press("ArrowDown"); // Sign the lease
+  await p.waitForTimeout(300);
+  const routedLine = acorn(p).getByRole("button", { name: /routed /i });
+  t("an acorn says when it is routed", (await routedLine.count()) === 1);
+  await routedLine.click();
+  await p.waitForTimeout(400);
+  const dayCard = p.getByRole("complementary", { name: / routed$/i });
+  t("  and its line opens that day's routing",
+    /Sign the lease/.test(await dayCard.innerText().catch(() => "")));
+  await dayCard.getByRole("button", { name: /Sign the lease/ }).click();
+  await p.waitForTimeout(400);
+  t("  whose rows walk back to the acorn",
+    /Sign the lease/.test(await acorn(p).innerText().catch(() => "")));
+
+  // The branch card carries its total.
+  await p.locator("canvas").first().focus();
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+  t("the branch card sums what is routed ahead",
+    /routed ahead/.test(await panel(p).innerText().catch(() => "")));
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+}
+
 /* ------------------------------------------------------- meaning is written */
 {
   await p.locator("canvas").first().focus();

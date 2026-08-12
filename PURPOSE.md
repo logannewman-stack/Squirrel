@@ -85,6 +85,28 @@ The hand gets the native grammar: drag for wind, wheel or **pinch to zoom**,
 **double-tap to reset**, and on the keys left/right walk the branches while
 **down/up walk the open branch's acorns** card by card.
 
+## The week, routed
+
+The planner has always routed open work into the days automatically —
+`distribute()` lays estimated tasks into real free slots around meetings,
+inside working hours, before their deadlines, and Today and the calendar are
+views of that one plan (`state.blocks`). Purpose now shows it at the source:
+
+- A **week dock** at the foot of the tree — seven columns, each filled to
+  the height of the work routed into that day (amber cap when a day is
+  over-committed), with the week's total beside them.
+- Tapping a day opens **that day's routing**: each block with its clock
+  time, its acorn, and its minutes — and each row walks back to the acorn's
+  own card.
+- An **acorn card says when its work happens** — "routed Thu 11:00 AM ·
+  1.5h" — and the line is a door to that day. When it can't be routed it
+  says why: no estimate yet, or it doesn't fit before its deadline.
+- A **branch card sums what's routed ahead**, next to when it began and
+  when it lands — so a project's future is one glance.
+
+All of it reads `state.blocks`, the same distribution Today works from, so
+the tree can never promise a different week than the day that arrives.
+
 Labels place themselves: the tree claims its own space (acorns, tips, the
 length of each shoot, measured without wind so nothing flickers) and every
 name slides up until its air is clear — which is what keeps a phone-width

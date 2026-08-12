@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutOak, hitTest, perchFor, geometryFor, findOnTree } from "../lib/oak";
 import { drawOak } from "../lib/oak-draw";
 import { whenProject } from "../lib/when";
+import { workOn, fmtTime } from "../lib/agenda";
+import { planOpts } from "../lib/hours";
 import {
   addProject, addTask, toggleTask, updateProject, updateTask, setProjectArchived, dayKey,
 } from "../lib/store";
@@ -46,6 +48,7 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
   const [finder, setFinder] = useState(null); // { q } while the squirrel listens
   const [plant, setPlant] = useState(false); // naming a new trunk branch
   const [grow, setGrow] = useState(null); // { kind: "sub" | "acorn" } inside the card
+  const [openDay, setOpenDay] = useState(null); // a day of the week dock, being read
   const findInput = useRef(null);
 
   // The tree only re-grows when the work actually changes, not per frame.
@@ -60,6 +63,35 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
   const unfiledOpen = selection === UNFILED;
   const found = finder?.q ? findOnTree(layout, finder.q) : null;
   const acornTask = acornId ? state.tasks.find((t) => t.id === acornId) : null;
+
+  /**
+   * The week, routed. `state.blocks` is the one plan — the same distribution
+   * Today works from and the calendar draws — so the tree showing where its
+   * acorns land can never disagree with the day that arrives. Seven days,
+   * each with the blocks the planner gave it.
+   */
+  const week = useMemo(() => {
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const key = dayKey(d);
+      const rows = workOn(state.blocks || [], state.tasks, key);
+      days.push({
+        key,
+        short: i === 0 ? "now" : d.toLocaleDateString([], { weekday: "narrow" }),
+        name: i === 0 ? "today" : d.toLocaleDateString([], { weekday: "long" }),
+        date: d.toLocaleDateString([], { month: "short", day: "numeric" }),
+        mins: rows.reduce((n, b) => n + b.mins, 0),
+        rows,
+      });
+    }
+    return days;
+  }, [state.blocks, state.tasks]);
+  const weekMins = week.reduce((n, d) => n + d.mins, 0);
+  const dayCap = planOpts(state.settings).dailyCapacity || 300;
+  const dockUp = !layout.empty && (weekMins > 0 || (state.shortfalls?.length ?? 0) > 0);
+  const readingDay = openDay ? week.find((d) => d.key === openDay) : null;
 
   /** Everything mutable per-frame lives in one ref, off React's books. */
   const v = useRef({
@@ -224,11 +256,13 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
       setAcornId(hit.taskId || null);
       setFinder(null);
       setPlant(false);
+      setOpenDay(null);
       setTouched(true);
-    } else if (s.selection || finder || plant) {
+    } else if (s.selection || finder || plant || openDay) {
       clear();
       setFinder(null);
       setPlant(false);
+      setOpenDay(null);
     }
   };
 
@@ -266,7 +300,8 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
       else if (ai <= 0) setAcornId(null);
       else setAcornId(list[ai - 1].taskId);
     } else if (e.key === "Escape") {
-      if (acornId) setAcornId(null);
+      if (openDay) setOpenDay(null);
+      else if (acornId) setAcornId(null);
       else clear();
     } else if (e.key === "Enter" && selection) {
       onOpenProject(selection);
@@ -283,6 +318,7 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
       setAcornId(null);
     }
     setFinder(null);
+    setOpenDay(null);
     canvas.current?.focus();
   };
 
@@ -339,6 +375,7 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
           <p className="mt-1 text-xs text-[var(--muted)]">
             {layout.branches.length} {layout.branches.length === 1 ? "branch" : "branches"} ·{" "}
             {layout.counts.done} of {layout.counts.total} acorns stored away
+            {weekMins > 0 ? ` · ${hm(weekMins)} routed this week` : ""}
           </p>
         )}
       </header>
@@ -382,11 +419,57 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
         </div>
       ) : (
         !touched && !finder && !plant && (
-          <p className="pointer-events-none absolute bottom-6 left-1/2 w-max max-w-[92%] -translate-x-1/2
-                        text-center text-xs text-[var(--faint)]">
+          <p className={`pointer-events-none absolute left-1/2 w-max max-w-[92%] -translate-x-1/2
+                        text-center text-xs text-[var(--faint)] ${dockUp ? "bottom-[4.8rem]" : "bottom-6"}`}>
             Tap anything — a branch, an acorn, the squirrel · drag for wind
           </p>
         )
+      )}
+
+      {/* ------------------------------------------------ the week, routed */}
+      {/**
+        * Seven days at the foot of the tree, each column filled to the height
+        * of the work the planner routed into it. This is the tree's answer to
+        * "when will all this actually happen?" — read from the same
+        * `state.blocks` Today works from, so it cannot disagree with the day
+        * that arrives. A tap opens the day; an over-committed day caps amber.
+        */}
+      {dockUp && (
+        <div
+          className={`absolute bottom-3 left-1/2 -translate-x-1/2 items-end gap-1 rounded-xl border
+                      border-[var(--line)] bg-[var(--paper)]/85 px-2.5 py-1.5 backdrop-blur-md
+                      sm:left-6 sm:translate-x-0
+                      ${branch || unfiledOpen || acornTask || finder || plant || openDay
+                        ? "hidden sm:flex" : "flex"}`}
+        >
+          {week.map((d) => (
+            <button
+              key={d.key}
+              onClick={() => { setOpenDay(openDay === d.key ? null : d.key); setPlant(false); setFinder(null); }}
+              aria-label={`${d.name} — ${d.mins ? `${hm(d.mins)} routed` : "nothing routed"}`}
+              title={`${d.name} · ${d.mins ? hm(d.mins) : "clear"}`}
+              className="group flex w-6 flex-col items-center gap-1"
+            >
+              <span
+                className={`flex h-10 w-3.5 items-end overflow-hidden rounded-sm border transition-colors ${
+                  openDay === d.key ? "border-[var(--ink)]" : "border-[var(--hairline)] group-hover:border-[var(--muted)]"
+                }`}
+              >
+                <span
+                  className={`w-full ${d.mins > dayCap ? "bg-[var(--alert)]" : "bg-[var(--ink)]"}`}
+                  style={{
+                    height: `${Math.min(100, Math.round((d.mins / dayCap) * 100))}%`,
+                    opacity: d.mins ? 0.9 : 0,
+                  }}
+                />
+              </span>
+              <span className={`text-[9px] leading-none ${d.key === week[0].key ? "text-[var(--ink)]" : "text-[var(--faint)]"}`}>
+                {d.short}
+              </span>
+            </button>
+          ))}
+          <span className="num ml-1.5 pb-4 text-[10px] text-[var(--muted)]">{hm(weekMins)}</span>
+        </div>
       )}
 
       {/* ------------------------------------------------ plant a new branch */}
@@ -456,8 +539,75 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
         </div>
       )}
 
+      {/* -------------------------------------------------- one routed day */}
+      {readingDay && !finder && (
+        <aside
+          aria-label={`${readingDay.name} routed`}
+          className="absolute inset-x-3 bottom-3 max-h-[62%] overflow-y-auto rounded-xl border
+                     border-[var(--line)] bg-[var(--paper)]/92 p-4 shadow-[var(--float)]
+                     backdrop-blur-md sm:inset-x-auto sm:bottom-auto sm:right-6 sm:top-20
+                     sm:max-h-[calc(100%-7rem)] sm:w-[21rem]"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="label">{readingDay.date}</p>
+              <p className="mt-1 text-sm font-semibold capitalize">{readingDay.name}</p>
+              <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                {readingDay.mins
+                  ? `${hm(readingDay.mins)} routed · ${new Set(readingDay.rows.map((b) => b.taskId)).size} ${
+                      new Set(readingDay.rows.map((b) => b.taskId)).size === 1 ? "acorn" : "acorns"
+                    }`
+                  : "nothing routed — a clear day"}
+              </p>
+            </div>
+            <button
+              onClick={() => setOpenDay(null)}
+              aria-label="Close"
+              className="shrink-0 px-1 text-[var(--faint)] hover:text-[var(--ink)]"
+            >
+              ×
+            </button>
+          </div>
+
+          {readingDay.rows.length > 0 && (
+            <ul className="mt-3 space-y-0.5 border-t border-[var(--hairline)] pt-2">
+              {readingDay.rows.map((b, i) => (
+                <li key={`${b.taskId}-${i}`}>
+                  {/* Each routed block walks back to its acorn — the day and
+                      the tree are two views of one plan. */}
+                  <button
+                    onClick={() => {
+                      setOpenDay(null);
+                      setSelection(b.task.projectId ?? UNFILED);
+                      setAcornId(b.taskId);
+                    }}
+                    className="flex w-full items-baseline gap-2 rounded px-1 py-1 text-left text-xs
+                               transition-colors hover:bg-[var(--hairline)]"
+                  >
+                    <span className="num w-14 shrink-0 text-[var(--muted)]">
+                      {b.start ? fmtTime(b.start) : "—"}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{b.task.title}</span>
+                    <span className="num shrink-0 text-[10px] text-[var(--faint)]">{hm(b.mins)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {(state.shortfalls?.length ?? 0) > 0 && (
+            <p className="alert mt-3 border-t border-[var(--hairline)] pt-2 text-[11px]">
+              {state.shortfalls.length === 1
+                ? "1 task doesn't fit before its deadline"
+                : `${state.shortfalls.length} tasks don't fit before their deadlines`}
+              {" — Today has the details."}
+            </p>
+          )}
+        </aside>
+      )}
+
       {/* --------------------------------------------------- one open acorn */}
-      {acornTask && !finder && (
+      {acornTask && !finder && !readingDay && (
         <aside
           aria-label={`${acornTask.title} acorn`}
           className="absolute inset-x-3 bottom-3 max-h-[62%] overflow-y-auto rounded-xl border
@@ -486,6 +636,41 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
                   : ""}
                 {acornTask.delegatedTo ? ` · with ${acornTask.delegatedTo}` : ""}
               </p>
+              {/* When the planner routed it — and the line is a door to that
+                  day. Honest when it couldn't be: no estimate, or no room. */}
+              {!acornTask.done && (() => {
+                const mine = (state.blocks || []).filter((b) => b.taskId === acornTask.id);
+                if (mine.length) {
+                  const total = mine.reduce((n, b) => n + b.mins, 0);
+                  const when = new Date(`${mine[0].day}T00:00`).toLocaleDateString([], { weekday: "short" });
+                  const label = `routed ${when}${mine[0].start ? ` ${fmtTime(mine[0].start)}` : ""}${
+                    mine.length > 1 ? ` +${mine.length - 1} more` : ""
+                  } · ${hm(total)}`;
+                  return week.some((d) => d.key === mine[0].day) ? (
+                    <button
+                      onClick={() => setOpenDay(mine[0].day)}
+                      className="mt-1 block text-[11px] text-[var(--muted)] underline
+                                 decoration-[var(--hairline)] underline-offset-2 transition-colors
+                                 hover:text-[var(--ink)]"
+                    >
+                      {label}
+                    </button>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-[var(--muted)]">{label}</p>
+                  );
+                }
+                if (state.shortfalls?.some((s) => s.taskId === acornTask.id)) {
+                  return <p className="alert mt-1 text-[11px]">doesn't fit before its deadline</p>;
+                }
+                if (!(acornTask.estimateMins > 0)) {
+                  return (
+                    <p className="mt-1 text-[11px] text-[var(--faint)]">
+                      no estimate yet, so it can't be routed
+                    </p>
+                  );
+                }
+                return null;
+              })()}
             </div>
             <button
               onClick={clear}
@@ -545,7 +730,7 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
       )}
 
       {/* --------------------------------------------------- the reading panel */}
-      {(branch || unfiledOpen) && !finder && !acornTask && (
+      {(branch || unfiledOpen) && !finder && !acornTask && !readingDay && (
         <aside
           aria-label={`${branch ? branch.name : "Unfiled"} branch`}
           className="absolute inset-x-3 bottom-3 max-h-[62%] overflow-y-auto rounded-xl border
@@ -735,11 +920,17 @@ function Timeline({ project, state }) {
   const focused = state.sessions
     .filter((s) => s.projectId === project.id)
     .reduce((n, s) => n + (s.focusedMs || 0), 0);
+  // What the planner has already routed for this branch, across the horizon.
+  const routed = (state.blocks || []).reduce((n, b) => {
+    const t = state.tasks.find((x) => x.id === b.taskId);
+    return t?.projectId === project.id ? n + b.mins : n;
+  }, 0);
 
   return (
     <p className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--muted)]">
       {started && <span>began {started}</span>}
       {focused > 0 && <span>{duration(focused)} lived in it</span>}
+      {routed > 0 && <span>{hm(routed)} routed ahead</span>}
       {lands?.short && lands.state !== "clear" && (
         <span className={lands.state === "short" || lands.state === "late" ? "font-medium text-[var(--ink)]" : ""}>
           {lands.short}
@@ -748,3 +939,6 @@ function Timeline({ project, state }) {
     </p>
   );
 }
+
+/** Minutes, said the way the app says them: 90 → "1.5h", 45 → "45m". */
+const hm = (m) => (m >= 60 ? `${+(m / 60).toFixed(1)}h` : `${m}m`);
