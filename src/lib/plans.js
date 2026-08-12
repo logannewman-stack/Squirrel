@@ -38,7 +38,11 @@ export const PLANS = {
     price: 24.99,
     projects: null,
     tasks: null,
-    chats: null,
+    // A ceiling, not a meter you feel: the deterministic parser answers most
+    // messages free on-device, so only model-backed turns count — and a
+    // thousand of those is a heavy month. It exists because "unlimited" here
+    // is an unlimited API bill for the app's owner.
+    chats: 1000,
     tagline: "Run your week",
     popular: true,
     blurb: "Everything unlimited, synced everywhere, with Squirrel on tap.",
@@ -63,7 +67,7 @@ export const PLANS = {
     price: 50,
     projects: null,
     tasks: null,
-    chats: null,
+    chats: 3000,
     tagline: "Run your team",
     blurb: "Pro, plus real delegation, client projects, and Squirrel at her most capable.",
     features: [
