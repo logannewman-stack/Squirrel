@@ -631,6 +631,9 @@ export default function Purpose({ state, onOpenProject, onStart, onFocus }) {
                     ? "stored away"
                     : acornTask.due && acornTask.due < dayKey() ? "overdue" : "ripening"}
                 </span>
+                {/* The declared priority, when it says something — it now
+                    buys capacity and the morning, so it belongs in view. */}
+                {acornTask.priority && acornTask.priority !== "normal" ? ` · ${acornTask.priority}` : ""}
                 {acornTask.estimateMins ? ` · ${acornTask.estimateMins}m` : ""}
                 {acornTask.due
                   ? ` · due ${new Date(`${acornTask.due}T00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}`

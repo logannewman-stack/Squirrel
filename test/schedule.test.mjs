@@ -434,5 +434,58 @@ const state = {
     JSON.stringify({ blocks: heavy.blocks.length, shorts: heavy.shortfalls.length }));
 }
 
+// ------------------------------------------- priority shapes the plan itself
+{
+  /**
+   * One day of room (300m), two 200-minute tasks. Only one fits whole. The
+   * low-priority task arrived first — created earlier, same deadline — and
+   * without the priority pull it would win the day on the tiebreak. The
+   * critical one must claim it instead, automatically.
+   */
+  const r = distribute(
+    [
+      task({ id: "lowly", priority: "low", estimateMins: 200, due: D(1), createdAt: 1 }),
+      task({ id: "vital", priority: "critical", estimateMins: 200, due: D(1), createdAt: 2 }),
+    ],
+    [], [], { now: NOW },
+  );
+  const vital = r.blocks.filter((b) => b.taskId === "vital").reduce((n, b) => n + b.mins, 0);
+  t("scarce capacity goes to the critical task, not the earlier one",
+    vital === 200, vital);
+  t("  and the low one is the one reported short",
+    r.shortfalls.length === 1 && r.shortfalls[0].taskId === "lowly",
+    JSON.stringify(r.shortfalls.map((s) => s.taskId)));
+
+  // Sharing a day, the critical task gets the first hours of it.
+  const day = distribute(
+    [
+      task({ id: "meh", priority: "low", estimateMins: 60, due: D(1), createdAt: 1 }),
+      task({ id: "top", priority: "critical", estimateMins: 60, due: D(1), createdAt: 2 }),
+    ],
+    [], [], { now: NOW },
+  );
+  const at = (id) => day.blocks.find((b) => b.taskId === id)?.start || "";
+  t("the morning belongs to the most important thing on the day",
+    at("top") < at("meh"), `${at("top")} vs ${at("meh")}`);
+
+  /**
+   * The nudge never overturns real arithmetic: a critical task with a week
+   * of room must not steal the only day a normal task has. The deadline is
+   * a fact; the label is a preference.
+   */
+  const fair = distribute(
+    [
+      task({ id: "roomy", priority: "critical", estimateMins: 300, due: D(9), createdAt: 1 }),
+      task({ id: "tight", priority: "normal", estimateMins: 300, due: D(1), createdAt: 2 }),
+    ],
+    [], [], { now: NOW },
+  );
+  const tightShort = fair.shortfalls.some((s) => s.taskId === "tight");
+  t("a deadline still beats a label — the tight task is never starved",
+    !tightShort, JSON.stringify(fair.shortfalls.map((s) => s.taskId)));
+  t("  and the roomy critical work still all lands",
+    fair.blocks.filter((b) => b.taskId === "roomy").reduce((n, b) => n + b.mins, 0) === 300);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

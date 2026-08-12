@@ -256,13 +256,27 @@ function byUrgency(a, b) {
   const aLost = a.slack < 0;
   const bLost = b.slack < 0;
   if (aLost !== bLost) return aLost ? 1 : -1;
-  if (a.slack !== b.slack) return a.slack - b.slack;
+  /**
+   * Priority leans on the scale, without lying to it. The sort key is slack
+   * *adjusted* by the declared priority — critical work behaves as if it had
+   * two hours less room, low work as if it had ninety minutes more — so when
+   * capacity is scarce the important thing claims it first. Deadline
+   * arithmetic still dominates: a two-day difference in slack is bigger than
+   * any nudge, and the lost-cause rule above reads the raw number, so a
+   * critical label can never make possible work look doomed.
+   */
+  const aPull = a.pull ?? a.slack;
+  const bPull = b.pull ?? b.slack;
+  if (aPull !== bPull) return aPull - bPull;
   const rank = { critical: 0, high: 1, normal: 2, low: 3 };
   if (rank[a.task.priority] !== rank[b.task.priority]) {
     return rank[a.task.priority] - rank[b.task.priority];
   }
   return (a.task.createdAt || 0) - (b.task.createdAt || 0);
 }
+
+/** How hard each priority leans — minutes of imaginary slack,±. */
+const PRIORITY_PULL = { critical: -120, high: -60, normal: 0, low: 90 };
 
 /**
  * Distribute open work across the days before each deadline.
@@ -377,12 +391,13 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     committed.set(day, (committed.get(day) || 0) + mins);
   };
 
-  // Rank by slack, which needs each task's available time first.
+  // Rank by slack, which needs each task's available time first. `pull` is
+  // the same number leaned on by priority — the order work claims capacity.
   const ranked = open
-    .map((x) => ({
-      ...x,
-      slack: x.days.reduce((n, d) => n + capacity(dayKey(d)), 0) - x.need,
-    }))
+    .map((x) => {
+      const slack = x.days.reduce((n, d) => n + capacity(dayKey(d)), 0) - x.need;
+      return { ...x, slack, pull: slack + (PRIORITY_PULL[x.task.priority] ?? 0) };
+    })
     .sort(byUrgency);
 
   const blocks = [];
@@ -468,8 +483,12 @@ export function distribute(tasks, events, sessions = [], opts = {}) {
     }
   }
 
-  // Give every block a real time by laying it into the day's actual gaps.
-  const placed = placeInDay(blocks, events, o);
+  // Give every block a real time by laying it into the day's actual gaps —
+  // the most important work first, so priority buys the morning.
+  const rankOf = new Map(
+    mine.map((t) => [t.id, { critical: 0, high: 1, normal: 2, low: 3 }[t.priority] ?? 2]),
+  );
+  const placed = placeInDay(blocks, events, o, rankOf);
 
   return {
     blocks: placed,
@@ -559,15 +578,22 @@ function shortfallFor(task, need, short, days, events, o, cache, committed = new
 /**
  * Turn "90 minutes on Tuesday" into "Tuesday 09:00–10:30".
  *
- * Blocks are laid into the day's real gaps in the order they were allocated. A
- * block that will not fit any single remaining gap is split rather than
- * dropped — two 45-minute halves on the same day are still the work.
+ * Blocks are laid into the day's real gaps, highest priority first — the
+ * first gap of a working day is the morning, and the morning belongs to the
+ * most important thing on it; allocation order breaks ties, so equal work
+ * keeps the urgency order it was ranked in. A block that will not fit any
+ * single remaining gap is split rather than dropped — two 45-minute halves
+ * on the same day are still the work.
  */
-function placeInDay(blocks, events, o) {
+function placeInDay(blocks, events, o, rankOf = new Map()) {
   const byDay = new Map();
   for (const b of blocks) {
     if (!byDay.has(b.day)) byDay.set(b.day, []);
     byDay.get(b.day).push(b);
+  }
+  // Stable sort: priority first, arrival order preserved within a rank.
+  for (const list of byDay.values()) {
+    list.sort((a, b) => (rankOf.get(a.taskId) ?? 2) - (rankOf.get(b.taskId) ?? 2));
   }
 
   const out = [];

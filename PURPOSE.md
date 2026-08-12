@@ -107,7 +107,17 @@ views of that one plan (`state.blocks`). Purpose now shows it at the source:
 All of it reads `state.blocks`, the same distribution Today works from, so
 the tree can never promise a different week than the day that arrives.
 
-Two rules deepen the routing itself (`lib/schedule.js`):
+Three rules deepen the routing itself (`lib/schedule.js`):
+
+- **Priority shapes the plan, automatically.** The sort key is slack leaned
+  on by the declared priority — critical work behaves as if it had two hours
+  less room, low work as if it had ninety minutes more — so when capacity is
+  scarce the important thing claims it first, no pinning required. Within a
+  day, blocks are laid into the gaps highest-priority first: the morning
+  belongs to the most important thing on it. Deadline arithmetic still
+  dominates — a label can never starve a task whose date is genuinely
+  tighter, and the lost-cause rule reads the raw slack so a critical label
+  can't make possible work look doomed.
 
 - **A project's deadline binds its undated tasks.** A task with its own due
   keeps it; a task with neither is ordinary undated work. The cascade is
