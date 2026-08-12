@@ -19,9 +19,11 @@ import { Button } from "./ui";
  * through the crown, and dragging feeds the gust.
  *
  * And the squirrel lives here. It perches on whatever you are reading, runs
- * along the tree when you change your mind, and — tapped, or summoned with
- * "/" — it finds things: type a few letters and the acorns that answer stay
- * lit while the rest of the tree steps back into the dark.
+ * along the tree when you change your mind, and at its crown lookout it
+ * wonders out loud — a thought bubble asking "Looking for something?".
+ * Tap the thought, tap the squirrel, or press "/" and it finds things:
+ * type a few letters and the acorns that answer stay lit while the rest of
+ * the tree steps back into the dark.
  *
  * This began life as a DNA helix; the oak replaced it because the shape of
  * this screen should belong to the brand, not to biology. The drawing lives
@@ -61,6 +63,7 @@ export default function Purpose({ state, onOpenProject, onStart }) {
   });
   v.current.selection = unfiledOpen ? null : selection;
   v.current.find = found;
+  v.current.finderOpen = Boolean(finder);
 
   const clear = () => setSelection(null);
 
@@ -111,6 +114,9 @@ export default function Purpose({ state, onOpenProject, onStart }) {
       s.drawn = drawOak(ctx, box.clientWidth, box.clientHeight, layout, {
         t, gust: s.gust, selection: s.selection, dim: s.dim,
         find: s.find, squirrel: s.squirrel, squirrelHot: Boolean(s.find),
+        // The thought bubble shows while the squirrel keeps lookout — gone
+        // the moment it is answered (finder open) or has a branch to show.
+        thought: !s.selection && !s.find && !s.finderOpen,
         zoom: s.zoom, panX: s.panX, reduced: s.reduced,
       }, { mode, font });
       raf = requestAnimationFrame(frame);

@@ -42,8 +42,9 @@ const grow = (opts = {}) => {
     L.ground.length === 1 && L.ground[0].title === "Loose end");
   t("branches alternate sides, so the crown balances",
     L.branches[0].side !== L.branches[1].side);
-  t("each branch takes the next ink in turn",
-    L.branches[0].color === PALETTE[0] && L.branches[1].color === PALETTE[1]);
+  t("every branch wears the same ink — the tree is monochrome, like the app",
+    L.branches[0].color === PALETTE[0] && L.branches[1].color === PALETTE[0] &&
+    PALETTE.length === 1);
   t("the count over the door is every acorn, hung or fallen",
     L.counts.total === 3, L.counts.total);
 }
@@ -119,6 +120,12 @@ const grow = (opts = {}) => {
   t("  and on nothing outside one", hitTest(drawn, 200, 200) === null);
   t("the squirrel wins its own square — it is the smallest and most alive",
     hitTest(drawn, 310, 108).squirrel === true);
+
+  const withThought = { ...drawn, bubble: { x: 250, y: 20, w: 140, h: 26 } };
+  t("the thought bubble is the squirrel, tap for tap",
+    withThought.bubble && hitTest(withThought, 320, 33).squirrel === true);
+  t("  but only the bubble, not the sky around it",
+    hitTest(withThought, 460, 33) === null);
 }
 
 /* ------------------------------------------------------------- the squirrel */

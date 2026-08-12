@@ -45,10 +45,24 @@ layout data drawn as bright nodes linked by who-works-on-what, an alternate
 renderer behind the same panel. Worth doing only after the oak has earned its
 keep.
 
+## One ink
+
+The first oak gave every branch its own colour, and it read as somebody
+else's app. Squirrel is monochrome everywhere — ink on paper, one alert
+accent — so the tree is too: white line-work in the dark, black ink in the
+light, and colour spent only where the rest of the app spends it, on overdue
+acorns (`--alert`). A branch is told apart by its place on the trunk and its
+name; done acorns are filled and glowing, open ones are outlines. `PALETTE`
+in `lib/oak.js` is now a single ink, kept as a list in case a second ink
+ever earns its place.
+
 ## The squirrel works here
 
-The squirrel perches at the crown, keeping lookout. Select a branch and it
-runs to perch on that branch. Tap it — or press **/** — and it finds things:
+The squirrel perches at the crown, keeping lookout — and wonders out loud:
+a thought bubble over its head asks *"Looking for something?"*, so the finder
+advertises itself instead of waiting to be discovered. Tapping the thought is
+tapping the squirrel. Select a branch and it runs to perch on that branch.
+Tap it — or press **/** — and it finds things:
 type a few letters and the branches and acorns that answer stay lit while the
 rest of the tree dims, with a result list naming each acorn's branch. Enter
 carries you to the best match, fallen acorns included. The finder is the same

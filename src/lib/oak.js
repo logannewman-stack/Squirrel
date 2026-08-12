@@ -14,17 +14,18 @@
  * by running it.
  */
 
-/** Branch inks: bark stays one colour; these tint each branch's acorn caps
- *  and label so ten branches stay tellable-apart at a glance. */
+/**
+ * One ink — the app's own (`--ink`: #fafafa on dark, #0a0a0a on paper).
+ *
+ * The first tree gave every branch its own colour, and it read as somebody
+ * else's app: Squirrel is monochrome everywhere, ink on paper with a single
+ * alert accent, and the oak has to belong to it. A branch's identity is its
+ * place on the trunk and its name, not a hue; the renderer spends the one
+ * accent (`--alert`) on overdue acorns only, the same way the rest of the
+ * app spends colour. Kept as a list so a future ink still slots in.
+ */
 export const PALETTE = [
-  { name: "amber",  dark: "#ffc44d", light: "#b45309" },
-  { name: "moss",   dark: "#b8f34e", light: "#4d7c0f" },
-  { name: "copper", dark: "#ff9d5c", light: "#c2410c" },
-  { name: "sage",   dark: "#5eead4", light: "#0f766e" },
-  { name: "honey",  dark: "#fde047", light: "#a16207" },
-  { name: "rose",   dark: "#ff7d8f", light: "#be123c" },
-  { name: "lilac",  dark: "#c4b5fd", light: "#6d28d9" },
-  { name: "sky",    dark: "#7dd3fc", light: "#0369a1" },
+  { name: "ink", dark: "#fafafa", light: "#0a0a0a" },
 ];
 
 /** Deterministic per-id variety, so the same tree grows the same way twice. */
@@ -183,9 +184,15 @@ export const trunkTopT = (layout) =>
 /**
  * Which drawn thing, if any, is under a finger.
  * Screen-space, against what the last frame actually drew; 26px covers a
- * fingertip. The squirrel wins ties — it is the smallest and the most alive.
+ * fingertip. The squirrel wins ties — it is the smallest and the most alive —
+ * and its thought bubble counts as the squirrel: touching the question is
+ * the most literal way to ask it.
  */
 export function hitTest(drawn, x, y, threshold = 26) {
+  const bb = drawn.bubble;
+  if (bb && x >= bb.x - 4 && x <= bb.x + bb.w + 4 && y >= bb.y - 4 && y <= bb.y + bb.h + 4) {
+    return { squirrel: true };
+  }
   const sq = drawn.squirrel;
   if (sq && Math.hypot(sq.x - x, sq.y - y) < threshold + 8) return { squirrel: true };
   let best = null;

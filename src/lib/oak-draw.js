@@ -7,11 +7,11 @@
  * acorns swinging a beat behind. Dragging feeds the gust, so a flick of the
  * finger moves through the crown like weather.
  *
- * The style is the app's own logo grown large: warm gold line-work on the
- * dark, ink on the paper. Bark is one colour on purpose — the tree is one
- * life — and each branch's identity lives in its acorn caps and its label,
- * which is enough to tell ten branches apart without the crown turning into
- * a colour wheel.
+ * The style is the app's own logo grown large: white line-work on the dark,
+ * ink on the paper — monochrome, because the rest of Squirrel is monochrome
+ * and this screen has to belong to it. The tree is one life in one ink; a
+ * branch is told apart by its place and its name, and colour is spent the
+ * way the app spends it everywhere: only on the alert, for overdue acorns.
  */
 import { branchPoint, trunkPoint, geometryFor, perchFor, trunkTopT } from "./oak.js";
 
@@ -41,7 +41,7 @@ const FLIES = makeFlies();
  */
 function drawSquirrel(ctx, x, y, side, theme, t, glowing) {
   const dark = theme.mode !== "light";
-  const ink = dark ? "#eec06a" : "#4a3a28";
+  const ink = dark ? "#f5f6f9" : "#141417";
   const bob = Math.sin(t / 700) * 0.8;
   ctx.save();
   ctx.translate(x, y + bob);
@@ -65,7 +65,7 @@ function drawSquirrel(ctx, x, y, side, theme, t, glowing) {
   );
 
   if (dark && glowing) {
-    ctx.shadowColor = hex("#ffc44d", 0.55);
+    ctx.shadowColor = hex("#ffffff", 0.45);
     ctx.shadowBlur = 14;
   }
   ctx.fillStyle = ink;
@@ -73,11 +73,65 @@ function drawSquirrel(ctx, x, y, side, theme, t, glowing) {
   ctx.fill(body);
   ctx.shadowBlur = 0;
   // The eye — paper-coloured, so it reads at silhouette size.
-  ctx.fillStyle = dark ? "#0a0b10" : "#faf9f5";
+  ctx.fillStyle = dark ? "#0a0b10" : "#ffffff";
   ctx.beginPath();
   ctx.arc(13.4, 16.4, 1.25, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
+}
+
+/**
+ * The squirrel's thought, floating over its head: a standing offer to go
+ * find something. A soft pill with a two-bead trail rising from the ear —
+ * the finder made visible, so nobody has to be told the squirrel can look.
+ * Tapping the thought is tapping the squirrel; the rect is returned so the
+ * hit test can honour the most literal route there is: touching the question.
+ */
+function drawThought(ctx, sq, theme, t, font, reduced) {
+  const dark = theme.mode !== "light";
+  const text = "Looking for something?";
+  const bob = reduced ? 0 : Math.sin(t / 700) * 0.8;
+  // Its own slow breath, half a beat off the squirrel's, so the two read as
+  // alive together rather than glued.
+  const breathe = reduced ? 0 : Math.sin(t / 950) * 1.4;
+  const dir = sq.side > 0 ? -1 : 1; // over the face, which looks at the trunk
+
+  ctx.save();
+  ctx.font = `500 11px ${font}`;
+  const bw = ctx.measureText(text).width + 22;
+  const bh = 26;
+  const bx = sq.x + dir * (bw / 2 - 10);
+  const by = sq.y - 64 + bob + breathe;
+
+  // The trail: two beads rising from the ear toward the thought.
+  ctx.fillStyle = dark ? hex("#fafafa", 0.5) : hex("#0a0a0a", 0.4);
+  for (const [f, r] of [[0.32, 1.7], [0.66, 2.6]]) {
+    ctx.beginPath();
+    ctx.arc(sq.x + dir * f * 18, sq.y - 34 - f * 20 + bob, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const x0 = bx - bw / 2;
+  const y0 = by - bh / 2;
+  if (dark) {
+    ctx.shadowColor = hex("#ffffff", 0.22);
+    ctx.shadowBlur = 12;
+  }
+  ctx.fillStyle = dark ? "rgba(10,10,12,0.92)" : "rgba(255,255,255,0.95)";
+  ctx.beginPath();
+  ctx.roundRect(x0, y0, bw, bh, 13);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = dark ? hex("#fafafa", 0.4) : hex("#0a0a0a", 0.3);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = dark ? "#fafafa" : "#0a0a0a";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, bx, by + 0.5);
+  ctx.restore();
+  return { x: x0, y: y0, w: bw, h: bh };
 }
 
 /** A tapered stroke along a sampled curve — canvas cannot taper, so we lay
@@ -98,16 +152,17 @@ function taper(ctx, pts, w0, w1, color) {
 /**
  * Draw one frame.
  *
- * @param view {t, gust, selection, dim, find, squirrel:{x,y,side}, zoom, panX, reduced}
- * @returns {{targets, squirrel}} screen-space hit records.
+ * @param view {t, gust, selection, dim, find, squirrel:{x,y,side}, thought,
+ *              zoom, panX, reduced} — `thought` shows the squirrel's bubble.
+ * @returns {{targets, squirrel, bubble}} screen-space hit records.
  */
 export function drawOak(ctx, w, h, layout, view, theme) {
   const dark = theme.mode !== "light";
   const t = view.reduced ? 0 : view.t || 0;
   const gust = view.gust || 0;
   const geo = geometryFor(w, h);
-  const bark = dark ? "#b98d4a" : "#4a3a28";
-  const barkDim = dark ? "#6d5731" : "#a08b6f";
+  const bark = dark ? "#eef0f5" : "#18181b";
+  const barkDim = dark ? "#5f5f68" : "#a1a1aa";
 
   /* ------------------------------------------------------------- the night */
   const vg = ctx.createRadialGradient(w / 2, h * 0.35, 0, w / 2, h * 0.45, Math.max(w, h) * 0.8);
@@ -126,7 +181,7 @@ export function drawOak(ctx, w, h, layout, view, theme) {
   // A breath of warmth where the ground meets the dark.
   const hz = ctx.createLinearGradient(0, geo.groundY - 60, 0, geo.groundY + 40);
   hz.addColorStop(0, "rgba(0,0,0,0)");
-  hz.addColorStop(1, dark ? "rgba(233,180,76,0.06)" : "rgba(74,58,40,0.05)");
+  hz.addColorStop(1, dark ? "rgba(250,250,250,0.05)" : "rgba(10,10,10,0.04)");
   ctx.fillStyle = hz;
   ctx.fillRect(0, geo.groundY - 60, w, 100);
 
@@ -134,7 +189,7 @@ export function drawOak(ctx, w, h, layout, view, theme) {
     const fx = ((f.x + (view.reduced ? 0 : t * 0.000006) + Math.sin(t / 2400 + f.wob) * 0.004) % 1) * w;
     const fy = f.y * h + Math.sin(t / 1700 + f.wob) * 6;
     const tw = view.reduced ? 0.5 : 0.3 + 0.35 * Math.sin(t / 800 + f.wob);
-    ctx.fillStyle = dark ? hex("#ffd98a", 0.06 + 0.1 * tw) : hex("#8a7a5a", 0.05 + 0.05 * tw);
+    ctx.fillStyle = dark ? hex("#e7eaf2", 0.06 + 0.1 * tw) : hex("#8b8b94", 0.05 + 0.05 * tw);
     ctx.beginPath();
     ctx.arc(fx, fy, f.r, 0, Math.PI * 2);
     ctx.fill();
@@ -162,7 +217,7 @@ export function drawOak(ctx, w, h, layout, view, theme) {
       { x: geo.baseX - 2, y: geo.groundY - 78 },
     ], 5, 2.4, bark);
     ctx.restore();
-    return { targets: [], squirrel: null };
+    return { targets: [], squirrel: null, bubble: null };
   }
 
   const selected = view.selection;
@@ -243,7 +298,8 @@ export function drawOak(ctx, w, h, layout, view, theme) {
       const found = find && find.acornIds.has(a.taskId);
       const aMul = find ? (found ? 1 : 0.12) : mul;
       const overdueHot = a.overdue && !view.reduced ? 0.7 + 0.3 * Math.sin(t / 280) : 1;
-      const body = a.overdue ? (dark ? "#ff5d6c" : "#dc2626") : accent;
+      // The app's one accent (--alert), spent here the way Today spends it.
+      const body = a.overdue ? (dark ? "#f0a04b" : "#b45309") : accent;
 
       // Stem — dashed when the task is with somebody else: hanging by an
       // agreement rather than by wood.
@@ -289,7 +345,7 @@ export function drawOak(ctx, w, h, layout, view, theme) {
       ctx.stroke();
 
       if (found) {
-        ctx.strokeStyle = hex(dark ? "#ffe9b0" : "#7c5a12", 0.85);
+        ctx.strokeStyle = hex(dark ? "#ffffff" : "#0a0a0a", 0.85);
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.arc(ax, ay, 8.5 + Math.sin(t / 300) * 1.2, 0, Math.PI * 2);
@@ -301,8 +357,8 @@ export function drawOak(ctx, w, h, layout, view, theme) {
     /* --------------------------------------------------------------- label */
     const tip = branchPoint(b, 1, geo, t, gust);
     const narrow = w < 560;
-    const ink = dark ? "#e8ecf4" : "#1c1c20";
-    const sub = dark ? "#7d879c" : "#71717a";
+    const ink = dark ? "#fafafa" : "#0a0a0a";
+    const sub = dark ? "#9a9aa3" : "#6b6b74";
     const lMul = find ? (find.branchIds.has(b.projectId) ? 1 : 0.25) : (mul < 1 ? 1 - view.dim * 0.55 : 1);
     ctx.textBaseline = "middle";
     ctx.font = `600 ${narrow ? 11.5 : 12.5}px ${theme.font || "system-ui"}`;
@@ -326,11 +382,6 @@ export function drawOak(ctx, w, h, layout, view, theme) {
     ctx.font = `500 10px ${theme.font || "system-ui"}`;
     ctx.fillStyle = hex(sub, 0.9 * lMul);
     ctx.fillText(narrow ? `${b.doneCount}/${b.count} stored` : `${b.doneCount} of ${b.count} stored away`, lx, ly + 6);
-    // A drop of the branch's own colour beside the name — the legend, inline.
-    ctx.fillStyle = hex(accent, 0.9 * lMul);
-    ctx.beginPath();
-    ctx.arc(lx + (align === "left" ? -7 : 7), ly - 8, 2.4, 0, Math.PI * 2);
-    ctx.fill();
     targets.push({ x: lx + (align === "left" ? 30 : -30), y: ly, projectId: b.projectId });
     // A generous invisible target along the wood itself.
     for (const f of [0.35, 0.6, 0.85]) {
@@ -347,7 +398,7 @@ export function drawOak(ctx, w, h, layout, view, theme) {
       const gy = geo.groundY - 4 - (g.spot * 7) % 6;
       const found = find && find.acornIds.has(g.taskId);
       const mul2 = find ? (found ? 1 : 0.12) : gMul;
-      ctx.strokeStyle = hex(g.overdue ? (dark ? "#ff5d6c" : "#dc2626") : barkDim, 0.8 * mul2);
+      ctx.strokeStyle = hex(g.overdue ? (dark ? "#f0a04b" : "#b45309") : barkDim, 0.8 * mul2);
       ctx.lineWidth = 1.3;
       ctx.beginPath();
       ctx.arc(gx, gy, 3.8, 0, Math.PI * 2);
@@ -358,7 +409,7 @@ export function drawOak(ctx, w, h, layout, view, theme) {
       ctx.arc(gx, gy - 1, 4, Math.PI * 1.1, Math.PI * 1.9);
       ctx.stroke();
       if (found) {
-        ctx.strokeStyle = hex(dark ? "#ffe9b0" : "#7c5a12", 0.85);
+        ctx.strokeStyle = hex(dark ? "#ffffff" : "#0a0a0a", 0.85);
         ctx.lineWidth = 1.1;
         ctx.beginPath();
         ctx.arc(gx, gy, 8, 0, Math.PI * 2);
@@ -368,13 +419,16 @@ export function drawOak(ctx, w, h, layout, view, theme) {
     });
     ctx.font = `500 10px ${theme.font || "system-ui"}`;
     ctx.textAlign = "left";
-    ctx.fillStyle = hex(dark ? "#7d879c" : "#71717a", 0.85);
+    ctx.fillStyle = hex(dark ? "#9a9aa3" : "#6b6b74", 0.85);
     ctx.fillText("fallen — not on a branch yet", geo.baseX + 60, geo.groundY + 16);
   }
 
   /* ------------------------------------------------------------ squirrel */
   const perch = view.squirrel || perchFor(null, layout, geo);
   drawSquirrel(ctx, perch.x, perch.y, perch.side, theme, t, Boolean(find) || view.squirrelHot);
+  const thought = view.thought
+    ? drawThought(ctx, perch, theme, t, theme.font || "system-ui", view.reduced)
+    : null;
   ctx.restore();
 
   // Report in screen space (undo the zoom/pan transform for hit testing).
@@ -388,5 +442,8 @@ export function drawOak(ctx, w, h, layout, view, theme) {
   return {
     targets: targets.map(toScreen),
     squirrel: toScreen({ x: perch.x, y: perch.y - 14 }),
+    bubble: thought
+      ? { ...toScreen(thought), w: thought.w * z, h: thought.h * z }
+      : null,
   };
 }

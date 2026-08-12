@@ -86,6 +86,28 @@ await p.waitForTimeout(700);
 
 /* ------------------------------------------------- the squirrel finds it */
 {
+  /**
+   * Tap the squirrel itself — its thought bubble is the visible offer. The
+   * perch is recomputed from the same exported geometry the app draws with,
+   * after a beat for the squirrel to ease back to its crown lookout.
+   */
+  await p.waitForTimeout(900);
+  const spot = await p.evaluate(async () => {
+    const { layoutOak, perchFor, geometryFor } = await import("/src/lib/oak.js");
+    const s = await import("/src/lib/store.js");
+    const cv = document.querySelector("canvas");
+    const r = cv.getBoundingClientRect();
+    const st = s.getState();
+    const perch = perchFor(null, layoutOak(st.projects, st.tasks, {}), geometryFor(r.width, r.height));
+    return { x: r.left + perch.x, y: r.top + perch.y - 14 };
+  });
+  await p.mouse.click(spot.x, spot.y);
+  await p.waitForTimeout(400);
+  t("tapping the squirrel under its thought bubble opens the finder",
+    (await p.getByLabel("Ask the squirrel to find something").count()) === 1);
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+
   await p.locator("canvas").first().focus();
   await p.keyboard.press("/");
   await p.waitForTimeout(400);
