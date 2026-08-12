@@ -95,6 +95,28 @@ const SAY = [
   [/\bASAP\b/gi, "as soon as possible"],
   [/\bQBR\b/gi, "Q B R"],
 
+  /* ------------------------------------------------------------------ money
+     A project's value is written the way it is read on a screen — $4M, $850k —
+     and a screen reader hits the symbol first, so "$4M" came out as "dollar
+     four M". Every answer about what a project is worth was unspeakable, which
+     matters because those answers exist to be asked for out loud: "how much is
+     Q3 launch worth" is a question somebody asks while driving.
+
+     Before the general number rules, which would otherwise take the digits and
+     leave the symbol stranded. */
+  [/\$(\d+(?:\.\d+)?)\s*([kKmMbB])\b/g, (_, n, unit) => {
+    const word = { k: "thousand", m: "million", b: "billion" }[unit.toLowerCase()];
+    return `${n} ${word} dollars`;
+  }],
+  [/\$(\d{1,3}(?:,\d{3})+)/g, (_, n) => {
+    const v = Number(n.replace(/,/g, ""));
+    if (v >= 1e9) return `${+(v / 1e9).toFixed(2)} billion dollars`;
+    if (v >= 1e6) return `${+(v / 1e6).toFixed(2)} million dollars`;
+    if (v >= 1000) return `${+(v / 1000).toFixed(1)} thousand dollars`;
+    return `${v} dollars`;
+  }],
+  [/\$(\d+(?:\.\d{2})?)\b/g, "$1 dollars"],
+
   /* ------------------------------------------------------------- half hours
      Nobody says "five hours thirty minutes"; that is a stopwatch reading. The
      half is the one fraction English has a word for, and these three phrasings
@@ -186,7 +208,10 @@ export function toSpeech(text) {
       : lines;
 
   return spoken
-    .map((line) => (/[.!?]$/.test(line) ? line : `${line}.`))
+    // A colon already ends the line the way it is meant to be read — it is the
+    // pause before a list. Adding a full stop after it produced "Start here:."
+    // which a screen reader renders as an audible stumble.
+    .map((line) => (/[.!?:]$/.test(line) ? line : `${line}.`))
     .join(" ")
     .replace(/\s{2,}/g, " ")
     .replace(/,\s*\./g, ".")

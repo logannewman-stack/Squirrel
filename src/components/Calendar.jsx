@@ -352,6 +352,34 @@ function AgendaList({ range, state, now, onOpenEvent, onNewEvent }) {
                   </li>
                 );
               })}
+
+              {/**
+                * The deadlines the day was counted for.
+                *
+                * The chip above says "2 due" and the list under it drew only
+                * meetings and planned work — so a day whose whole content is
+                * deadlines rendered as a date, a red count, and blank space.
+                * The app told you twice that something was due on Friday and
+                * would not say what. Drawn last because a deadline is a fact
+                * about the day rather than an appointment inside it, and given
+                * no clock time for the same reason.
+                */}
+              {due.map((t) => (
+                <li key={`due-${t.id}`}>
+                  <div className="flex items-baseline gap-3 rounded-lg px-2 py-2">
+                    <span className="num w-16 shrink-0 text-xs text-[var(--muted)]">due</span>
+                    <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rotate-45 border border-[var(--alert)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm">{t.title}</span>
+                      <span className="mt-0.5 block truncate text-xs text-[var(--faint)]">
+                        {t.estimateMins > 0
+                          ? `${sayMins(t.estimateMins)} of work`
+                          : "no estimate yet, so it isn't in the plan"}
+                      </span>
+                    </span>
+                  </div>
+                </li>
+              ))}
             </ul>
           </section>
         );
