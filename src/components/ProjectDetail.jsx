@@ -11,9 +11,30 @@ import { duration } from "../lib/format";
 
 const ESTIMATES = [15, 30, 60, 120];
 
+/**
+ * The id that means "everything with no project on it".
+ *
+ * Work filed nowhere had no home at all: `Projects` groups by project and this
+ * screen is keyed on one, so a task with no `projectId` appeared on Today while
+ * it was due and nowhere at all once it was finished, or delegated past the
+ * sixth row, or simply not urgent yet. It could be *found* by search, and
+ * pressing enter on it navigated to Today — the one screen that does not
+ * contain it.
+ *
+ * Rather than a fourth list somewhere, it is a project without a record. Every
+ * part of this screen already does the right thing for a set of tasks; the only
+ * things that do not apply are the ones that edit the project itself.
+ */
+export const UNFILED = "unfiled";
+
 export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
-  const project = state.projects.find((p) => p.id === projectId);
-  const tasks = state.tasks.filter((t) => t.projectId === projectId);
+  const unfiled = projectId === UNFILED;
+  const project = unfiled
+    ? { id: null, name: "Unfiled", client: "", value: null }
+    : state.projects.find((p) => p.id === projectId);
+  const tasks = unfiled
+    ? state.tasks.filter((t) => !t.projectId)
+    : state.tasks.filter((t) => t.projectId === projectId);
 
   const [title, setTitle] = useState("");
   const [estimate, setEstimate] = useState(30);
@@ -28,7 +49,7 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
   const waiting = tasks.filter((t) => !t.done && t.delegatedTo);
   const done = tasks.filter((t) => t.done);
   const focused = state.sessions
-    .filter((s) => s.projectId === project.id)
+    .filter((s) => (unfiled ? !s.projectId : s.projectId === project.id))
     .reduce((a, s) => a + s.focusedMs, 0);
   const overdue = open.filter((t) => t.due && t.due < dayKey()).length;
 
@@ -41,6 +62,18 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
       </button>
 
       <header className="mb-6 mt-3 flex items-start justify-between gap-6">
+        {unfiled ? (
+          /* Nothing here to rename, bill, or delete — there is no record. What
+             this screen owes an unfiled pile instead is the way out of being
+             one, which is the line underneath. */
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold tracking-tight">Unfiled</h1>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Work with no project on it. Say “file the lease under Q3 launch” and it moves.
+            </p>
+          </div>
+        ) : (
+        <>
         <div className="min-w-0 flex-1">
           <input
             defaultValue={project.name}
@@ -78,6 +111,8 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
         >
           Delete
         </Button>
+        </>
+        )}
       </header>
 
       <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--line)]
@@ -93,7 +128,7 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
           e.preventDefault();
           if (!title.trim()) return;
           addTask({
-            projectId, title, estimateMins: estimate, priority,
+            projectId: unfiled ? null : projectId, title, estimateMins: estimate, priority,
             due: due || null, delegatedTo: delegate.trim(),
           });
           setTitle("");

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { addProject, dayKey } from "../lib/store";
 import { Button, Input, Find } from "./ui";
+import { UNFILED } from "./ProjectDetail";
 import { usage } from "../lib/plans";
 import { TEMPLATES, scheduleFor } from "../lib/templates";
 import { addTask } from "../lib/store";
@@ -76,6 +77,20 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
 
   const live = rows.filter((r) => !r.p.archived);
 
+  /**
+   * Work with no project on it, which until now had nowhere to be.
+   *
+   * This screen groups by project and the detail screen is keyed on one, so an
+   * unfiled task was visible on Today while it was due and invisible the moment
+   * it was finished, delegated past the sixth row, or simply not urgent yet.
+   * A card here is the whole fix: it gives the pile a name, a count, and a
+   * door.
+   */
+  const unfiled = state.tasks.filter((t) => !t.projectId);
+  const unfiledOpen = unfiled.filter((t) => !t.done && !t.delegatedTo);
+  const unfiledWaiting = unfiled.filter((t) => !t.done && t.delegatedTo);
+  const unfiledNoEstimate = unfiledOpen.filter((t) => !(t.estimateMins > 0));
+
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -140,12 +155,34 @@ export default function Projects({ state, onOpen, onUpgrade, onSearch }) {
         </div>
       </header>
 
-      {live.length === 0 ? (
+      {live.length === 0 && unfiled.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
           No projects yet. A project groups work — a deal, a launch, a function.
         </p>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {/* Deliberately first and deliberately plain. It is a holding pen
+              rather than an achievement, and the point of showing it is that
+              somebody notices the number and empties it. */}
+          {unfiled.length > 0 && (
+            <li>
+              <button
+                onClick={() => onOpen(UNFILED)}
+                className="card row-hover flex h-full w-full flex-col items-start px-4 py-4 text-left"
+              >
+                <span className="label">Unfiled</span>
+                <span className="mt-1 text-sm font-medium">
+                  {unfiledOpen.length} open
+                  {unfiledWaiting.length > 0 && ` · ${unfiledWaiting.length} with someone else`}
+                </span>
+                <span className="mt-1 text-xs text-[var(--muted)]">
+                  {unfiledNoEstimate.length > 0
+                    ? `${unfiledNoEstimate.length} still need an estimate`
+                    : `${unfiled.length - unfiledOpen.length - unfiledWaiting.length} finished`}
+                </span>
+              </button>
+            </li>
+          )}
           {live.map(({ p, open, overdue, focused, pct, total, due, remaining }) => (
             <li key={p.id}>
               <button

@@ -24,7 +24,7 @@ import { Find } from "./ui";
  * thing on the page now, because it is the only thing here that costs money
  * to find out late.
  */
-export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearch }) {
+export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearch, onOpenUnfiled }) {
   const day = dayKey();
   const now = new Date();
   const events = eventsOn(day, state.events);
@@ -347,7 +347,7 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
           )}
 
           {spent.length > 0 && <Spent list={spent} tasks={state.tasks} onFocus={onFocus} />}
-          {unestimated.length > 0 && <NoEstimate list={unestimated} />}
+          {unestimated.length > 0 && <NoEstimate list={unestimated} onOpenUnfiled={onOpenUnfiled} />}
 
         </section>
 
@@ -369,7 +369,14 @@ export default function Today({ state, onFocus, onNewEvent, onOpenEvent, onSearc
                   </li>
                 ))}
                 {waiting.length > 6 && (
-                  <li className="pt-2 text-xs text-[var(--faint)]">+{waiting.length - 6} more</li>
+                  <li className="pt-2">
+                    <button
+                      onClick={onOpenUnfiled}
+                      className="text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline"
+                    >
+                      +{waiting.length - 6} more
+                    </button>
+                  </li>
                 )}
               </ul>
             </div>
@@ -523,7 +530,7 @@ function Spent({ list, tasks, onFocus }) {
   );
 }
 
-function NoEstimate({ list }) {
+function NoEstimate({ list, onOpenUnfiled }) {
   return (
     <div className="mt-5 rounded-md border border-dashed border-[var(--line)] p-4">
       <p className="label mb-1">Needs an estimate</p>
@@ -539,7 +546,14 @@ function NoEstimate({ list }) {
           </li>
         ))}
         {list.length > 5 && (
-          <li className="text-xs text-[var(--faint)]">+{list.length - 5} more</li>
+          <li>
+            <button
+              onClick={onOpenUnfiled}
+              className="text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--ink)] hover:underline"
+            >
+              +{list.length - 5} more
+            </button>
+          </li>
         )}
       </ul>
     </div>

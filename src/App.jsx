@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Today from "./components/Today";
 import Calendar from "./components/Calendar";
 import Projects from "./components/Projects";
-import ProjectDetail from "./components/ProjectDetail";
+import ProjectDetail, { UNFILED } from "./components/ProjectDetail";
 import Insights from "./components/Insights";
 import AssistantSheet from "./components/AssistantSheet";
 import Upgrade from "./components/Upgrade";
@@ -419,6 +419,7 @@ export default function App() {
         onNewEvent={() => setNewEvent(true)}
         onOpenEvent={setEditingEvent}
         onSearch={openSearch}
+        onOpenUnfiled={() => setView({ name: "project", id: UNFILED })}
       />
     ) : view.name === "calendar" ? (
       <Calendar
