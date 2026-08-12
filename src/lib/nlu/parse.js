@@ -34,6 +34,11 @@ export const INTENTS = {
   PLAN_DAY: "plan_day",
   CREATE_PROJECT: "create_project",
   QUERY_PROJECTS: "query_projects",
+  WHICH_PROJECT: "which_project",
+  RENAME_PROJECT: "rename_project",
+  ARCHIVE_PROJECT: "archive_project",
+  REOPEN_PROJECT: "reopen_project",
+  PROJECT_DUE: "project_due",
   FILE_TASK: "file_task",
   HELP: "help",
   UNKNOWN: "unknown",
@@ -1143,6 +1148,22 @@ const RULES = [
    * never a record.
    */
   [INTENTS.QUERY_PROJECTS, (body) => Boolean(projectMoneyAsk(body))],
+  /**
+   * The project verbs, all demanding the word "project" in the sentence.
+   *
+   * An audit ran the natural phrasings and found every one landing somewhere
+   * destructive or dead: "rename the Munich lease project to X" renamed a
+   * TASK — sometimes in a different project — while the project kept its
+   * name; "set the Munich sale project deadline to Friday" wrote a task's
+   * due date; and archiving, which the UI had just learned, was unreachable
+   * by voice entirely. Ahead of EDIT_TASK because that is precisely the rule
+   * that was swallowing them.
+   */
+  [INTENTS.WHICH_PROJECT, /\b(?:which|what) project\b/],
+  [INTENTS.RENAME_PROJECT, /\brenam\w+[^.]*\bproject\b|\bproject\b[^.]*\brenam\w+/],
+  [INTENTS.ARCHIVE_PROJECT, /\b(?:archiv\w+|shelve|mothball)\b[^.]*\bproject\b|\bproject\b[^.]*\b(?:archiv\w+|shelved|mothball\w*)\b/],
+  [INTENTS.REOPEN_PROJECT, /\b(?:re-?open\w*|un-?archiv\w+)\b[^.]*\bproject\b|\bproject\b[^.]*\b(?:re-?open\w*|un-?archiv\w+)\b/],
+  [INTENTS.PROJECT_DUE, /\bproject\b[^.]*\b(?:deadline|due)\b|\b(?:deadline|due)\b[^.]*\bproject\b/],
   [INTENTS.EDIT_TASK, isTaskEdit],
   // Two meetings changing places. Ahead of MOVE because "swap X and Y" has no
   // move verb in it at all, and a rule that merely tolerated it would move one

@@ -22,6 +22,7 @@ import {
 import {
   addEvent, updateEvent, deleteEvent, addTask, updateTask, toggleTask,
   deleteTask, addProject, setMemory, setPlan, batch, undo, lastChange, getState, activeTasks,
+  updateProject, setProjectArchived,
 } from "../store.js";
 import { record as recordMiss, resolve as pairMiss, REASONS } from "../misses.js";
 import { interpret, hasResolver, contextFor } from "./fallback.js";
@@ -966,11 +967,22 @@ function answer(text, state, opts = {}) {
 
       // Already there. Making a second one quietly is how a board ends up with
       // two "Series B"s and the work split between them.
-      const existing = resolveProject(name, state.projects);
-      if (existing.length && isConfident(existing)) {
+      /**
+       * Only a genuine collision refuses. The fuzzy resolver was allowed to
+       * veto here, so \u201cstart a project called Berlin lease\u201d answered
+       * \u201cMunich lease already exists\u201d and created nothing — a
+       * refusal wearing a fact that was not one. Similar names are what
+       * portfolios look like; identical names are the actual problem.
+       */
+      const existing = state.projects.find(
+        (x) => x.name.trim().toLowerCase() === name.trim().toLowerCase(),
+      );
+      if (existing) {
         return reply(
-          `\u201c${existing[0].item.name}\u201d already exists.`,
-          [], { entity: { kind: "project", id: existing[0].item.id } },
+          existing.archived
+            ? `\u201c${existing.name}\u201d already exists on the shelf \u2014 say \u201creopen the ${existing.name} project\u201d to bring it back instead.`
+            : `\u201c${existing.name}\u201d already exists.`,
+          [], { entity: { kind: "project", id: existing.id } },
         );
       }
 
@@ -985,6 +997,108 @@ function answer(text, state, opts = {}) {
     }
 
     /** The projects, and what each is carrying. */
+    case INTENTS.WHICH_PROJECT: {
+      /**
+       * "Which project is the survey in?" used to get the whole portfolio
+       * read back — an answer to a question nobody asked, hiding the absence
+       * of an answer to the one they did.
+       */
+      const ranked = resolveTask(p.body.replace(/\b(?:which|what) project\b[^\w]*(?:is|does|do|был)?\b/i, " "), state.tasks.filter((t) => !t.done));
+      if (!ranked.length) return dead("I couldn't find that task.", REASONS.NO_MATCH);
+      const task = ranked[0].item;
+      const home = state.projects.find((x) => x.id === task.projectId);
+      return reply(
+        home
+          ? `\u201c${task.title}\u201d is in ${home.name}${home.archived ? " (archived)" : ""}.`
+          : `\u201c${task.title}\u201d isn't filed under any project \u2014 it's in Unfiled.`,
+        [], { entity: { kind: "task", id: task.id } },
+      );
+    }
+
+    case INTENTS.RENAME_PROJECT: {
+      /**
+       * This phrasing used to fall through to the task-rename path, which
+       * found the fuzziest matching TASK — sometimes in a different project —
+       * and destroyed its title while the project kept the old name and the
+       * reply read as success. A rename that renames something else is the
+       * worst sentence the assistant can say "done" to.
+       */
+      const m = p.body.match(/renam\w+\s+(?:the\s+)?(.+?)\s+project\s+(?:to|as|into)\s+(.+?)[.!?]*$/i)
+        || p.body.match(/renam\w+\s+(?:the\s+)?project\s+(.+?)\s+(?:to|as|into)\s+(.+?)[.!?]*$/i);
+      if (!m) return needs("Which project, and to what? \u201cRename the Munich lease project to Berlin lease\u201d works.");
+      const hit = resolveProject(m[1], state.projects);
+      if (!hit.length) return dead(`I couldn't find a project called \u201c${m[1]}\u201d.`, REASONS.NO_MATCH);
+      if (!isConfident(hit)) {
+        return askWhich("Which project?", {
+          kind: "project", intent: "rename-project", text: p.body,
+          options: hit.slice(0, 4).map((r) => ({ id: r.item.id, label: r.item.name })),
+        });
+      }
+      const proj = opts.resolvedProjectId
+        ? state.projects.find((x) => x.id === opts.resolvedProjectId)
+        : hit[0].item;
+      const fresh = m[2].trim();
+      return gate(`renaming \u201c${proj.name}\u201d to \u201c${fresh}\u201d`, () => {
+        updateProject(proj.id, { name: fresh });
+        return reply(`\u201c${proj.name}\u201d is \u201c${fresh}\u201d now.`,
+          [{ summary: `Renamed project to ${fresh}` }], { entity: { kind: "project", id: proj.id } });
+      });
+    }
+
+    case INTENTS.ARCHIVE_PROJECT:
+    case INTENTS.REOPEN_PROJECT: {
+      const reopen = p.intent === INTENTS.REOPEN_PROJECT;
+      // Reopening searches the shelf; archiving searches the live grid.
+      const pool = state.projects.filter((x) => (reopen ? x.archived : !x.archived));
+      const named = namedProject(p.body, slots.project, pool);
+      if (!named) {
+        const other = namedProject(p.body, slots.project, state.projects);
+        if (other) {
+          return reply(reopen
+            ? `${other.name} isn't archived \u2014 it's already live.`
+            : `${other.name} is already archived.`);
+        }
+        return dead(`I couldn't find that project${reopen ? " on the shelf" : ""}.`, REASONS.NO_MATCH);
+      }
+      const openCount = state.tasks.filter((t) => t.projectId === named.id && !t.done).length;
+      return gate(`${reopen ? "reopening" : "archiving"} \u201c${named.name}\u201d`, () => {
+        setProjectArchived(named.id, !reopen);
+        return reply(
+          reopen
+            ? `${named.name} is back${openCount ? ` \u2014 its ${openCount} open ${openCount === 1 ? "task is" : "tasks are"} in the plan again` : ""}.`
+            : `${named.name} is archived${openCount ? ` \u2014 its ${openCount} open ${openCount === 1 ? "task comes" : "tasks come"} out of the plan until you reopen it` : ""}.`,
+          [{ summary: `${reopen ? "Reopened" : "Archived"} ${named.name}` }],
+          { entity: { kind: "project", id: named.id } },
+        );
+      });
+    }
+
+    case INTENTS.PROJECT_DUE: {
+      /**
+       * "Set the Munich sale project deadline to Friday" was writing a due
+       * date onto a fuzzily-matched TASK while the project's own deadline —
+       * the date the whole thing is judged on, the one projectLoad paces
+       * against — stayed empty, and the reply never mentioned which of the
+       * two it had touched.
+       */
+      const named = namedProject(p.body, slots.project, state.projects);
+      if (!named) return dead("Which project's deadline? Name it and I'll set it.", REASONS.NO_MATCH);
+      if (!slots.dateOnly) {
+        return named.due
+          ? reply(`${named.name} is due ${describe(atLocal(named.due, 9), now).split(" at ")[0]}.`,
+              [], { entity: { kind: "project", id: named.id } })
+          : reply(`${named.name} has no deadline on it. Say \u201cset the ${named.name} project deadline to Friday\u201d and I'll pace it.`);
+      }
+      const due = dayKey(slots.dateOnly);
+      return gate(`setting ${named.name}'s deadline to ${describe(atLocal(due, 9), now).split(" at ")[0]}`, () => {
+        updateProject(named.id, { due });
+        return reply(
+          `${named.name} is due ${describe(atLocal(due, 9), now).split(" at ")[0]} \u2014 I'll pace its work against that.`,
+          [{ summary: `Set ${named.name} deadline` }], { entity: { kind: "project", id: named.id } },
+        );
+      });
+    }
+
     case INTENTS.QUERY_PROJECTS: {
       const live = state.projects.filter((x) => !x.archived);
       if (!live.length) {
@@ -1001,7 +1115,7 @@ function answer(text, state, opts = {}) {
        * which reads exactly like the app not holding the number at all.
        */
       if (slots.projectAsk) {
-        const named = namedProject(p.body, slots.project, live);
+        const named = namedProject(p.body, slots.project, state.projects);
         const money_ = slots.projectAsk.money;
 
         if (named) {
@@ -1016,7 +1130,7 @@ function answer(text, state, opts = {}) {
               ? `${bits.length ? "for " : `${named.name} is for `}${named.client}`
               : `${bits.length ? "with " : `${named.name} has `}no client set`);
           }
-          return reply(`${bits.join(", ")}.`,
+          return reply(`${bits.join(", ")}${named.archived ? " (archived)" : ""}.`,
             [], { entity: { kind: "project", id: named.id } });
         }
 
@@ -1044,6 +1158,19 @@ function answer(text, state, opts = {}) {
           [], { entity: null });
       }
 
+      /**
+       * A named project gets its own answer. "What's left on the Munich
+       * lease" was answered with the whole portfolio — the name in the
+       * question ignored, three projects read back, and the asker left to
+       * find their own answer inside it.
+       */
+      const one = namedProject(p.body, slots.project, state.projects);
+      if (one) {
+        const load = projectLoad(one, state.tasks, state.sessions, state.events, { now });
+        return reply(`${describeLoad(load)}${one.archived ? " (archived \u2014 out of the plan)" : ""}`,
+          [], { entity: { kind: "project", id: one.id } });
+      }
+
       const lines = live.slice(0, 8).map((project) => {
         const load = projectLoad(project, state.tasks, state.sessions, state.events, { now });
         return `\u2022 ${describeLoad(load)}`;
@@ -1065,7 +1192,22 @@ function answer(text, state, opts = {}) {
      * as soon as there is a deck.
      */
     case INTENTS.FILE_TASK: {
-      const hit = resolveProject(slots.project, state.projects);
+      /**
+       * Filing goes to living projects. An archived one used to swallow the
+       * work silently — filed onto the shelf, out of the plan, reported as a
+       * success — so the shelf only takes work when it is named outright, and
+       * then the answer is the honest one: reopen first.
+       */
+      const named = namedProject(p.body, slots.project, state.projects.filter((x) => x.archived));
+      if (named && !opts.resolvedProjectId) {
+        return reply(
+          `${named.name} is archived, so its work is out of the plan. Say \u201creopen the ${named.name} project\u201d first and I'll file it there.`,
+          [], { entity: { kind: "project", id: named.id } },
+        );
+      }
+      const hit = opts.resolvedProjectId
+        ? state.projects.filter((x) => x.id === opts.resolvedProjectId).map((item) => ({ item, score: 9 }))
+        : resolveProject(slots.project, state.projects.filter((x) => !x.archived));
       if (!hit.length) {
         return dead(`I couldn't find a project called \u201c${slots.project}\u201d.`, REASONS.NO_MATCH);
       }
@@ -2511,11 +2653,23 @@ export function resolveChoice(choice, id, state, now = new Date()) {
     return ask(`${choice.text} ${id}`, state, { now });
   }
 
+  /**
+   * Picking a project re-asks the original sentence with the project half
+   * answered. This case used to fall into the verb table below, find nothing
+   * under "file", and hand `undefined` to ask() — a TypeError, thrown at the
+   * exact moment somebody answered the question the assistant had asked.
+   */
+  if (choice.kind === "project") return ask(choice.text, state, { now, resolvedProjectId: id });
+
   const verb = {
     move: `move it to ${choice.when}`,
     cancel: "cancel it",
     complete: "complete it",
     delegate: `delegate it to ${choice.person}`,
   }[choice.intent];
+  // An intent this table has not met re-runs the sentence with the entity
+  // pinned. Slightly blunt, never a crash — the table is a list of phrasings,
+  // not a gate.
+  if (!verb) return ask(choice.text, state, { now, resolvedId: id });
   return ask(verb, state, { now, resolvedId: id });
 }
