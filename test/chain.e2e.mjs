@@ -47,6 +47,19 @@ await skipOnboarding(p);
 await p.evaluate(async () => {
   const s = await import("/src/lib/store.js");
   s.addProject({ name: "Munich lease", client: "Hartmann", value: 48000 });
+  /**
+   * An afternoon meeting, so the ordering check further down has teeth.
+   *
+   * The planner fills mornings first, so a two o'clock meeting has to sort
+   * *below* the focus work booked before it. Under the old two-list render —
+   * every meeting, then every block — it sorted above, which is the regression
+   * this fixture exists to catch. Without it the day holds one time and any
+   * ordering is trivially correct.
+   */
+  const d = new Date();
+  const at = (h) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-` +
+    `${String(d.getDate()).padStart(2, "0")}T${String(h).padStart(2, "0")}:00:00`;
+  s.addEvent({ title: "Partners sync", start: at(14), end: at(15) });
 });
 await p.waitForTimeout(500);
 await p.getByRole("button", { name: "Projects", exact: true }).first().click();
@@ -111,6 +124,27 @@ await p.waitForTimeout(900);
    */
   t("  and names the deal the hour belongs to",
     /of focus · Munich lease/.test(cal), cal.match(/[^\n]*of focus[^\n]*/)?.[0]);
+
+  /**
+   * And in time order. Meetings and planned work were two lists rendered one
+   * after the other, each sorted only within itself — so a day with a ten
+   * o'clock meeting and nine o'clock focus work put the meeting on top. An
+   * agenda is read top to bottom as a sequence, and this one silently was not
+   * one.
+   */
+  // Scoped to the first day. The agenda stacks a section per day, so reading
+  // every `.num` on the page walks off the end of today and into tomorrow's
+  // nine o'clock — which is not out of order, it is a different day.
+  const times = (await p.locator("section").first().locator("li .num").allInnerTexts())
+    .map((x) => x.trim())
+    .filter((x) => /^\d+:\d\d\s*(AM|PM)$/i.test(x))
+    .map((x) => {
+      const [, h, m, ap] = x.match(/^(\d+):(\d\d)\s*(AM|PM)$/i);
+      return ((Number(h) % 12) + (/pm/i.test(ap) ? 12 : 0)) * 60 + Number(m);
+    });
+  t("  the fixture puts more than one hour on the day", new Set(times).size > 1, times.join(" "));
+  t("  and the day runs in time order", times.every((v, i) => i === 0 || times[i - 1] <= v),
+    times.join(" "));
 
   const pressable = await p.locator("button", { hasText: /redlines/i }).count();
   t("  and the block is pressable, not an inert div", pressable > 0, `${pressable} buttons`);

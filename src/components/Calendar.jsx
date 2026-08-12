@@ -233,6 +233,41 @@ const LoadKey = () => (
  * simply left out. It is the default because it is the one view that answers
  * "what's next" without a single sideways scroll.
  */
+/**
+ * One block of planned focus time on the agenda.
+ *
+ * Named rather than inlined because it now sits inside a ternary over the
+ * merged day, and a thirty-line JSX branch inside a `.map` callback inside a
+ * ternary is where this file would start becoming unreadable.
+ */
+function WorkRow({ block, state, onOpenProject }) {
+  const task = state.tasks.find((t) => t.id === block.taskId);
+  const project = state.projects.find((x) => x.id === task?.projectId);
+  return (
+    <li>
+      <button
+        onClick={() => onOpenProject?.(project?.id ?? UNFILED)}
+        className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2 text-left
+                   transition-colors hover:bg-[var(--hairline)]"
+      >
+        <span className="num w-16 shrink-0 text-xs text-[var(--faint)]">
+          {block.start ? fmtTime(block.start) : "\u2014"}
+        </span>
+        <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full border border-dashed border-[var(--muted)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-[var(--muted)]">{task?.title || "Focus"}</span>
+          <span className="mt-0.5 block truncate text-xs text-[var(--faint)]">
+            {sayMins(block.mins)} of focus
+            {/* Which deal this hour is actually for. A week of bare task
+                titles hides the only grouping anybody reports on. */}
+            {project ? ` \u00b7 ${project.name}` : ""}
+          </span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
 function AgendaList({ range, state, now, onOpenEvent, onNewEvent, onOpenProject }) {
   const today = dayKey(now);
   const from = range.from.getTime();
@@ -272,6 +307,22 @@ function AgendaList({ range, state, now, onOpenEvent, onNewEvent, onOpenProject 
       .map((d) => {
         d.events.sort((a, b) => new Date(a.start) - new Date(b.start));
         d.work.sort((a, b) => new Date(a.start) - new Date(b.start));
+        /**
+         * Meetings and planned work in one column, in the order they happen.
+         *
+         * They were two lists rendered one after the other, each sorted only
+         * within itself — so a day with a ten o'clock meeting and nine o'clock
+         * focus work listed the meeting first. A day's agenda that is not in
+         * time order is worse than no agenda: it is read top to bottom as a
+         * sequence, and this one silently was not one.
+         *
+         * Blocks the planner could not give a clock time to sort last rather
+         * than to NaN, which would have scattered them through the day.
+         */
+        d.timed = [
+          ...d.events.map((e) => ({ kind: "event", at: new Date(e.start).getTime(), e })),
+          ...d.work.map((b) => ({ kind: "work", at: b.start ? new Date(b.start).getTime() : Infinity, b })),
+        ].sort((a, b) => a.at - b.at);
         return d;
       });
   }, [state.events, state.blocks, state.tasks, from, to]);
@@ -293,7 +344,7 @@ function AgendaList({ range, state, now, onOpenEvent, onNewEvent, onOpenProject 
 
   return (
     <div className="mx-auto max-w-2xl px-4 pb-8 sm:px-6">
-      {days.map(({ key, events, work, due }) => {
+      {days.map(({ key, timed, due }) => {
         const d = new Date(`${key}T00:00:00`);
         const isToday = key === today;
         const rel = relativeDay(d, now);
@@ -319,63 +370,41 @@ function AgendaList({ range, state, now, onOpenEvent, onNewEvent, onOpenProject 
             </div>
 
             <ul className="space-y-0.5">
-              {events.map((e) => (
-                <li key={e.id}>
-                  <button
-                    onClick={() => onOpenEvent(e)}
-                    className="row-hover flex w-full items-baseline gap-3 rounded-lg px-2 py-2 text-left"
-                  >
-                    <span className="num w-16 shrink-0 text-xs text-[var(--muted)]">{fmtTime(e.start)}</span>
-                    <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ink)]" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{e.title}</span>
-                      <span className="mt-0.5 block truncate text-xs text-[var(--muted)]">
-                        {sayMins((new Date(e.end) - new Date(e.start)) / 60000)}
-                        {e.attendees?.length ? ` · ${e.attendees.map((a) => a.name).join(", ")}` : ""}
-                        {e.location ? ` · ${e.location}` : ""}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-
-              {/**
-                * Planned work, which is now a way back to what it is for.
-                *
-                * These were inert `<div>`s: a browser walk found twenty
-                * elements mentioning the task and not one of them pressable.
-                * The calendar could tell you that two hours of Thursday belong
-                * to "Draft the lease redlines" and had no way to tell you it
-                * belongs to the Munich lease, or to take you there — so the
-                * screen that shows where your week went was the one screen you
-                * could not act from.
-                */}
-              {work.map((b) => {
-                const task = state.tasks.find((t) => t.id === b.taskId);
-                const project = state.projects.find((x) => x.id === task?.projectId);
-                return (
-                  <li key={`${b.taskId}-${b.start}`}>
+              {timed.map((row) =>
+                row.kind === "event" ? (
+                  <li key={row.e.id}>
                     <button
-                      onClick={() => onOpenProject?.(project?.id ?? UNFILED)}
-                      className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2 text-left
-                                 transition-colors hover:bg-[var(--hairline)]"
+                      onClick={() => onOpenEvent(row.e)}
+                      className="row-hover flex w-full items-baseline gap-3 rounded-lg px-2 py-2 text-left"
                     >
-                      <span className="num w-16 shrink-0 text-xs text-[var(--faint)]">{fmtTime(b.start)}</span>
-                      <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full border border-dashed border-[var(--muted)]" />
+                      <span className="num w-16 shrink-0 text-xs text-[var(--muted)]">{fmtTime(row.e.start)}</span>
+                      <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ink)]" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-[var(--muted)]">{task?.title || "Focus"}</span>
-                        <span className="mt-0.5 block truncate text-xs text-[var(--faint)]">
-                          {sayMins(b.mins)} of focus
-                          {/* Which deal this hour is actually for. A week of
-                              bare task titles hides the only grouping anybody
-                              reports on. */}
-                          {project ? ` · ${project.name}` : ""}
+                        <span className="block truncate text-sm font-medium">{row.e.title}</span>
+                        <span className="mt-0.5 block truncate text-xs text-[var(--muted)]">
+                          {sayMins((new Date(row.e.end) - new Date(row.e.start)) / 60000)}
+                          {row.e.attendees?.length ? ` \u00b7 ${row.e.attendees.map((a) => a.name).join(", ")}` : ""}
+                          {row.e.location ? ` \u00b7 ${row.e.location}` : ""}
                         </span>
                       </span>
                     </button>
                   </li>
-                );
-              })}
+                ) : (
+                  /**
+                   * Planned work, which is now a way back to what it is for.
+                   *
+                   * These were inert `<div>`s: a browser walk found twenty
+                   * elements mentioning the task and not one of them pressable.
+                   * The calendar could say two hours of Thursday belong to
+                   * "Draft the lease redlines" and had no way to say it belongs
+                   * to the Munich lease, or to take you there — so the screen
+                   * showing where the week went was the one you could not act
+                   * from.
+                   */
+                  <WorkRow key={`${row.b.taskId}-${row.b.start}`} block={row.b} state={state}
+                           onOpenProject={onOpenProject} />
+                ),
+              )}
 
               {/**
                 * The deadlines the day was counted for.
