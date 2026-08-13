@@ -3,6 +3,7 @@ import { Button, Input } from "./ui";
 import { client } from "../lib/supabase";
 import { startCheckout } from "../lib/billing";
 import { PLANS } from "../lib/plans";
+import { quote } from "../lib/seats";
 
 /**
  * The company screen: seats, the people in them, and the invitations out.
@@ -154,26 +155,10 @@ export default function Company({ onUpgrade }) {
       )}
 
       {/* Seats are bought through Stripe, so the number here is always the
-          number being billed — there is no way to grant one for free. */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {["pro", "studio"].map((plan) => (
-          <Button
-            key={plan}
-            variant={org.plan === plan ? "secondary" : "ghost"}
-            size="sm"
-            disabled={busy}
-            onClick={() => {
-              const want = prompt(
-                `How many seats of ${PLANS[plan].name}? (currently ${org.seats})`,
-                String(Math.max(org.seats || 1, members.length || 1)),
-              );
-              if (want) startCheckout(plan, { seats: Number(want) }).catch(() => {});
-            }}
-          >
-            {org.plan === plan ? `Change ${PLANS[plan].name} seats` : `Buy ${PLANS[plan].name} seats`}
-          </Button>
-        ))}
-      </div>
+          number being billed — there is no way to grant one for free. The
+          quote is shown before the button, because a company setting a budget
+          line should see the arithmetic rather than meet it on an invoice. */}
+      <SeatPicker org={org} floor={Math.max(members.length, 1)} />
 
       {/* ------------------------------------------------------- the roster */}
       <ul className="mt-4 divide-y divide-[var(--hairline)] border-t border-[var(--hairline)]">
@@ -224,6 +209,90 @@ export default function Company({ onUpgrade }) {
         You can see the projects, tasks and calendars on the accounts you provide, and not
         change them. Everyone you invite is told this before they accept.
       </p>
+    </div>
+  );
+}
+
+/**
+ * How many seats, at what price, before anybody is charged.
+ *
+ * A number and a live quote rather than a prompt() and a surprise. The floor
+ * is the people already seated — offering a company the chance to buy fewer
+ * seats than it has staff is offering it a way to lock somebody out, and the
+ * server refuses it anyway.
+ */
+function SeatPicker({ org, floor }) {
+  const [plan, setPlan] = useState(org.plan === "free" ? "pro" : org.plan);
+  const [seats, setSeats] = useState(Math.max(org.seats || 1, floor));
+  const [sending, setSending] = useState(false);
+  const q = quote(plan, seats);
+  const money = (n) => (n % 1 ? `$${n.toFixed(2)}` : `$${n}`);
+
+  return (
+    <div className="mt-3 rounded-lg border border-[var(--hairline)] p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {["pro", "studio"].map((id) => (
+          <button
+            key={id}
+            onClick={() => setPlan(id)}
+            className={`rounded-md border px-2.5 py-1 text-[13px] transition-colors ${
+              plan === id ? "border-[var(--ink)] font-medium" : "border-[var(--line)] hover:border-[var(--ink)]"
+            }`}
+          >
+            {PLANS[id].name}
+          </button>
+        ))}
+        <span className="ml-auto flex items-center gap-1">
+          <button
+            aria-label="One fewer seat"
+            onClick={() => setSeats((n) => Math.max(floor, n - 1))}
+            className="grid h-7 w-7 place-items-center rounded-md border border-[var(--line)] transition-colors hover:border-[var(--ink)]"
+          >
+            −
+          </button>
+          <span className="num w-10 text-center text-[15px]">{seats}</span>
+          <button
+            aria-label="One more seat"
+            onClick={() => setSeats((n) => Math.min(500, n + 1))}
+            className="grid h-7 w-7 place-items-center rounded-md border border-[var(--line)] transition-colors hover:border-[var(--ink)]"
+          >
+            +
+          </button>
+        </span>
+      </div>
+
+      <p className="mt-2 text-[15px]">
+        <span className="font-medium">{money(q.total)}</span>
+        <span className="text-[var(--muted)]">/month · {money(q.perSeat)} a seat</span>
+      </p>
+      {q.saved > 0 && (
+        <p className="text-[12px] text-[var(--muted)]">
+          {money(q.saved)} a month less than {seats} individual subscriptions.
+        </p>
+      )}
+      {q.negotiable && (
+        <p className="mt-1 text-[12px] text-[var(--muted)]">
+          At this size the price is a conversation — buy these now and we'll sort the rest out.
+        </p>
+      )}
+      {floor > 1 && seats === floor && (
+        <p className="mt-1 text-[12px] text-[var(--faint)]">
+          {floor} people hold seats, so that's the fewest you can buy.
+        </p>
+      )}
+
+      <Button
+        variant="primary"
+        size="sm"
+        className="mt-3"
+        disabled={sending}
+        onClick={() => {
+          setSending(true);
+          startCheckout(plan, { seats }).catch(() => setSending(false));
+        }}
+      >
+        {org.plan === "free" ? `Buy ${seats} ${seats === 1 ? "seat" : "seats"}` : "Change the subscription"}
+      </Button>
     </div>
   );
 }
