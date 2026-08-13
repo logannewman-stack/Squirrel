@@ -62,6 +62,13 @@ await p.evaluate(async () => {
   s.setSetting("identity", { style: "formal", honorific: "Mr.", lastName: "Newman" });
   s.setSetting("confirm", false);
   s.setSetting("voice", { speak: true, handsFree: true, rate: 1 });
+  // This suite builds its state directly rather than walking onboarding, so
+  // the first-plan card is still up — and it carries its own text box, which
+  // collides in strict mode with the assistant's. Put away rather than worked
+  // around with a more specific locator: the field being tested is the
+  // assistant's, and a test that has to name it precisely to dodge a coach
+  // will break again the next time the empty screen gains a control.
+  s.setSetting("firstPlanDone", true);
 });
 await p.reload({ waitUntil: "networkidle" });
 // The assistant is reached from the floating button now, not a tab.

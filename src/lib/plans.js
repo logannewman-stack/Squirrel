@@ -37,9 +37,13 @@ export const PLANS = {
     tagline: "Get organized",
     blurb: "The whole planner on one device, capped at two projects.",
     features: [
+      // Named first, and named here rather than under Pro: auto-scheduling is
+      // free on purpose, and the free tier's list previously said "plan your
+      // week by hand" — advertising the absence of the single best thing the
+      // app does to the exact people who have to fall in love with it.
+      "Auto-scheduling: your week lays itself out",
       "Calendar, agenda, and focus timer",
       "2 projects · 15 open tasks",
-      "Plan your week by hand",
       "This device only",
     ],
   },
@@ -65,7 +69,6 @@ export const PLANS = {
       "Unlimited projects and tasks",
       "Sync across every device",
       "Insights: where your time actually goes",
-      "Auto-scheduling that lays work into your week",
       "Calendar sync (Google, Apple)",
       "Priority support",
     ],
@@ -83,13 +86,17 @@ export const PLANS = {
     tasks: null,
     chats: 3000,
     tagline: "Run your team",
-    blurb: "Pro, plus real delegation, client projects, and Squirrel at her most capable.",
+    blurb: "Pro, plus your whole team's work in one place — and who is about to miss something.",
     features: [
       "Everything in Pro",
-      "Invite teammates — they see what's theirs",
-      "Shared client projects with value and reporting",
+      // First, because it is the one thing here that is worth $50 to somebody
+      // who already has a planner they like: not more of their own week, but
+      // sight of everybody else's.
+      "See what your team is carrying — who is over, what is late",
+      "Buy seats for the whole company on one invoice",
+      "Hand work to a teammate and follow it",
+      "Client projects with value and reporting",
       "Squirrel at her most capable, with the highest limits",
-      "Advanced automations and recurring rules",
       "Concierge setup and early access",
     ],
   },
@@ -127,10 +134,29 @@ export const FEATURES = {
   assistant:   { tiers: ["pro", "plus", "studio"], name: "Squirrel, the assistant" },
   calendarSync:{ tiers: ["pro", "plus", "studio"], name: "Calendar sync" },
   insights:    { tiers: ["pro", "plus", "studio"], name: "Insights" },
-  autoSchedule:{ tiers: ["pro", "plus", "studio"], name: "Auto-scheduling" },
   delegation:  { tiers: ["studio"], name: "Teammates and delegation" },
   clientWork:  { tiers: ["studio"], name: "Client projects" },
+  // Companies: the roster and the seat controls come with any paid seat, but
+  // reading what the people on those seats are working on is the enterprise
+  // capability, and priced like one.
+  teamVisibility: { tiers: ["studio"], name: "See your team's work" },
 };
+
+/**
+ * Auto-scheduling is free, on purpose, and is therefore not in the table.
+ *
+ * It was listed above as a paid feature and enforced in exactly no place —
+ * a gate declared and never applied, which is worse than either choice made
+ * deliberately: the pricing page claimed something the product did not do,
+ * and one honest afternoon of "let's enforce our own table" would have taken
+ * the best thing in the app away from the tier that has to fall in love with
+ * it. The wall belongs *after* the magic. Somebody who has watched a week
+ * rebuild itself three times will pay for a third project; somebody who never
+ * saw it will not.
+ *
+ * Named here so the decision survives the next reading of FEATURES.
+ */
+export const ALWAYS_FREE = ["autoSchedule"];
 
 /** Can this plan use this feature? Unknown features are open, never accidentally locked. */
 export const can = (plan, feature) => {

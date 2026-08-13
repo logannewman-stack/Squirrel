@@ -2,8 +2,24 @@ import { useEffect, useState } from "react";
 import { Button, Input } from "./ui";
 import { client } from "../lib/supabase";
 import { startCheckout } from "../lib/billing";
-import { PLANS } from "../lib/plans";
+import { PLANS, can } from "../lib/plans";
 import { quote } from "../lib/seats";
+import { decode } from "../lib/merge";
+import { teamLoad, sayLoad, LOAD } from "../lib/team";
+
+/**
+ * Does this company's subscription include reading its people's work?
+ *
+ * The mirror of `org_sees_work()` in migration 0014, and only a mirror: the
+ * database decides what comes back, this decides what to draw and — the part
+ * that matters more — what to promise the person holding the seat. A screen
+ * that offers a window Postgres will not open is a bug the customer reports;
+ * a screen that promises privacy Postgres does not keep is a different kind of
+ * problem entirely, so the two conditions are written to match line for line.
+ */
+export const seesWork = (org) =>
+  can(org?.plan, "teamVisibility") &&
+  (!org?.renewsAt || new Date(org.renewsAt) > new Date());
 
 /**
  * The company screen: seats, the people in them, and the invitations out.
@@ -29,6 +45,10 @@ export default function Company({ onUpgrade }) {
   // say "you" rather than offering to show somebody their own account.
   const [openMember, setOpenMember] = useState(null);
   const [meId, setMeId] = useState(null);
+  // Everybody's work, in one pass. Hooks cannot live behind the four early
+  // returns below, so it is asked for here and simply answers null until
+  // there is a Studio company with people in it to answer about.
+  const work = useTeamWork(state.members, seesWork(state.org));
 
   const token = async () => {
     const supabase = await client();
@@ -90,13 +110,23 @@ export default function Company({ onUpgrade }) {
     return (
       <div className="text-[15px]">
         <p>
-          <span className="font-medium">{invite.organizations?.name || "A company"}</span> has
+          <span className="font-medium">{invite.org?.name || "A company"}</span> has
           offered you a seat.
         </p>
+        {/* What accepting actually costs, in the only currency anybody
+            hesitates over. It differs by tier, so it is read off the plan
+            rather than written once and hoped over: a member of a Pro company
+            warned about a window that does not exist would decline a seat for
+            nothing, and one on Studio who was not warned has been enrolled in
+            something without being asked. */}
         <p className="mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
-          Taking it puts this account on their plan, and lets their administrators see the
-          projects, tasks and calendar on it — the way a company device works. Your
-          conversations with Squirrel stay private, and they cannot change your work.
+          {seesWork(invite.org)
+            ? <>Taking it puts this account on their plan, and lets their administrators see the
+                projects, tasks and calendar on it — the way a company device works. Your
+                conversations with Squirrel stay private, and they cannot change your work.</>
+            : <>Taking it puts this account on their plan. They can see that you hold a seat,
+                and nothing that is on it — not your projects, not your tasks, not your
+                calendar.</>}
         </p>
         <Button variant="primary" size="sm" className="mt-3" disabled={busy}
                 onClick={() => post({ accept: invite.id })}>
@@ -130,6 +160,8 @@ export default function Company({ onUpgrade }) {
 
   /* -------------------------------------------------------------- member */
   const { org, role, seats, members = [], pending = [] } = state;
+  const visible = seesWork(org);
+
   if (role !== "admin") {
     return (
       <div className="text-[15px]">
@@ -137,12 +169,49 @@ export default function Company({ onUpgrade }) {
         <p className="mt-1 text-[13px] text-[var(--muted)]">
           On {PLANS[org.plan]?.name || org.plan}, paid for by your company.
         </p>
+        {/* Said here, on the screen a member can reach at any time, and not
+            only in the sentence they read once while accepting. Visibility
+            somebody has to remember being told about is visibility they will
+            eventually be surprised by, and the surprise is the whole harm. */}
+        <div className="mt-3 rounded-lg border border-[var(--line)] p-3 text-[13px] leading-relaxed">
+          {visible ? (
+            <>
+              <p className="font-medium">What your company can see</p>
+              <p className="mt-1 text-[var(--muted)]">
+                Administrators at {org.name} can read the projects, tasks and calendar on this
+                account. They cannot change any of it, and they cannot read your conversations
+                with Squirrel — those are shown to nobody.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium">What your company can see</p>
+              <p className="mt-1 text-[var(--muted)]">
+                That you hold a seat, and nothing on it. Your projects, tasks, calendar and
+                conversations are yours alone.
+              </p>
+            </>
+          )}
+        </div>
       </div>
     );
   }
 
   /* --------------------------------------------------------------- admin */
   const free = Math.max(0, (org.seats || 0) - (seats?.taken || 0));
+
+  // The roster, ordered by who needs looking at. Alphabetical is the ordering
+  // that treats a person about to miss three deadlines the same as everybody
+  // else, which is precisely the failure this screen is sold to prevent — so
+  // load leads, and only falls back to the order the seats were filled in
+  // when there is no load to read.
+  const team = teamLoad(
+    members.map((m) => ({ id: m.userId, name: shortName(m), tasks: work?.[m.userId]?.tasks || [] })),
+  );
+  const byId = Object.fromEntries(members.map((m) => [m.userId, m]));
+  const roster = visible
+    ? team.rows.map((r) => ({ member: byId[r.id], load: r.load }))
+    : members.map((m) => ({ member: m, load: null }));
   return (
     <div className="text-[15px]">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -167,24 +236,47 @@ export default function Company({ onUpgrade }) {
           line should see the arithmetic rather than meet it on an invoice. */}
       <SeatPicker org={org} floor={Math.max(members.length, 1)} />
 
+      {/* The one sentence this screen exists to say, when there is anybody to
+          say it about. A company of one is a company with nothing to report. */}
+      {members.length > 1 && (
+        visible
+          ? <p className="mt-4 text-[15px]">{team.headline}</p>
+          : <VisibilityOffer onUpgrade={onUpgrade} count={members.length} />
+      )}
+
       {/* ------------------------------------------------------- the roster */}
-      <ul className="mt-4 divide-y divide-[var(--hairline)] border-t border-[var(--hairline)]">
-        {members.map((m) => (
+      <ul className="mt-3 divide-y divide-[var(--hairline)] border-t border-[var(--hairline)]">
+        {roster.map(({ member: m, load }) => (
           <li key={m.userId} className="py-2">
             <div className="flex items-center justify-between gap-3">
               {/* The name is the door to their work — the visibility this tier
                   is sold on, one tap from the roster rather than a feature
-                  nobody can find. */}
-              <button
-                onClick={() => setOpenMember(openMember === m.userId ? null : m.userId)}
-                className="min-w-0 flex-1 text-left transition-colors hover:text-[var(--ink)]"
-              >
-                <span className="block truncate text-[14px]">{m.email || m.name || "—"}</span>
-                <span className="block text-[12px] text-[var(--faint)]">
-                  {m.role === "admin" ? "Administrator" : "Member"}
-                  {m.userId === meId ? " · you" : " · see their work"}
+                  nobody can find. Below Studio it is not a door, so it is not
+                  drawn as one: no cursor, no hover, no promise. */}
+              {visible ? (
+                <button
+                  onClick={() => setOpenMember(openMember === m.userId ? null : m.userId)}
+                  className="min-w-0 flex-1 text-left transition-colors hover:text-[var(--ink)]"
+                >
+                  <span className="flex items-baseline gap-2">
+                    <span className="min-w-0 truncate text-[14px]">{m.email || m.name || "—"}</span>
+                    {load && load.state !== "empty" && load.state !== "clear" && (
+                      <Chip state={load.state} />
+                    )}
+                  </span>
+                  <span className="block truncate text-[12px] text-[var(--faint)]">
+                    {sayLoad(load)}
+                  </span>
+                </button>
+              ) : (
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px]">{m.email || m.name || "—"}</span>
+                  <span className="block text-[12px] text-[var(--faint)]">
+                    {m.role === "admin" ? "Administrator" : "Member"}
+                    {m.userId === meId ? " · you" : ""}
+                  </span>
                 </span>
-              </button>
+              )}
               <button
                 onClick={() => post({ remove: m.userId })}
                 disabled={busy}
@@ -193,8 +285,9 @@ export default function Company({ onUpgrade }) {
                 Remove
               </button>
             </div>
-            {openMember === m.userId && (
-              <MemberWork member={m} onClose={() => setOpenMember(null)} />
+            {visible && openMember === m.userId && (
+              <MemberWork member={m} work={work?.[m.userId]} load={load}
+                          onClose={() => setOpenMember(null)} />
             )}
           </li>
         ))}
@@ -225,9 +318,125 @@ export default function Company({ onUpgrade }) {
       </div>
       {err && <p className="alert mt-2 text-[13px]">{err}</p>}
       <p className="mt-3 text-[12px] leading-relaxed text-[var(--faint)]">
-        You can see the projects, tasks and calendars on the accounts you provide, and not
-        change them. Everyone you invite is told this before they accept.
+        {visible
+          ? <>You can see the projects, tasks and calendars on the accounts you provide, and not
+              change them. Their conversations with Squirrel are shown to nobody. Everyone you
+              invite is told all of this before they accept.</>
+          : <>You can see who holds a seat, and nothing on it. Everyone you invite is told
+              the same.</>}
       </p>
+    </div>
+  );
+}
+
+/**
+ * The name to put in a sentence.
+ *
+ * A headline reading "cass@acme.com has more due this week than the week
+ * holds" is a machine talking; the same line with a person's name in it is a
+ * colleague telling you something. Most companies invite by email long before
+ * anybody fills in a full name, so the address gets trimmed to the part a
+ * person would actually say out loud.
+ */
+const shortName = (m) => m?.name || (m?.email || "").split("@")[0] || "Somebody";
+
+/**
+ * Every seat-holder's work, read once.
+ *
+ * Through the ordinary signed-in client rather than a service-role endpoint,
+ * deliberately: the policy from 0013 and its Studio condition from 0014 are
+ * what decide whether these rows come back, so the screen and the database
+ * agree by construction. An administrator whose company drops to Pro, or whose
+ * card fails, or who is removed between one render and the next, gets an empty
+ * result from Postgres rather than a check this component had to remember.
+ *
+ * One query per kind rather than one per person: a forty-seat company would
+ * otherwise open a hundred and twenty requests to draw one screen.
+ */
+function useTeamWork(members, enabled) {
+  const [work, setWork] = useState(null);
+  // The dependency is the *contents* of the roster, not the array — a new
+  // array with the same people in it arrives on every poll, and re-fetching
+  // everybody's work each time is how a quiet screen becomes a busy one.
+  const ids = (members || []).map((m) => m.userId).sort().join(",");
+
+  useEffect(() => {
+    if (!enabled || !ids) { setWork(null); return undefined; }
+    let live = true;
+    (async () => {
+      try {
+        const supabase = await client();
+        if (!supabase || !live) return;
+        const list = ids.split(",");
+        const [projects, tasks, events] = await Promise.all([
+          supabase.from("projects").select("*").in("user_id", list).is("deleted_at", null),
+          supabase.from("tasks").select("*").in("user_id", list).is("deleted_at", null),
+          supabase.from("events").select("*").in("user_id", list).is("deleted_at", null)
+            .gte("starts_at", new Date().toISOString()).order("starts_at"),
+        ]);
+        if (!live) return;
+
+        // Everybody gets a bucket, including the people who came back with
+        // nothing — an absent key and an empty one mean "still loading" and
+        // "genuinely empty", and the whole team screen turns on the difference.
+        const by = Object.fromEntries(list.map((id) => [id, { projects: [], tasks: [], events: [] }]));
+        const group = (kind, rows) => {
+          const app = decode(kind, rows || []);
+          (rows || []).forEach((row, i) => by[row.user_id]?.[kind].push(app[i]));
+        };
+        group("projects", projects.data);
+        group("tasks", tasks.data);
+        group("events", events.data);
+        setWork(by);
+      } catch {
+        // A failed read is not "nobody has any work" — that would report a
+        // calm, empty team at exactly the moment the screen knows nothing.
+        if (live) setWork(null);
+      }
+    })();
+    return () => { live = false; };
+  }, [ids, enabled]);
+
+  return work;
+}
+
+/** A person's state as a word, coloured only when it is worth a colour. */
+function Chip({ state }) {
+  const it = LOAD[state];
+  if (!it) return null;
+  const tone = it.tone === "alert"
+    ? "border-[var(--alert,#b4453a)] text-[var(--alert,#b4453a)]"
+    : it.tone === "warn"
+      ? "border-[var(--ink)] text-[var(--ink)]"
+      : "border-[var(--hairline)] text-[var(--faint)]";
+  return (
+    <span className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] uppercase tracking-wide ${tone}`}>
+      {it.label}
+    </span>
+  );
+}
+
+/**
+ * What the tier above this one would show, said as the thing it would show.
+ *
+ * Not "upgrade for team visibility". A company with nine people on it already
+ * knows how many people it has; what it does not know is which of them is
+ * about to miss something, and naming that is both the honest description of
+ * the feature and the only version of this sentence anybody acts on.
+ */
+function VisibilityOffer({ onUpgrade, count }) {
+  return (
+    <div className="mt-4 rounded-lg border border-[var(--line)] p-3">
+      <p className="text-[14px]">See what your team is carrying</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
+        Studio shows the work on every seat you pay for — who has more due this week than the
+        week holds, what is already late, and whose account has nothing on it yet. Right now
+        you can see that {count} people hold seats, and nothing else.
+      </p>
+      <Button variant="secondary" size="sm" className="mt-3"
+              onClick={() => onUpgrade?.("Seeing your team's work is on Studio")}>
+        See what Studio adds
+      </Button>
     </div>
   );
 }
@@ -319,52 +528,28 @@ function SeatPicker({ org, floor }) {
 /**
  * One member's work, as their administrator sees it.
  *
- * Read through the ordinary signed-in client rather than a service-role
- * endpoint, deliberately: the row-level policy from 0013 is what decides
- * whether these rows come back, so the screen and the database agree by
- * construction. Somebody who is not an administrator — or who has just lost
- * the seat — gets an empty list from Postgres rather than a check this
- * component had to remember to make.
+ * Handed the rows rather than fetching them, because the roster above already
+ * read everybody's — a panel that re-queried on open would double the traffic
+ * for data sitting in memory, and would show a spinner over numbers already on
+ * the screen behind it.
  *
- * Read-only, because the policy is. There is no control here to tick
- * somebody else's task off, and one would fail at the database anyway.
+ * What is actually read still comes from the ordinary signed-in client, one
+ * level up, so the policies of 0013 and 0014 are what decide. An administrator
+ * whose company is on Pro, or has stopped paying, or who was removed a moment
+ * ago, gets nothing from Postgres rather than a check somebody had to remember
+ * to write here.
+ *
+ * Read-only, because the policy is. There is no control to tick somebody
+ * else's task off, and one would fail at the database anyway.
  */
-function MemberWork({ member, onClose }) {
-  const [work, setWork] = useState(null);
-
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const supabase = await client();
-        if (!supabase) return;
-        const [projects, tasks, events] = await Promise.all([
-          supabase.from("projects").select("id,name,archived")
-            .eq("user_id", member.userId).is("deleted_at", null),
-          supabase.from("tasks").select("id,title,done,due")
-            .eq("user_id", member.userId).is("deleted_at", null)
-            .order("done").limit(200),
-          supabase.from("events").select("id,title,starts_at")
-            .eq("user_id", member.userId).is("deleted_at", null)
-            .gte("starts_at", new Date().toISOString())
-            .order("starts_at").limit(5),
-        ]);
-        if (!live) return;
-        setWork({
-          projects: projects.data || [],
-          tasks: tasks.data || [],
-          events: events.data || [],
-        });
-      } catch {
-        if (live) setWork({ projects: [], tasks: [], events: [] });
-      }
-    })();
-    return () => { live = false; };
-  }, [member.userId]);
-
+function MemberWork({ member, work, load, onClose }) {
   const open = work?.tasks.filter((t) => !t.done) || [];
   const done = (work?.tasks.length || 0) - open.length;
   const live = work?.projects.filter((p) => !p.archived) || [];
+  // The late work first, and by name. "Three overdue" tells a manager to go
+  // and ask; the three titles let them decide whether it matters before they
+  // interrupt anybody.
+  const late = load?.late || [];
 
   return (
     <div className="mt-3 rounded-lg border border-[var(--line)] p-3">
@@ -383,6 +568,32 @@ function MemberWork({ member, onClose }) {
 
       {work && !live.length && !open.length && (
         <p className="mt-2 text-[13px] text-[var(--muted)]">Nothing on this account yet.</p>
+      )}
+
+      {late.length > 0 && (
+        <div className="mt-3">
+          <p className="label">Already late</p>
+          <ul className="mt-1 space-y-1">
+            {late.slice(0, 6).map((t) => (
+              <li key={t.id} className="flex items-baseline justify-between gap-3 text-[13px]">
+                <span className="min-w-0 truncate">{t.title}</span>
+                <span className="num shrink-0 text-[11px] text-[var(--faint)]">
+                  {new Date(`${t.due}T00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {late.length > 6 && (
+            <p className="mt-1 text-[12px] text-[var(--faint)]">and {late.length - 6} more.</p>
+          )}
+        </div>
+      )}
+
+      {load && load.state !== "empty" && (
+        <p className="mt-3 text-[12px] leading-relaxed text-[var(--faint)]">
+          {sayLoad(load)} — measured against a standard working week, not{" "}
+          {member.name ? `${member.name}'s` : "their"} own hours, which stay on their device.
+        </p>
       )}
 
       {live.length > 0 && (
@@ -423,11 +634,11 @@ function MemberWork({ member, onClose }) {
         <div className="mt-3">
           <p className="label">Next up</p>
           <ul className="mt-1 space-y-1">
-            {work.events.map((e) => (
+            {work.events.slice(0, 5).map((e) => (
               <li key={e.id} className="flex items-baseline justify-between gap-3 text-[13px]">
                 <span className="min-w-0 truncate">{e.title}</span>
                 <span className="num shrink-0 text-[11px] text-[var(--faint)]">
-                  {new Date(e.starts_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                  {new Date(e.start).toLocaleDateString([], { month: "short", day: "numeric" })}
                 </span>
               </li>
             ))}

@@ -9,6 +9,7 @@ import {
 import { PRIORITIES } from "../lib/store";
 import { duration } from "../lib/format";
 import { whenTask, whenProject } from "../lib/when";
+import { can } from "../lib/plans";
 
 const ESTIMATES = [15, 30, 60, 120];
 
@@ -28,7 +29,14 @@ const ESTIMATES = [15, 30, 60, 120];
  */
 export const UNFILED = "unfiled";
 
-export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
+export default function ProjectDetail({ state, projectId, onBack, onFocus, onUpgrade }) {
+  /**
+   * Two of the tiers' own promises, enforced here for the first time. Both
+   * were declared Studio features in plans.js and gated in no code anywhere,
+   * so Studio's entire differentiator over Pro was working for free.
+   */
+  const canDelegate = can(state.plan, "delegation");
+  const canClient = can(state.plan, "clientWork");
   const unfiled = projectId === UNFILED;
   const project = unfiled
     ? { id: null, name: "Unfiled", client: "", value: null }
@@ -98,21 +106,36 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
             className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none"
           />
           <div className="mt-2 flex flex-wrap gap-2">
-            <input
-              defaultValue={project.client}
-              onBlur={(e) => updateProject(project.id, { client: e.target.value })}
-              placeholder="Client"
-              className="rounded border border-[var(--line)] bg-transparent px-2.5 py-1 text-xs
-                         outline-none placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
-            />
-            <input
-              type="number"
-              defaultValue={project.value ?? ""}
-              onBlur={(e) => updateProject(project.id, { value: e.target.value ? Number(e.target.value) : null })}
-              placeholder="Value ($)"
-              className="w-28 rounded border border-[var(--line)] bg-transparent px-2.5 py-1 text-xs
-                         tabular-nums outline-none placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
-            />
+            {/* Who the work is for and what it is worth: the consultant's
+                half of Studio, and the other gate that was never applied. */}
+            {canClient ? (
+              <>
+                <input
+                  defaultValue={project.client}
+                  onBlur={(e) => updateProject(project.id, { client: e.target.value })}
+                  placeholder="Client"
+                  className="rounded border border-[var(--line)] bg-transparent px-2.5 py-1 text-xs
+                             outline-none placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+                />
+                <input
+                  type="number"
+                  defaultValue={project.value ?? ""}
+                  onBlur={(e) => updateProject(project.id, { value: e.target.value ? Number(e.target.value) : null })}
+                  placeholder="Value ($)"
+                  className="w-28 rounded border border-[var(--line)] bg-transparent px-2.5 py-1 text-xs
+                             tabular-nums outline-none placeholder:text-[var(--faint)] focus:border-[var(--ink)]"
+                />
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onUpgrade?.("Client projects are on Studio")}
+                className="rounded border border-[var(--line)] px-2.5 py-1 text-xs text-[var(--muted)]
+                           transition-colors hover:border-[var(--ink)] hover:text-[var(--ink)]"
+              >
+                Add a client and a value — on Studio
+              </button>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -248,13 +271,30 @@ export default function ProjectDetail({ state, projectId, onBack, onFocus }) {
           </div>
 
           <div className="flex flex-wrap items-end justify-between gap-3">
+            {/* Handing work to somebody else is Studio's story, and was
+                advertised as one while working on every tier. Locked rather
+                than hidden: a control nobody can see is a control nobody
+                upgrades for, and the person reaching for a colleague's name
+                is exactly who the tier is for. */}
             <Field label="Delegate" className="min-w-[15rem] flex-1">
-              <PersonPicker
-                value={delegate}
-                onChange={setDelegate}
-                state={state}
-                className="w-full max-w-xs"
-              />
+              {canDelegate ? (
+                <PersonPicker
+                  value={delegate}
+                  onChange={setDelegate}
+                  state={state}
+                  className="w-full max-w-xs"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onUpgrade?.("Handing work to someone is on Studio")}
+                  className="w-full max-w-xs rounded-md border border-[var(--line)] px-2.5 py-2
+                             text-left text-xs text-[var(--muted)] transition-colors
+                             hover:border-[var(--ink)] hover:text-[var(--ink)]"
+                >
+                  Hand it to someone — on Studio
+                </button>
+              )}
             </Field>
             <Button type="submit" variant="primary" disabled={!title.trim()}>
               Add

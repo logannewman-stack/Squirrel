@@ -345,7 +345,16 @@ const convo = await p.evaluate(async () => {
   // The App recomputes the plan whenever work or meetings move, so this checks
   // the wiring rather than the algorithm, which has its own suite.
   store.setSetting("confirm", false);
-  store.addTask({ title: "Board deck", estimateMins: 480, due: iso(2026, 8, 14, 9).slice(0, 10) });
+  // Relative to the real clock, because the planner inside the app runs on it
+  // rather than on this suite's fixed NOW. Written as an absolute date, this
+  // quietly became a one-day deadline on the day the calendar caught up with
+  // it — and an eight-hour task that will not fit into a single five-hour day
+  // is not the planner failing to spread work, it is arithmetic. Six days out
+  // leaves at least four working days whatever weekday it is run on.
+  const end = new Date();
+  end.setDate(end.getDate() + 6);
+  const by = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+  store.addTask({ title: "Board deck", estimateMins: 480, due: by });
   await new Promise((r) => setTimeout(r, 400));
   const st = M();
   t("the app lays long work out across days",
@@ -353,7 +362,7 @@ const convo = await p.evaluate(async () => {
   t("every block has a real clock time",
     st.blocks.every((b) => b.start === null || /T\d\d:\d\d/.test(b.start)));
   t("and none of it lands after the deadline",
-    st.blocks.every((b) => b.day <= "2026-08-14"), st.blocks.map((b) => b.day).join());
+    st.blocks.every((b) => b.day <= by), st.blocks.map((b) => b.day).join());
 
   return out;
 });
@@ -448,7 +457,9 @@ await p.getByRole("button", { name: "New event" }).click();
 await p.getByPlaceholder("Title").fill("Partner sync");
 await p.getByPlaceholder(/^With/).fill("Bob, John");
 await p.getByPlaceholder(/^About/).fill("the Q3 pipeline");
-await p.getByRole("button", { name: "Add" }).click();
+// Exact, because an empty Today screen offers "I'll add things my own way" and
+// a substring match on "Add" finds that too. The dialog's own button is meant.
+await p.getByRole("button", { name: "Add", exact: true }).click();
 
 // The assistant is reached from the floating button now, not a tab.
 await p.getByRole("button", { name: "Ask Squirrel" }).click();

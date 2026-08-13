@@ -30,15 +30,33 @@ async function seatsUsed(db, orgId) {
   return { members: members || 0, pending: pending || 0, taken: (members || 0) + (pending || 0) };
 }
 
-/** The caller's company and role, or null. */
+/**
+ * The caller's company and role, or null.
+ *
+ * The row is renamed on the way out rather than handed over as Postgres
+ * spells it. The screen was already reading `org.billingAlert` from a row
+ * carrying `billing_alert`, so the banner warning a company that its card is
+ * failing had never once appeared — the quietest possible failure, on the one
+ * notice that exists to stop a whole team losing access without warning.
+ * One mapping, in one place, is what stops the next one.
+ */
 async function orgOf(db, userId) {
   const { data } = await db
     .from("org_members")
     .select("role, org_id, organizations(id,name,plan,seats,plan_renews_at,billing_status,billing_alert)")
     .eq("user_id", userId)
     .maybeSingle();
-  if (!data?.organizations) return null;
-  return { role: data.role, org: data.organizations };
+  const o = data?.organizations;
+  if (!o) return null;
+  return {
+    role: data.role,
+    org: {
+      id: o.id, name: o.name, plan: o.plan, seats: o.seats,
+      renewsAt: o.plan_renews_at,
+      billingStatus: o.billing_status,
+      billingAlert: o.billing_alert,
+    },
+  };
 }
 
 export default async function handler(req, res) {
@@ -56,14 +74,30 @@ export default async function handler(req, res) {
     // somebody with no company yet — it is the whole of their next step.
     const { data: invites } = await db
       .from("org_invites")
-      .select("id, role, created_at, organizations(name)")
+      // The plan travels with the invitation because the acceptance screen has
+      // to say what accepting means, and on this product that differs by tier:
+      // a Studio company can read the work on the seat it is handing over, a
+      // Pro company cannot. Saying the wrong one is either a false accusation
+      // or an undisclosed truth, and there is no third option worth shipping.
+      .select("id, role, created_at, organizations(name,plan,plan_renews_at)")
       .ilike("email", myEmail)
       .is("accepted_at", null).is("revoked_at", null);
 
-    if (!mine) return json(res, 200, { org: null, invites: invites || [] });
+    // Named the same way `org` is, so one `seesWork(x)` on the client answers
+    // for a company you belong to and a company asking you to.
+    const waiting = (invites || []).map((i) => ({
+      id: i.id, role: i.role, createdAt: i.created_at,
+      org: {
+        name: i.organizations?.name || null,
+        plan: i.organizations?.plan || "free",
+        renewsAt: i.organizations?.plan_renews_at || null,
+      },
+    }));
+
+    if (!mine) return json(res, 200, { org: null, invites: waiting });
 
     const seats = await seatsUsed(db, mine.org.id);
-    const body = { org: mine.org, role: mine.role, seats, invites: invites || [] };
+    const body = { org: mine.org, role: mine.role, seats, invites: waiting };
     if (mine.role !== "admin") return json(res, 200, body);
 
     // Administrators get the roster: who holds a seat, and who has been asked.

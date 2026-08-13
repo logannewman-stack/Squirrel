@@ -45,10 +45,23 @@ const ask = (q, from) =>
 await ask("book a call with priya thursday at 2", "siri");
 await p.waitForTimeout(2500);
 
+// The Thursday coming, worked out from the real clock. Pinned to a literal
+// date this passed for five days a week and failed on the sixth — the one
+// where today *is* Thursday, and a bare weekday deliberately means the next
+// one rather than this one. What is under test here is that a sentence in the
+// address bar reaches the calendar; which Thursday a Thursday is has its own
+// suite, and should not be re-litigated by a string.
+const nextThursday = (() => {
+  const d = new Date();
+  d.setDate(d.getDate() + ((4 - d.getDay() + 7) % 7 || 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+})();
+
 const events = await store((s) => s.getState().events.map((e) => `${e.title}|${e.start}`));
 t("a sentence in the URL actually books the meeting", events.length === 1, JSON.stringify(events));
 t("on the day and at the hour asked for",
-  /Priya\|2026-08-13T14:00/.test(events[0] || ""), events[0]);
+  (events[0] || "").startsWith(`Call with Priya|${nextThursday}T14:00`),
+  `${events[0]} (wanted ${nextThursday})`);
 t("and she is shown doing it, not silently changing a calendar",
   (await p.getByRole("dialog").count()) === 1);
 t("with the exchange in the conversation", (await store((s) => s.getState().chat.length)) >= 2);

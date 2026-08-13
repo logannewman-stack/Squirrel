@@ -26,7 +26,7 @@ p.on("pageerror", (e) => errs.push(e.message));
 await p.goto("http://localhost:5173/", { waitUntil: "networkidle" });
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: "networkidle" });
-await skipOnboarding(p);
+await skipOnboarding(p, { coach: true });
 
 /* ------------------------------------------------ the first three acorns */
 {

@@ -11,9 +11,11 @@
  * papered over a change there would defeat the point.
  *
  * @param {import("playwright").Page} page
- * @param {{surname?: string}} [opts]
+ * @param {{surname?: string, coach?: boolean}} [opts]
+ *   coach — leave the first-plan card up. Only `flow.e2e.mjs` wants this; it
+ *   is the suite that tests the card itself.
  */
-export async function skipOnboarding(page, { surname = "Newman" } = {}) {
+export async function skipOnboarding(page, { surname = "Newman", coach = false } = {}) {
   // 1. Identity.
   await page.getByRole("button", { name: "Mr." }).click();
   await page.getByPlaceholder("Surname").fill(surname);
@@ -31,6 +33,18 @@ export async function skipOnboarding(page, { surname = "Newman" } = {}) {
   //    without one finish at step 3, so this step may not exist at all.
   const notNow = page.getByRole("button", { name: /^Not now/ });
   if (await notNow.count()) await notNow.click();
+
+  // 5. The first-plan card, which is not onboarding but is on the screen the
+  //    instant onboarding ends. It carries its own textbox and its own
+  //    add-shaped button, and those collide in strict mode with the ones every
+  //    other suite is actually reaching for — `getByRole("textbox")` finding
+  //    two elements, one of them a coach nobody asked about. Dismissed by
+  //    default for the same reason the walk above lives here: a screen that is
+  //    merely in the way should be one suite's problem, not everybody's.
+  if (!coach) {
+    const ownWay = page.getByRole("button", { name: /my own way/i });
+    if (await ownWay.count()) await ownWay.click();
+  }
 
   await page.waitForTimeout(250);
 }

@@ -493,6 +493,7 @@ export default function App() {
         projectId={view.id}
         onBack={() => setView({ name: "projects" })}
         onFocus={setPending}
+        onUpgrade={(reason) => setUpgrade(reason ?? null)}
       />
     ) : view.name === "purpose" ? (
       <Purpose
