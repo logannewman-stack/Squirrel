@@ -79,24 +79,46 @@ end $$;
 -- session is a real signed-in user, because that is the only way these
 -- policies mean anything.
 insert into projects (id, user_id, name)
-  values ('cccccccc-0000-4000-8000-000000000001', :emp, 'Employee salary review');
-insert into tasks (user_id, title) values (:emp, 'Ask for a raise');
+  values ('cccccccc-0000-4000-8000-000000000001', :emp, 'Q4 migration');
+insert into tasks (user_id, title) values (:emp, 'Draft the runbook');
 insert into events (user_id, title, starts_at, ends_at)
-  values (:emp, 'Interview elsewhere', now(), now() + interval '1 hour');
+  values (:emp, 'Vendor call', now(), now() + interval '1 hour');
+insert into chat_messages (user_id, role, text) values (:emp, 'user', 'what should I do today');
 
 set role authenticated;
 set request.jwt.claim.sub = 'aaaaaaaa-0000-4000-8000-000000000001';   -- the boss
 set request.jwt.claim.email = 'boss@acme.com';
 
-select case when (select count(*) from projects) = 0
-  then 'PASS  an admin cannot read a member''s projects'
-  else 'FAIL  ADMIN READ A MEMBER PROJECT' end;
-select case when (select count(*) from tasks) = 0
-  then 'PASS  nor their tasks'
-  else 'FAIL  ADMIN READ A MEMBER TASK' end;
-select case when (select count(*) from events) = 0
-  then 'PASS  nor their calendar'
-  else 'FAIL  ADMIN READ A MEMBER EVENT' end;
+-- Enterprise visibility (0013): the administrator of a company can read the
+-- work on the accounts that company provisions. This is the arrangement for
+-- company-issued tools; the limits on it are asserted below.
+select case when (select count(*) from projects where user_id = :emp) = 1
+  then 'PASS  an admin reads a member''s projects'
+  else 'FAIL  admin could not read a member project' end;
+select case when (select count(*) from tasks where user_id = :emp) = 1
+  then 'PASS  and their tasks'
+  else 'FAIL  admin could not read a member task' end;
+select case when (select count(*) from events where user_id = :emp) = 1
+  then 'PASS  and their calendar'
+  else 'FAIL  admin could not read a member event' end;
+select case when (select email from profiles where id = :emp) = 'emp@acme.com'
+  then 'PASS  and their account details'
+  else 'FAIL  admin could not read a member profile' end;
+
+-- Read, not write. Oversight is not impersonation: an administrator cannot
+-- tick off, edit or delete somebody's work from inside their account.
+update tasks set done = true where user_id = :emp;
+delete from projects where user_id = :emp;
+select case when (select count(*) from tasks where user_id = :emp and done) = 0
+             and (select count(*) from projects where user_id = :emp) = 1
+  then 'PASS  but cannot edit or delete it'
+  else 'FAIL  ADMIN WROTE TO A MEMBER''S DATA' end;
+
+-- The assistant transcript is deliberately not included. Reading somebody's
+-- task list is a long way from reading what they said to a notebook.
+select case when (select count(*) from chat_messages where user_id = :emp) = 0
+  then 'PASS  and cannot read their assistant transcript'
+  else 'FAIL  ADMIN READ A MEMBER CHAT' end;
 
 -- What an admin *can* see: the seat. Presence, not contents.
 select case when (select count(*) from org_members where org_id = :org) = 3
@@ -139,12 +161,29 @@ exception
   when others then raise notice 'PASS  a member cannot hand out a seat even when one is free';
 end $$;
 
--- And an outsider sees no company at all.
+-- Visibility follows the admin role, not membership. A colleague on the next
+-- desk — same company, same seat — sees none of it.
+set request.jwt.claim.sub = 'aaaaaaaa-0000-4000-8000-000000000004';
+set request.jwt.claim.email = 'third@acme.com';
+select case when (select count(*) from projects where user_id = :emp) = 0
+             and (select count(*) from tasks where user_id = :emp) = 0
+  then 'PASS  a colleague sees none of a member''s work'
+  else 'FAIL  A COLLEAGUE READ ANOTHER MEMBER''S WORK' end;
+
+-- And an outsider sees no company, no roster, and no work at all.
 set request.jwt.claim.sub = 'aaaaaaaa-0000-4000-8000-000000000003';
 set request.jwt.claim.email = 'nobody@else.com';
 select case when (select count(*) from organizations) = 0 and (select count(*) from org_members) = 0
   then 'PASS  an outsider sees no company and no roster'
   else 'FAIL  OUTSIDER READ THE ORG' end;
+select case when (select count(*) from projects) = 0 and (select count(*) from tasks) = 0
+  then 'PASS  and none of anybody''s work'
+  else 'FAIL  OUTSIDER READ SOMEBODY''S WORK' end;
+
+-- The disclosure the app makes to the person whose account it is.
+select case when is_managed(:emp) and not is_managed(:rando)
+  then 'PASS  a managed account knows it is managed, a personal one does not'
+  else 'FAIL  is_managed is wrong' end;
 
 -- --------------------------------------------------------- the invitation
 reset role;

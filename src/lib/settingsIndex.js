@@ -115,6 +115,13 @@ export const INDEX = [
     keywords: "delete account close account remove account leave quit cancel account gdpr erasure",
   },
   {
+    // Indexed for everyone, rendered only on a company account — somebody
+    // searching "who can see my tasks" should find the answer whether or not
+    // this particular account has one.
+    group: "data", header: "Your company",
+    keywords: "company organisation organization employer enterprise admin administrator managed work account who can see my tasks visibility privacy team seat",
+  },
+  {
     // Indexed for everyone, rendered for owners only — the group exists on the
     // screen whether or not the server lets this account see anything in it,
     // and an index that lied about that would drift the first time either side

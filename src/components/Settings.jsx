@@ -11,6 +11,7 @@ import Usage from "./Usage";
 import Calendars from "./Calendars";
 import SetupCheck from "./SetupCheck";
 import Owner from "./Owner";
+import Managed from "./Managed";
 import DeleteAccount from "./DeleteAccount";
 import Appearance from "./Appearance";
 import Backup from "./Backup";
@@ -257,6 +258,14 @@ export default function Settings({ state, onBack, onLegal, onUpgrade, onKeyboard
 
     data: (
       <>
+        {/* Renders nothing on a personal account. On a company one it says so
+            before anything else on this screen, because somebody reading
+            "Stored here" deserves to know who else can read it. */}
+        {canSync && (
+          <Group header="Your company">
+            <PanelRow><Managed /></PanelRow>
+          </Group>
+        )}
         <Group
           header="Stored here"
           footer={state.settings?.email
