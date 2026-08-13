@@ -25,6 +25,10 @@ export default function Company({ onUpgrade }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // Which member's work is open, and who the viewer is — so the roster can
+  // say "you" rather than offering to show somebody their own account.
+  const [openMember, setOpenMember] = useState(null);
+  const [meId, setMeId] = useState(null);
 
   const token = async () => {
     const supabase = await client();
@@ -34,7 +38,10 @@ export default function Company({ onUpgrade }) {
 
   const load = async () => {
     try {
-      const t = await token();
+      const supabase = await client();
+      const { data: session } = (await supabase?.auth.getSession()) ?? {};
+      setMeId(session?.session?.user?.id ?? null);
+      const t = session?.session?.access_token || null;
       if (!t) return setState({ signedOut: true });
       const res = await fetch("/api/org", { headers: { authorization: `Bearer ${t}` } });
       if (!res.ok) return setState({ unavailable: true });
@@ -163,20 +170,32 @@ export default function Company({ onUpgrade }) {
       {/* ------------------------------------------------------- the roster */}
       <ul className="mt-4 divide-y divide-[var(--hairline)] border-t border-[var(--hairline)]">
         {members.map((m) => (
-          <li key={m.userId} className="flex items-center justify-between gap-3 py-2">
-            <span className="min-w-0">
-              <span className="block truncate text-[14px]">{m.email || m.name || "—"}</span>
-              <span className="block text-[12px] text-[var(--faint)]">
-                {m.role === "admin" ? "Administrator" : "Member"}
-              </span>
-            </span>
-            <button
-              onClick={() => post({ remove: m.userId })}
-              disabled={busy}
-              className="shrink-0 text-[12px] text-[var(--faint)] transition-colors hover:text-[var(--ink)]"
-            >
-              Remove
-            </button>
+          <li key={m.userId} className="py-2">
+            <div className="flex items-center justify-between gap-3">
+              {/* The name is the door to their work — the visibility this tier
+                  is sold on, one tap from the roster rather than a feature
+                  nobody can find. */}
+              <button
+                onClick={() => setOpenMember(openMember === m.userId ? null : m.userId)}
+                className="min-w-0 flex-1 text-left transition-colors hover:text-[var(--ink)]"
+              >
+                <span className="block truncate text-[14px]">{m.email || m.name || "—"}</span>
+                <span className="block text-[12px] text-[var(--faint)]">
+                  {m.role === "admin" ? "Administrator" : "Member"}
+                  {m.userId === meId ? " · you" : " · see their work"}
+                </span>
+              </button>
+              <button
+                onClick={() => post({ remove: m.userId })}
+                disabled={busy}
+                className="shrink-0 text-[12px] text-[var(--faint)] transition-colors hover:text-[var(--ink)]"
+              >
+                Remove
+              </button>
+            </div>
+            {openMember === m.userId && (
+              <MemberWork member={m} onClose={() => setOpenMember(null)} />
+            )}
           </li>
         ))}
         {pending.map((p) => (
@@ -293,6 +312,133 @@ function SeatPicker({ org, floor }) {
       >
         {org.plan === "free" ? `Buy ${seats} ${seats === 1 ? "seat" : "seats"}` : "Change the subscription"}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * One member's work, as their administrator sees it.
+ *
+ * Read through the ordinary signed-in client rather than a service-role
+ * endpoint, deliberately: the row-level policy from 0013 is what decides
+ * whether these rows come back, so the screen and the database agree by
+ * construction. Somebody who is not an administrator — or who has just lost
+ * the seat — gets an empty list from Postgres rather than a check this
+ * component had to remember to make.
+ *
+ * Read-only, because the policy is. There is no control here to tick
+ * somebody else's task off, and one would fail at the database anyway.
+ */
+function MemberWork({ member, onClose }) {
+  const [work, setWork] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const supabase = await client();
+        if (!supabase) return;
+        const [projects, tasks, events] = await Promise.all([
+          supabase.from("projects").select("id,name,archived")
+            .eq("user_id", member.userId).is("deleted_at", null),
+          supabase.from("tasks").select("id,title,done,due")
+            .eq("user_id", member.userId).is("deleted_at", null)
+            .order("done").limit(200),
+          supabase.from("events").select("id,title,starts_at")
+            .eq("user_id", member.userId).is("deleted_at", null)
+            .gte("starts_at", new Date().toISOString())
+            .order("starts_at").limit(5),
+        ]);
+        if (!live) return;
+        setWork({
+          projects: projects.data || [],
+          tasks: tasks.data || [],
+          events: events.data || [],
+        });
+      } catch {
+        if (live) setWork({ projects: [], tasks: [], events: [] });
+      }
+    })();
+    return () => { live = false; };
+  }, [member.userId]);
+
+  const open = work?.tasks.filter((t) => !t.done) || [];
+  const done = (work?.tasks.length || 0) - open.length;
+  const live = work?.projects.filter((p) => !p.archived) || [];
+
+  return (
+    <div className="mt-3 rounded-lg border border-[var(--line)] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-medium">{member.email || member.name}</p>
+          <p className="text-[12px] text-[var(--muted)]">
+            {work
+              ? `${live.length} projects · ${open.length} open · ${done} done`
+              : "Reading…"}
+          </p>
+        </div>
+        <button onClick={onClose} aria-label="Close"
+                className="shrink-0 px-1 text-[var(--faint)] hover:text-[var(--ink)]">×</button>
+      </div>
+
+      {work && !live.length && !open.length && (
+        <p className="mt-2 text-[13px] text-[var(--muted)]">Nothing on this account yet.</p>
+      )}
+
+      {live.length > 0 && (
+        <div className="mt-3">
+          <p className="label">Projects</p>
+          <ul className="mt-1 flex flex-wrap gap-1.5">
+            {live.map((p) => (
+              <li key={p.id} className="rounded-md border border-[var(--hairline)] px-2 py-1 text-[12px]">
+                {p.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {open.length > 0 && (
+        <div className="mt-3">
+          <p className="label">Open work</p>
+          <ul className="mt-1 space-y-1">
+            {open.slice(0, 12).map((t) => (
+              <li key={t.id} className="flex items-baseline justify-between gap-3 text-[13px]">
+                <span className="min-w-0 truncate">{t.title}</span>
+                {t.due && (
+                  <span className="num shrink-0 text-[11px] text-[var(--faint)]">
+                    {new Date(`${t.due}T00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {open.length > 12 && (
+            <p className="mt-1 text-[12px] text-[var(--faint)]">and {open.length - 12} more.</p>
+          )}
+        </div>
+      )}
+
+      {work?.events.length > 0 && (
+        <div className="mt-3">
+          <p className="label">Next up</p>
+          <ul className="mt-1 space-y-1">
+            {work.events.map((e) => (
+              <li key={e.id} className="flex items-baseline justify-between gap-3 text-[13px]">
+                <span className="min-w-0 truncate">{e.title}</span>
+                <span className="num shrink-0 text-[11px] text-[var(--faint)]">
+                  {new Date(e.starts_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p className="mt-3 text-[12px] text-[var(--faint)]">
+        Read-only, and they have been told you can see it. Conversations with Squirrel are
+        shown to nobody.
+      </p>
     </div>
   );
 }
