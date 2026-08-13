@@ -87,6 +87,52 @@ After saving each product, open it and copy the **price** id. It begins
 `price_…`. The `prod_…` id on the same page is the product, not the price, and
 putting it in the variable produces a checkout that 400s.
 
+### B2a. Seat pricing for companies — do this, or the invoice won't match
+
+**The one setup step that can produce a billing dispute.**
+
+The company screen quotes volume discounts: 12 Pro seats reads **$269.88/month**,
+not 12 × $24.99 = $299.88. Those breaks live in `src/lib/seats.js`. Stripe knows
+nothing about them — it charges what the price object says, times the quantity.
+So a **flat** per-seat price bills $299.88 against a quote of $269.88, every
+month, to a customer who can do the multiplication.
+
+Configure each price with **graduated tiers** matching the app exactly. In the
+price editor pick **per unit → Graduated pricing** (Stripe sometimes labels this
+"tiered"), then enter:
+
+**Squirrel Pro** — `STRIPE_PRICE_PRO`
+
+| First unit | Last unit | Per unit |
+| --- | --- | --- |
+| 1 | 4 | 24.99 |
+| 5 | 24 | 21.24 |
+| 25 | 99 | 18.74 |
+| 100 | ∞ | 16.24 |
+
+**Squirrel Studio** — `STRIPE_PRICE_STUDIO`
+
+| First unit | Last unit | Per unit |
+| --- | --- | --- |
+| 1 | 4 | 50.00 |
+| 5 | 24 | 42.50 |
+| 25 | 99 | 37.50 |
+| 100 | ∞ | 32.50 |
+
+**Graduated, not Volume.** Stripe offers both, and they are different: *Volume*
+charges every unit at the rate the last one reached; *Graduated* charges each
+unit at the rate of the band it falls in. The app computes graduated, and the
+gap is not subtle — at 30 seats, graduated bills $637.20 and volume bills
+$562.20.
+
+Prove it once before you sell anything: buy 12 seats with a test card and check
+the invoice says **$269.88**. $299.88 means the price is flat; anything lower
+means it is on Volume rather than Graduated.
+
+> Prefer no discounts at all? That is a legitimate choice — set every `off` in
+> `BANDS` (`src/lib/seats.js`) to `0`, and the app quotes flat per-seat pricing
+> that matches a flat Stripe price. The tests hold either way.
+
 ### B3. Get the secret key
 
 **Developers → API keys → Secret key → Reveal.** Copy it.
