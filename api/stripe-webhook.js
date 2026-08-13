@@ -94,6 +94,32 @@ async function applySubscription(stripe, db, event) {
     sub = await stripe.subscriptions.retrieve(sub.id);
   }
 
+  /**
+   * A company's subscription is written to the company, not to whoever
+   * happened to hold the card. Seats come from the line item's quantity —
+   * what Stripe actually billed — rather than from metadata written once at
+   * checkout, so changing the quantity in the billing portal moves the seats
+   * with it and the two can never disagree.
+   */
+  const orgId = await orgFor(db, sub);
+  if (orgId) {
+    const { data: before } = await db
+      .from("organizations").select("billing_event_at").eq("id", orgId).maybeSingle();
+    if (isStale(event.created, before?.billing_event_at)) return;
+
+    const fields = profileFromSubscription(sub, PRICES);
+    const quantity = sub?.items?.data?.[0]?.quantity;
+    await db.from("organizations").update({
+      ...fields,
+      // A lapsed company keeps its seat count. The plan falling to free is
+      // what ends entitlement; zeroing the seats would additionally evict a
+      // roster the customer may be one card update away from restoring.
+      ...(fields.plan !== "free" && Number.isFinite(quantity) ? { seats: quantity } : {}),
+      billing_event_at: new Date(event.created * 1000).toISOString(),
+    }).eq("id", orgId);
+    return;
+  }
+
   const userId = await userFor(db, sub);
   const { data: before } = await db
     .from("profiles").select("billing_event_at").eq("id", userId).maybeSingle();
@@ -106,6 +132,17 @@ async function applySubscription(stripe, db, event) {
   }).eq("id", userId);
 }
 
+/** The company a subscription belongs to, by metadata first and mapping second. */
+async function orgFor(db, sub) {
+  const fromMeta = sub?.metadata?.squirrel_org_id;
+  if (fromMeta) return fromMeta;
+  const customerId = typeof sub?.customer === "string" ? sub.customer : sub?.customer?.id;
+  if (!customerId) return null;
+  const { data } = await db
+    .from("organizations").select("id").eq("stripe_customer_id", customerId).maybeSingle();
+  return data?.id ?? null;
+}
+
 /**
  * First purchase: bind the Stripe customer to the account.
  *
@@ -114,10 +151,22 @@ async function applySubscription(stripe, db, event) {
  * dashboard — or by a support agent — still finds its way home.
  */
 async function linkCustomer(db, session) {
+  const customerId = typeof session?.customer === "string" ? session.customer : session?.customer?.id;
+  if (!customerId) throw permanent("no_link");
+
+  // A company's checkout carries the org rather than a person: the customer
+  // is the business, and binding it to whoever held the card would put the
+  // company's subscription on an individual's profile.
+  const orgId = session?.metadata?.squirrel_org_id
+    ?? session?.subscription_data?.metadata?.squirrel_org_id;
+  if (orgId) {
+    await db.from("organizations").update({ stripe_customer_id: customerId }).eq("id", orgId);
+    return;
+  }
+
   const userId = session?.metadata?.supabase_user_id
     ?? session?.subscription_data?.metadata?.supabase_user_id;
-  const customerId = typeof session?.customer === "string" ? session.customer : session?.customer?.id;
-  if (!userId || !customerId) throw permanent("no_link");
+  if (!userId) throw permanent("no_link");
 
   await db.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
 }

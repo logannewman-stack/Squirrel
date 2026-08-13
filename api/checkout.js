@@ -44,38 +44,83 @@ export default async function handler(req, res) {
   const auth = await requireUser(req);
   if (!auth) return json(res, 401, { error: "unauthorized" });
 
-  const { plan, return: returnTo = "web" } = req.body || {};
+  const { plan, return: returnTo = "web", seats } = req.body || {};
   if (!PRICE[plan]) return json(res, 400, { error: "unknown_plan" });
   if (!RETURNS[returnTo]) return json(res, 400, { error: "unknown_return" });
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   const db = asUser(auth.jwt);
+  const service = asService();
+
+  /**
+   * Buying for a company rather than for yourself.
+   *
+   * `seats` turns this into a quantity-based subscription billed to the
+   * organisation's own Stripe customer, so a company's invoice is one line
+   * that says how many people it covers — and cancelling it does not touch
+   * whatever the administrator pays for personally.
+   *
+   * The number is bounded and floored at the seats already occupied: a
+   * company that has handed out nine seats cannot "reduce" to three and
+   * strand six people. Stripe would happily take the smaller number.
+   */
+  let org = null;
+  if (seats != null) {
+    const { data: mine } = await service
+      .from("org_members")
+      .select("role, organizations(id,name,seats,stripe_customer_id)")
+      .eq("user_id", auth.user.id)
+      .maybeSingle();
+    if (!mine || mine.role !== "admin") return json(res, 403, { error: "not_an_admin" });
+    org = mine.organizations;
+
+    const { count: held } = await service
+      .from("org_members").select("user_id", { count: "exact", head: true })
+      .eq("org_id", org.id);
+    const want = Math.floor(Number(seats));
+    if (!Number.isFinite(want) || want < 1 || want > 500) {
+      return json(res, 400, { error: "bad_seat_count" });
+    }
+    if (want < (held || 0)) return json(res, 409, { error: "fewer_seats_than_people", held });
+    org.wanted = want;
+  }
+
   const { data: profile } = await db.from("profiles")
     .select("stripe_customer_id,email").eq("id", auth.user.id).maybeSingle();
 
-  let customerId = profile?.stripe_customer_id;
+  let customerId = org ? org.stripe_customer_id : profile?.stripe_customer_id;
   if (!customerId) {
     const customer = await stripe.customers.create({
       email: profile?.email || auth.user.email,
-      metadata: { supabase_user_id: auth.user.id },
+      name: org ? org.name : undefined,
+      metadata: org
+        ? { squirrel_org_id: org.id, bought_by: auth.user.id }
+        : { supabase_user_id: auth.user.id },
     });
     customerId = customer.id;
-    // Service role: the user must not be able to point their profile at
-    // someone else's Stripe customer.
-    await asService().from("profiles")
-      .update({ stripe_customer_id: customerId }).eq("id", auth.user.id);
+    // Service role: the user must not be able to point their profile — or
+    // their company — at someone else's Stripe customer.
+    if (org) {
+      await service.from("organizations").update({ stripe_customer_id: customerId }).eq("id", org.id);
+    } else {
+      await service.from("profiles").update({ stripe_customer_id: customerId }).eq("id", auth.user.id);
+    }
   }
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: PRICE[plan], quantity: 1 }],
+    line_items: [{ price: PRICE[plan], quantity: org ? org.wanted : 1 }],
     ...(({ ok, no }) => ({ success_url: ok, cancel_url: no }))(
       RETURNS[returnTo](process.env.PUBLIC_URL || ""),
     ),
     // Carried onto the subscription so the webhook can attribute it without a
-    // second lookup.
-    subscription_data: { metadata: { supabase_user_id: auth.user.id, plan } },
+    // second lookup — to a company when there is one, to the person otherwise.
+    subscription_data: {
+      metadata: org
+        ? { squirrel_org_id: org.id, plan, seats: String(org.wanted) }
+        : { supabase_user_id: auth.user.id, plan },
+    },
   });
 
   return json(res, 200, { url: session.url });

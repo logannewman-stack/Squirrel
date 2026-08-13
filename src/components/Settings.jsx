@@ -12,6 +12,7 @@ import Calendars from "./Calendars";
 import SetupCheck from "./SetupCheck";
 import Owner from "./Owner";
 import Managed from "./Managed";
+import Company from "./Company";
 import DeleteAccount from "./DeleteAccount";
 import Appearance from "./Appearance";
 import Backup from "./Backup";
@@ -262,8 +263,12 @@ export default function Settings({ state, onBack, onLegal, onUpgrade, onKeyboard
             before anything else on this screen, because somebody reading
             "Stored here" deserves to know who else can read it. */}
         {canSync && (
-          <Group header="Your company">
+          <Group
+            header="Your company"
+            footer="One subscription, a seat each, one invoice. Administrators can see the work on the accounts they provide — and everyone invited is told so before they accept."
+          >
             <PanelRow><Managed /></PanelRow>
+            <PanelRow><Company onUpgrade={onUpgrade} /></PanelRow>
           </Group>
         )}
         <Group

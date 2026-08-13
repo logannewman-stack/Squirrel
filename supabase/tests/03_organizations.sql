@@ -206,3 +206,40 @@ select case when (select count(*) from org_invites) = 0
 reset role;
 reset request.jwt.claim.sub;
 reset request.jwt.claim.email;
+
+-- ------------------------------------------------- what the API relies on
+-- The endpoints in api/org run as the service role, so their correctness
+-- rests on these constraints rather than on RLS. Each one is a rule the
+-- endpoint reports to a person as an ordinary answer ("every seat is taken",
+-- "they already have an invitation"), so it has to be a rule.
+
+-- One live invitation per address per company; re-inviting is not a second row.
+insert into org_invites (org_id, email, invited_by) values (:org, 'dup@acme.com', :boss);
+do $$ begin
+  insert into org_invites (org_id, email, invited_by)
+    values ('bbbbbbbb-0000-4000-8000-000000000001','dup@acme.com',
+            'aaaaaaaa-0000-4000-8000-000000000001');
+  raise notice 'FAIL  a second live invitation was allowed';
+exception when unique_violation then raise notice 'PASS  one live invitation per address';
+end $$;
+
+-- Withdrawing frees the address to be invited again later.
+update org_invites set revoked_at = now() where org_id = :org and email = 'dup@acme.com';
+insert into org_invites (org_id, email, invited_by) values (:org, 'dup@acme.com', :boss);
+select 'PASS  a withdrawn invitation can be re-sent'
+  where (select count(*) from org_invites where org_id = :org and email = 'dup@acme.com') = 2;
+
+-- Losing a seat leaves the person's work exactly where it was. A seat is a
+-- plan, not custody: taking it back must never delete somebody's projects.
+delete from org_members where org_id = :org and user_id = :emp;
+select case when (select count(*) from projects where user_id = :emp) = 1
+             and current_plan(:emp) = 'free'
+  then 'PASS  removing a seat keeps the work and ends only the plan'
+  else 'FAIL  removing a seat destroyed work or kept the plan' end;
+
+-- Deleting the company does not cascade into anybody's data either.
+delete from organizations where id = :org;
+select case when (select count(*) from projects where user_id = :emp) = 1
+             and (select count(*) from org_members where org_id = :org) = 0
+  then 'PASS  closing a company frees its people without erasing them'
+  else 'FAIL  closing a company destroyed work' end;

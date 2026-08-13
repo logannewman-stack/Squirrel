@@ -48,9 +48,16 @@ export const inNativeApp = () => globalThis.__SQUIRREL_NATIVE__ === true;
  * back to `location.assign` would quietly turn a compliant link-out into a
  * webview purchase, so the absence of it is an error rather than a default.
  */
-export async function startCheckout(plan) {
+export async function startCheckout(plan, { seats } = {}) {
   const native = inNativeApp();
-  const { url } = await post("/api/checkout", { plan, return: native ? "app" : "web" });
+  // `seats` turns this into a company's quantity-based subscription, billed to
+  // the organisation rather than to the administrator who happens to be
+  // holding the card. The server checks they administer one.
+  const { url } = await post("/api/checkout", {
+    plan,
+    return: native ? "app" : "web",
+    ...(seats ? { seats } : {}),
+  });
   if (!url) throw new Error("no checkout url");
 
   if (!native) return location.assign(url);
