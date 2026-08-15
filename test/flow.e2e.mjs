@@ -146,6 +146,23 @@ await p.waitForTimeout(500);
   await p.getByRole("tab", { name: "Week" }).click();
   await p.waitForTimeout(700);
   const block = p.locator('button[title*="Draft the agenda"]').first();
+
+  /**
+   * Walk forward to the week the work actually landed on.
+   *
+   * The grid opens on the week containing today, and the planner only uses
+   * working days that have not happened yet — so run this on a Saturday and
+   * every hour it could possibly use is in *next* week's grid. The block is
+   * correctly scheduled and correctly not on screen, and a test that assumes
+   * those are the same week fails every weekend for no reason at all.
+   *
+   * Two hops covers any day of the week and stays bounded, so work that never
+   * got scheduled at all still fails here instead of looping.
+   */
+  for (let hop = 0; hop < 2 && (await block.count()) === 0; hop++) {
+    await p.getByRole("button", { name: "Next week" }).click();
+    await p.waitForTimeout(500);
+  }
   t("the routed block stands on the week grid", (await block.count()) === 1);
 
   await block.scrollIntoViewIfNeeded();

@@ -55,8 +55,17 @@ await p.evaluate(async () => {
    * every meeting, then every block — it sorted above, which is the regression
    * this fixture exists to catch. Without it the day holds one time and any
    * ordering is trivially correct.
+   *
+   * On the *next full working day*, not today, and that is the point rather
+   * than a detail. The planner only places work in the hours that are left, so
+   * a suite run at half past two finds the morning already gone: the day holds
+   * the two o'clock meeting and nothing else, the ordering it is checking
+   * becomes trivially true, and the guard below is what notices. Run at ten in
+   * the morning the same fixture passes. A test that depends on when it is run
+   * is a test that will fail on somebody else's afternoon and be called flaky.
    */
   const d = new Date();
+  do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
   const at = (h) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-` +
     `${String(d.getDate()).padStart(2, "0")}T${String(h).padStart(2, "0")}:00:00`;
   s.addEvent({ title: "Partners sync", start: at(14), end: at(15) });
@@ -132,10 +141,13 @@ await p.waitForTimeout(900);
    * agenda is read top to bottom as a sequence, and this one silently was not
    * one.
    */
-  // Scoped to the first day. The agenda stacks a section per day, so reading
-  // every `.num` on the page walks off the end of today and into tomorrow's
-  // nine o'clock — which is not out of order, it is a different day.
-  const times = (await p.locator("section").first().locator("li .num").allInnerTexts())
+  // Scoped to the day the fixture built, found by the meeting on it rather
+  // than by position. The agenda stacks a section per day, so reading every
+  // `.num` on the page walks into the next day's nine o'clock — which is not
+  // out of order, it is a different day — and counting sections from the top
+  // assumes which day the planner started on.
+  const times = (await p.locator("section").filter({ hasText: "Partners sync" })
+    .first().locator("li .num").allInnerTexts())
     .map((x) => x.trim())
     .filter((x) => /^\d+:\d\d\s*(AM|PM)$/i.test(x))
     .map((x) => {
