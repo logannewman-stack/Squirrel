@@ -2,7 +2,8 @@ import { useState } from "react";
 import Sheet from "./Sheet";
 import { Button } from "./ui";
 import { PLANS, PAID } from "../lib/plans";
-import { startCheckout } from "../lib/billing";
+import { upgrade, inNativeApp } from "../lib/billing";
+import { restore, sayOutcome } from "../lib/appstore";
 
 /**
  * The one place an upgrade happens.
@@ -24,12 +25,55 @@ export default function Upgrade({ open, onClose, reason, plan = "free", email, o
   // Studio is only an upsell from Pro if Pro is already yours; from free, two
   // columns of features is a decision, and a decision is a delay.
   const offered = plan === "free" ? PAID : PAID.filter((id) => id !== plan);
+  const native = inNativeApp();
+
+  /**
+   * Put back a subscription this Apple ID already pays for.
+   *
+   * Separate from `go` because it is a different promise: nothing is bought,
+   * nothing is charged, and the only two outcomes are "you already have this"
+   * and "you don't". It does prompt for the App Store password, which is why
+   * it lives behind a button and never runs on its own.
+   */
+  async function bringBack() {
+    setBusy("restore");
+    setError(null);
+    try {
+      const out = await restore();
+      if (out.ok) {
+        dispatchEvent(new Event("squirrel:plan"));
+        onClose?.();
+        return;
+      }
+      setError(sayOutcome(out.reason));
+    } catch (e) {
+      setError(e.message);
+    }
+    setBusy(null);
+  }
 
   async function go(id) {
     setBusy(id);
     setError(null);
     try {
-      await startCheckout(id);
+      // One call, two worlds: In-App Purchase inside the app because Apple
+      // requires it, Stripe on the web because it is allowed and cheaper.
+      const out = await upgrade(id);
+      // On the web the browser is already leaving; there is nothing to render
+      // and nothing to reset, and clearing `busy` would flash the old label.
+      if (out.redirected) return;
+      if (out.ok) {
+        // The server wrote the plan before this resolved, so the app only has
+        // to be told to re-read it.
+        dispatchEvent(new Event("squirrel:plan"));
+        onClose?.();
+        return;
+      }
+      // A closed payment sheet says nothing. Somebody who cancelled on purpose
+      // does not need to be told what they just did.
+      setError(sayOutcome(out.reason));
+      setBusy(null);
+      return;
     } catch (e) {
       /**
        * "Failed to fetch" is a browser talking to a developer. The person who
@@ -101,12 +145,31 @@ export default function Upgrade({ open, onClose, reason, plan = "free", email, o
                     disabled={busy !== null}
                     className="mt-5 w-full"
                   >
-                    {busy === id ? "Opening checkout…" : `Get ${tier.name}`}
+                    {busy === id
+                      ? native ? "Asking the App Store…" : "Opening checkout…"
+                      : `Get ${tier.name}`}
                   </Button>
                 </div>
               );
             })}
           </div>
+
+          {/* Required by Guideline 3.1.1, and the first thing review looks for
+              on a subscription app. It is not a nicety: somebody who reinstalls
+              on a new phone is looking at a paywall for a subscription they are
+              already being charged for, and without this their only recourse is
+              to pay twice. Shown only where it means something — there is
+              nothing to restore in a browser. */}
+          {native && (
+            <button
+              onClick={bringBack}
+              disabled={busy !== null}
+              className="mt-4 w-full rounded-md border border-[var(--line)] px-4 py-2.5 text-sm
+                         transition-colors hover:border-[var(--ink)] disabled:opacity-50"
+            >
+              {busy === "restore" ? "Checking with the App Store…" : "Restore purchases"}
+            </button>
+          )}
 
           {error && (
             <p className="mt-4 rounded-md border border-[var(--alert)] px-4 py-3 text-sm">

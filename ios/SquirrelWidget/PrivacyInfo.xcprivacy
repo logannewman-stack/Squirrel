@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The widget's own privacy manifest.
+
+  Every bundle in the app needs one, and an extension is a bundle. A manifest
+  on the app alone passes local builds and is refused at upload, which is a
+  slow way to find out.
+
+  The widget collects nothing and sends nothing anywhere. It reads a small
+  summary of today out of the shared App Group container that the app already
+  wrote, and draws it — no network, no account, no identifiers. The only
+  declaration it owes is the UserDefaults access that reading that container
+  amounts to.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

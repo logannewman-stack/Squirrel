@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PLANS, PAID } from "../lib/plans";
-import { startCheckout, openPortal, fetchUsage } from "../lib/billing";
+import { upgrade, openPortal, fetchUsage, inNativeApp } from "../lib/billing";
+import { restore, sayOutcome } from "../lib/appstore";
 import { Button } from "./ui";
 
 /**
@@ -38,6 +39,44 @@ export default function Billing({ email }) {
   const current = PLANS[plan] ?? PLANS.free;
   const renews = usage?.renewsAt ? new Date(usage.renewsAt) : null;
   const alert = usage?.billingAlert ?? null;
+
+  /**
+   * Buy a plan, by whichever route this build is allowed to use.
+   *
+   * In the app that is In-App Purchase and it resolves in place; on the web it
+   * is a redirect that never comes back. The `redirected` flag is what saves
+   * this from having to know which of the two just happened.
+   */
+  async function buy(id) {
+    const out = await upgrade(id);
+    if (out.redirected) return;
+    if (out.ok) {
+      dispatchEvent(new Event("squirrel:plan"));
+      fetchUsage().then(setUsage);
+      setBusy(null);
+      return;
+    }
+    // A closed payment sheet says nothing — cancelling is not an error.
+    const said = sayOutcome(out.reason);
+    setBusy(null);
+    if (said) throw new Error(said);
+  }
+
+  /**
+   * Restore purchases — required by Guideline 3.1.1 anywhere a subscription is
+   * sold in-app, and the reason somebody setting up a new phone is not shown a
+   * paywall for what they are already being charged for.
+   */
+  async function bringBack() {
+    const out = await restore();
+    if (out.ok) {
+      dispatchEvent(new Event("squirrel:plan"));
+      fetchUsage().then(setUsage);
+      setBusy(null);
+      return;
+    }
+    throw new Error(sayOutcome(out.reason));
+  }
 
   async function go(fn, key) {
     setBusy(key);
@@ -125,10 +164,12 @@ export default function Billing({ email }) {
                 <Button
                   variant={tier.popular ? "primary" : "secondary"}
                   disabled={busy !== null}
-                  onClick={() => go(() => startCheckout(id), id)}
+                  onClick={() => go(() => buy(id), id)}
                   className="mt-5 w-full"
                 >
-                  {busy === id ? "Opening checkout…" : `Choose ${tier.name}`}
+                  {busy === id
+                    ? inNativeApp() ? "Asking the App Store…" : "Opening checkout…"
+                    : `Choose ${tier.name}`}
                 </Button>
               </div>
             );
@@ -141,15 +182,33 @@ export default function Billing({ email }) {
           className="mt-4 rounded-full border border-[var(--line)] px-5 py-2 text-sm
                      transition-colors hover:border-[var(--ink)] disabled:opacity-50"
         >
-          {busy === "portal" ? "Opening…" : "Manage billing"}
+          {busy === "portal"
+            ? "Opening…"
+            : inNativeApp() ? "Manage subscription" : "Manage billing"}
+        </button>
+      )}
+
+      {/* Required wherever a subscription is sold in-app, and offered on every
+          plan rather than only on free: the person who needs it most is
+          somebody whose new phone shows them as free while Apple is still
+          charging them, and that account looks paid to nobody but Apple. */}
+      {inNativeApp() && (
+        <button
+          disabled={busy !== null}
+          onClick={() => go(bringBack, "restore")}
+          className="mt-3 block rounded-full border border-[var(--line)] px-5 py-2 text-sm
+                     transition-colors hover:border-[var(--ink)] disabled:opacity-50"
+        >
+          {busy === "restore" ? "Checking with the App Store…" : "Restore purchases"}
         </button>
       )}
 
       {error && <p className="mt-3 text-sm text-[var(--alert)]">{error}</p>}
 
       <p className="mt-3 text-xs text-[var(--muted)]">
-        Payment is handled by Stripe — card details never reach this app. Cancel any time from
-        Manage billing; you keep the plan until the period you've paid for ends.
+        {inNativeApp()
+          ? "Payment is handled by the App Store — card details never reach this app. Cancel any time from Manage subscription; you keep the plan until the period you've paid for ends."
+          : "Payment is handled by Stripe — card details never reach this app. Cancel any time from Manage billing; you keep the plan until the period you've paid for ends."}
       </p>
     </div>
   );

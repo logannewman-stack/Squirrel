@@ -21,6 +21,28 @@ const PRODUCTS = {
 };
 
 export default async function handler(req, res) {
+  /**
+   * GET: which product id is which plan.
+   *
+   * The app has to know what to ask StoreKit for, and the ids live here in
+   * `APPLE_PRODUCT_*` because this is the endpoint that matches a receipt
+   * against them. A second copy compiled into the bundle is a copy that goes
+   * stale on the next rename, and the failure it produces is the worst
+   * available: the purchase succeeds, Apple charges the card, and the server
+   * does not recognise what was bought.
+   *
+   * Unauthenticated, because there is nothing here to protect — an App Store
+   * product id is printed in App Store Connect, visible in any receipt, and
+   * readable from the binary by anybody who cares. Requiring a session would
+   * only stop the paywall from drawing prices before sign-in.
+   */
+  if (req.method === "GET") {
+    return json(res, 200, {
+      products: { pro: PRODUCTS.pro ?? null, studio: PRODUCTS.studio ?? null },
+      configured: Boolean(PRODUCTS.pro || PRODUCTS.studio),
+    });
+  }
+
   if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" });
 
   const auth = await requireUser(req);

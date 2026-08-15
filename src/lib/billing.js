@@ -36,13 +36,48 @@ async function post(path, body) {
 export const inNativeApp = () => globalThis.__SQUIRREL_NATIVE__ === true;
 
 /**
- * Start a subscription.
+ * Start a subscription, by whichever route this build is allowed to use.
+ *
+ * The one function every buy button calls, and the only place the rule lives:
+ *
+ *   in the iOS app  → In-App Purchase, because Guideline 3.1.1 requires it
+ *   on the web      → Stripe, because it is permitted and costs 2.9%, not 15%
+ *
+ * A fork rather than a preference. Sending an in-app upgrade to Stripe
+ * Checkout is a rejection, not a grey area, and it has to be impossible to do
+ * by accident from a component — which is why no screen calls `startCheckout`
+ * directly any more.
+ *
+ * @returns {{ok: boolean, plan?: string, reason?: string, redirected?: boolean}}
+ *   `redirected: true` means the browser is already leaving and there is
+ *   nothing left for the caller to render.
+ */
+export async function upgrade(plan) {
+  if (inNativeApp()) {
+    const { buy, appStoreAvailable } = await import("./appstore.js");
+    // A native build whose StoreKit plugin failed to register cannot sell
+    // anything — and must not quietly fall back to Stripe, because that
+    // fallback *is* the rejection. Better to say so than to ship the offence.
+    if (!appStoreAvailable()) return { ok: false, reason: "unavailable" };
+    return buy(plan);
+  }
+  await startCheckout(plan);
+  return { ok: true, redirected: true };
+}
+
+/**
+ * Start a Stripe subscription.
  *
  * Two routes to the same Stripe session. From the web it is an ordinary
  * redirect. From the native app it must open in the *system browser* and come
  * back through a universal link: since the 2025 Epic ruling a US app may send
  * someone out to an external checkout, but only by genuinely leaving the app —
  * an in-app webview is still the app, and still a rejection under 3.1.1.
+ *
+ * Note that this is the *link-out*, not the in-app upgrade. `upgrade()` above
+ * is what a buy button calls; this is only reached on the web, or from a
+ * deliberate "subscribe on the web instead" affordance whose wording and
+ * placement have their own rules worth re-reading before they change.
  *
  * The native shell is expected to expose `__SQUIRREL_OPEN_EXTERNAL__`. Falling
  * back to `location.assign` would quietly turn a compliant link-out into a
@@ -67,10 +102,25 @@ export async function startCheckout(plan, { seats } = {}) {
   open(url);
 }
 
-/** Manage an existing subscription: card, invoices, upgrade, cancel. */
+/**
+ * Manage an existing subscription: card, invoices, upgrade, cancel.
+ *
+ * Where that happens depends on who is taking the money, and getting it wrong
+ * is a dead end rather than a rejection: an App Store subscriber sent to the
+ * Stripe portal arrives at a page with no subscription on it and no way to
+ * cancel the one they have. Apple owns the cancel button for anything bought
+ * through StoreKit, and the deep link below is the one it wants used.
+ */
 export async function openPortal() {
+  if (inNativeApp()) {
+    const open = globalThis.__SQUIRREL_OPEN_EXTERNAL__;
+    if (typeof open === "function") {
+      await open("https://apps.apple.com/account/subscriptions");
+      return;
+    }
+  }
   const { url } = await post("/api/portal");
-  if (!url) throw new Error("no portal url");
+  if (!url) throw new Error("no checkout url");
   location.assign(url);
 }
 

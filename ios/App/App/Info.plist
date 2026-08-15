@@ -58,9 +58,12 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<!-- arm64, not armv7. The template's armv7 is a leftover from 32-bit iOS:
+	     App Store Connect warns on it, and a device-capability filter that no
+	     current device satisfies is a filter with teeth. -->
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -94,7 +97,13 @@
 	     full dark theme and forcing light would strand it. -->
 	<key>UIUserInterfaceStyle</key>
 	<string>Automatic</string>
-	<key>UIViewControllerBasedStatusBarAppearance</key>
-	<true/>
+
+	<!-- Answered here so it is not asked at every single upload. Squirrel uses
+	     HTTPS and the platform's own TLS and nothing else, which is exempt
+	     under the export regulations; declaring it false is what turns the
+	     compliance question in App Store Connect into a no-op. Revisit this the
+	     day the app ships its own cryptography, and not before. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

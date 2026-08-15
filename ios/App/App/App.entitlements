@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The app's half of the App Group.
+
+  The widget and the Siri intents read the day out of a shared container that
+  `SquirrelBridge` writes. Both sides need this identifier, and a mismatch is
+  the quietest failure in the project: `UserDefaults(suiteName:)` returns nil,
+  every write is silently dropped, and the widget shows its placeholder for
+  ever with nothing in the logs to explain why.
+
+  In-App Purchase needs no entitlement here — it comes from the App ID in the
+  developer portal — which is why StoreKit is absent from this file despite
+  being the largest new capability in the build.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.squirrelll.app</string>
+	</array>
+</dict>
+</plist>

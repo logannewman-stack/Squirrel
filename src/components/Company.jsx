@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Input } from "./ui";
 import { client } from "../lib/supabase";
-import { startCheckout } from "../lib/billing";
+import { startCheckout, inNativeApp } from "../lib/billing";
 import { PLANS, can } from "../lib/plans";
 import { quote } from "../lib/seats";
 import { decode } from "../lib/merge";
@@ -448,12 +448,40 @@ function VisibilityOffer({ onUpgrade, count }) {
  * is the people already seated — offering a company the chance to buy fewer
  * seats than it has staff is offering it a way to lock somebody out, and the
  * server refuses it anyway.
+ *
+ * ## Not sold inside the iOS app, and it cannot be
+ *
+ * Seats are a quantity-based subscription: one company, one invoice, twelve
+ * people. In-App Purchase has no such concept — a StoreKit subscription
+ * belongs to the Apple ID that bought it, and there is no way to express
+ * "twelve of these, billed to the company, assignable to staff who each have
+ * their own Apple ID". So this cannot be moved to IAP, and selling it through
+ * Stripe inside the app is Guideline 3.1.1.
+ *
+ * The remaining honest option is the one every business tool takes: the app
+ * does not sell it. An administrator on a phone is told where it is bought and
+ * everything else on this screen — the roster, invitations, seats already
+ * paid for, the team's load — keeps working exactly as it does on the web.
  */
 function SeatPicker({ org, floor }) {
   const [plan, setPlan] = useState(org.plan === "free" ? "pro" : org.plan);
   const [seats, setSeats] = useState(Math.max(org.seats || 1, floor));
   const [sending, setSending] = useState(false);
   const q = quote(plan, seats);
+
+  if (inNativeApp()) {
+    return (
+      <div className="mt-3 rounded-lg border border-[var(--hairline)] p-3 text-[13px] leading-relaxed">
+        <p className="font-medium">Seats are bought on the web</p>
+        <p className="mt-1 text-[var(--muted)]">
+          {org.plan === "free"
+            ? "A company subscription is one invoice for the whole team, so it's arranged at squirrel on a computer rather than through this app."
+            : `${org.seats} ${org.seats === 1 ? "seat" : "seats"} on ${PLANS[org.plan]?.name || org.plan}. Add or remove seats from the same place you bought them.`}
+          {" "}Everything else here works normally.
+        </p>
+      </div>
+    );
+  }
   const money = (n) => (n % 1 ? `$${n.toFixed(2)}` : `$${n}`);
 
   return (

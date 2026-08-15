@@ -161,4 +161,89 @@ export async function startNative() {
       if (url) dispatchEvent(new CustomEvent("squirrel:url", { detail: { url } }));
     });
   } catch { /* not available */ }
+
+  await startStore();
+  await startCalendar();
+}
+
+/**
+ * The App Store, and the one listener that must exist before anything is sold.
+ *
+ * `Transaction.updates` on the native side delivers renewals, refunds,
+ * Ask-to-Buy approvals, and — the case that matters most — any purchase that
+ * never reached the server on its first attempt. Subscribing here rather than
+ * from a screen is deliberate: the customer who was killed mid-purchase is
+ * exactly the customer who will not think to open the plan screen, and the
+ * transaction is replayed at every launch until somebody listens.
+ */
+async function startStore() {
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    const plugin = registerPlugin("SquirrelStore");
+    const { available } = await plugin.available();
+    globalThis.__SQUIRREL_STORE__ = plugin;
+
+    // A transaction arriving on its own. Put through the same verify-then-
+    // finish path as a fresh purchase, and announced so the plan on screen
+    // catches up without a reload.
+    plugin.addListener?.("transaction", async () => {
+      try {
+        const { reconcile } = await import("./appstore.js");
+        await reconcile();
+        dispatchEvent(new Event("squirrel:plan"));
+      } catch { /* offline; StoreKit will offer it again */ }
+    });
+
+    // What is already outstanding — everything above, from before this launch.
+    // Silent and prompt-free by design; `restore()` is the one that asks for a
+    // password, and it only ever runs from a button.
+    if (available) {
+      const { reconcile } = await import("./appstore.js");
+      reconcile().then((r) => { if (r.ok && r.count) dispatchEvent(new Event("squirrel:plan")); });
+      addEventListener("squirrel:resumed", () => { reconcile().catch(() => {}); });
+    }
+  } catch { /* no plugin in this build; the web checkout still works */ }
+}
+
+/**
+ * Apple Calendar.
+ *
+ * The plugin speaks Capacitor's shape — every method resolves an object — and
+ * `apple-calendar.js` was written against EventKit's, where `calendars()`
+ * returns calendars. Adapting here keeps that module a plain one the tests can
+ * run under Node, and keeps the unwrapping in one place instead of at six call
+ * sites.
+ */
+async function startCalendar() {
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    const kit = registerPlugin("SquirrelCalendar");
+    const { available } = await kit.available();
+    if (!available) return;
+
+    globalThis.__SQUIRREL_EVENTKIT__ = {
+      available: () => true,
+      requestAccess: () => kit.requestAccess().then((r) => r.status),
+      calendars: () => kit.calendars().then((r) => r.calendars),
+      // Dates cross the bridge as ISO strings; sending them as Date objects
+      // relies on an implicit `toJSON` that a future serialiser is free to
+      // change, and the failure would be a silently empty calendar.
+      events: ({ calendarId, from, to }) =>
+        kit.events({
+          calendarId,
+          from: new Date(from).toISOString(),
+          to: new Date(to).toISOString(),
+        }).then((r) => r.events),
+      save: ({ calendarId, event }) =>
+        kit.save({
+          calendarId,
+          event: {
+            ...event,
+            startDate: new Date(event.startDate).toISOString(),
+            endDate: new Date(event.endDate).toISOString(),
+          },
+        }),
+      remove: ({ id }) => kit.remove({ id }).then((r) => r.removed),
+    };
+  } catch { /* no plugin in this build; the settings screen says so plainly */ }
 }

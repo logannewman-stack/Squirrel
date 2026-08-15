@@ -16,6 +16,14 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		8CFD25CD4C274F8A91543140 /* SquirrelBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5454A44F4CA545C8827E6E49 /* SquirrelBridge.swift */; };
+		60359FEBD5DE423BBAFDD580 /* SquirrelBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 17CA360EDBFF4DF6ABA4D8BA /* SquirrelBridge.m */; };
+		641F1DB2401F4E8A9C7A0486 /* SquirrelIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9487A2B7CC48019D0D88E7 /* SquirrelIntents.swift */; };
+		3BC8E10F96B147CFA6E5ABD9 /* SquirrelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 700EFCB3DC8E478185C2C313 /* SquirrelStore.swift */; };
+		934343F7A240472FB3277243 /* SquirrelStore.m in Sources */ = {isa = PBXBuildFile; fileRef = C9569A4E22C444BBB888F86B /* SquirrelStore.m */; };
+		35277AFA07014D08A87FEAF7 /* SquirrelCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E2712AFB3BC4E0F9B336A59 /* SquirrelCalendar.swift */; };
+		3EE40134A87B44A884D26804 /* SquirrelCalendar.m in Sources */ = {isa = PBXBuildFile; fileRef = 0B4A8A26ACEF4063B11DFBE8 /* SquirrelCalendar.m */; };
+		4ACE58AFAE8A4E40B85D859C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C4D8974F1664386A55E8001 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +38,14 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		5454A44F4CA545C8827E6E49 /* SquirrelBridge.swift */ = {isa = PBXFileReference; name = "SquirrelBridge.swift"; path = "SquirrelBridge.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		17CA360EDBFF4DF6ABA4D8BA /* SquirrelBridge.m */ = {isa = PBXFileReference; name = "SquirrelBridge.m"; path = "SquirrelBridge.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
+		CE9487A2B7CC48019D0D88E7 /* SquirrelIntents.swift */ = {isa = PBXFileReference; name = "SquirrelIntents.swift"; path = "SquirrelIntents.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		700EFCB3DC8E478185C2C313 /* SquirrelStore.swift */ = {isa = PBXFileReference; name = "SquirrelStore.swift"; path = "SquirrelStore.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		C9569A4E22C444BBB888F86B /* SquirrelStore.m */ = {isa = PBXFileReference; name = "SquirrelStore.m"; path = "SquirrelStore.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
+		8E2712AFB3BC4E0F9B336A59 /* SquirrelCalendar.swift */ = {isa = PBXFileReference; name = "SquirrelCalendar.swift"; path = "SquirrelCalendar.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		0B4A8A26ACEF4063B11DFBE8 /* SquirrelCalendar.m */ = {isa = PBXFileReference; name = "SquirrelCalendar.m"; path = "SquirrelCalendar.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
+		5C4D8974F1664386A55E8001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,6 +89,14 @@
 				504EC3131FED79650016851F /* Info.plist */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				5454A44F4CA545C8827E6E49 /* SquirrelBridge.swift */,
+				17CA360EDBFF4DF6ABA4D8BA /* SquirrelBridge.m */,
+				CE9487A2B7CC48019D0D88E7 /* SquirrelIntents.swift */,
+				700EFCB3DC8E478185C2C313 /* SquirrelStore.swift */,
+				C9569A4E22C444BBB888F86B /* SquirrelStore.m */,
+				8E2712AFB3BC4E0F9B336A59 /* SquirrelCalendar.swift */,
+				0B4A8A26ACEF4063B11DFBE8 /* SquirrelCalendar.m */,
+				5C4D8974F1664386A55E8001 /* PrivacyInfo.xcprivacy */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -106,8 +130,8 @@
 		504EC2FC1FED79650016851F /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastSwiftUpdateCheck = 0920;
-				LastUpgradeCheck = 0920;
+				LastSwiftUpdateCheck = 920;
+				LastUpgradeCheck = 920;
 				TargetAttributes = {
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
@@ -148,6 +172,7 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+				4ACE58AFAE8A4E40B85D859C /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -160,6 +185,13 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				8CFD25CD4C274F8A91543140 /* SquirrelBridge.swift in Sources */,
+				60359FEBD5DE423BBAFDD580 /* SquirrelBridge.m in Sources */,
+				641F1DB2401F4E8A9C7A0486 /* SquirrelIntents.swift in Sources */,
+				3BC8E10F96B147CFA6E5ABD9 /* SquirrelStore.swift in Sources */,
+				934343F7A240472FB3277243 /* SquirrelStore.m in Sources */,
+				35277AFA07014D08A87FEAF7 /* SquirrelCalendar.swift in Sources */,
+				3EE40134A87B44A884D26804 /* SquirrelCalendar.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -234,7 +266,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -285,7 +317,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -302,7 +334,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -314,6 +346,8 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 			};
 			name = Debug;
 		};
@@ -324,7 +358,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -335,6 +369,8 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 			};
 			name = Release;
 		};

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The privacy manifest. Required for App Store submission since 2024, and the
+  build is rejected at upload without it rather than at review, which is the
+  kinder failure of the two.
+
+  Two halves, and they answer different questions.
+
+  NSPrivacyAccessedAPITypes is about *APIs Apple wants a reason for* — ones
+  that were historically used to fingerprint a device. They are not "private
+  APIs"; UserDefaults is on the list. Every reason code here is one of Apple's
+  own strings, and inventing one fails validation.
+
+  NSPrivacyCollectedDataTypes is about what actually leaves the device. It has
+  to match the nutrition labels in App Store Connect: a mismatch between the
+  two is a rejection with a note about the discrepancy, and the manifest is the
+  one review trusts. What is declared below is exactly what the schema stores —
+  an email address to own the account, the subscription, the assistant's usage
+  counters, and the person's own tasks and projects, which are linked to them
+  because that is what makes them sync.
+
+  Nothing is used for tracking. NSPrivacyTracking is false and there are no
+  tracking domains, which is what lets the app avoid the App Tracking
+  Transparency prompt entirely — an app with no tracking should never show it,
+  and one that shows it without tracking is asking for a refusal it does not
+  need.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- Capacitor's own preferences, the theme, and the EventKit id map all
+		     sit in UserDefaults; the App Group container the widget reads is
+		     UserDefaults too. CA92.1 is "access info from same app only", which
+		     is exactly what this is. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!-- WKWebView's cache and the offline bundle. C617.1 is "files created
+		     by this app, inside its own container". -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<!-- The offline cache has to know whether there is room before writing.
+		     E174.1 covers displaying or acting on available space. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
+			</array>
+		</dict>
+		<!-- Elapsed-time arithmetic in the focus timer and the scheduler.
+		     35F9.1 is "measure time within the app". -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<!-- The account itself. Magic-link sign-in, so an address and nothing
+		     else — no password is ever created, held, or reset. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<key>NSPrivacyCollectedDataTypeLinkedToUser</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<!-- The subscription. Which plan, when it renews, whether the card is
+		     failing. No card number ever reaches this app. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePurchaseHistory</string>
+			<key>NSPrivacyCollectedDataTypeLinkedToUser</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<!-- Tasks, projects, meetings, notes. The reason an account exists at
+		     all: without them syncing there is no second device. Linked to the
+		     person, because a planner that could not tell whose week it was
+		     would be no use to anyone. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinkedToUser</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<!-- How many assistant turns were spent this month. Metered because
+		     every plan has a hard ceiling enforced in the database; it is a
+		     counter, not an analytics event, and nothing is sold or shared. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeProductInteraction</string>
+			<key>NSPrivacyCollectedDataTypeLinkedToUser</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The widget's half of the App Group, and it must match the app's exactly.
+
+  A widget extension is a separate process with its own container; the only
+  thing it shares with the app is this group. Set on one target and not the
+  other, the app writes happily into a container the widget cannot see — which
+  looks like a broken widget and is a missing checkbox.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.squirrelll.app</string>
+	</array>
+</dict>
+</plist>
