@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { asUser, asService, requireUser, json } from "./_lib/db.js";
+import { SEATED } from "../src/lib/plans.js";
 
 const PRICE = {
   plus: process.env.STRIPE_PRICE_PLUS,
@@ -66,6 +67,20 @@ export default async function handler(req, res) {
    */
   let org = null;
   if (seats != null) {
+    /**
+     * Only the top tier holds more than one person.
+     *
+     * Pro is a personal subscription — one account on every device — and
+     * Studio is where a company exists at all. Without this check a client can
+     * post `{plan: "pro", seats: 40}`: forty Pro seats at a per-seat tiered
+     * price, which is a tier the product does not sell and, above a hundred
+     * seats, the cheapest route to team visibility without paying for it.
+     *
+     * Stripe would refuse it too — only Studio is given a per-seat price — but
+     * a 400 here is an answer and a Stripe error is a stack trace.
+     */
+    if (plan !== SEATED) return json(res, 400, { error: "plan_has_no_seats" });
+
     const { data: mine } = await service
       .from("org_members")
       .select("role, organizations(id,name,seats,stripe_customer_id)")

@@ -31,7 +31,7 @@
  * a tiered price in Stripe is configured to match.
  */
 
-import { PLANS } from "./plans.js";
+import { PLANS, SEATED } from "./plans.js";
 
 /**
  * Seat bands, cheapest-per-seat last. `upTo` is inclusive; the final band is
@@ -109,6 +109,11 @@ export function quote(plan, seats) {
  * are how a price ends up a cent out.
  */
 export function tiers(plan) {
+  // Only the seated tier gets a per-seat table. Pro is a personal
+  // subscription bought one at a time, and giving it a graduated price would
+  // put a volume discount on a plan that cannot have volume — and quietly
+  // offer forty Pro seats at $16.24 to anybody who posted a quantity.
+  if (plan !== SEATED) return [];
   const list = PLANS[plan]?.price || 0;
   if (!list) return [];
   return BANDS.map((band) => ({

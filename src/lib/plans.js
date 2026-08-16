@@ -110,6 +110,22 @@ export const PLANS = {
 export const PAID = ["pro", "studio"];
 
 /**
+ * The tier a company buys, and the only one that holds more than one person.
+ *
+ * Pro is a personal subscription: one account, every device, no roster. Studio
+ * is where a company appears at all — seats, an invoice, people you can see
+ * the work of — which is what makes $50 defensible next to $24.99 and is the
+ * whole reason the top tier exists.
+ *
+ * Named once, here, because four places need to agree about it: the seat
+ * picker draws it, `api/checkout.js` refuses a quantity on anything else,
+ * `seats.js` prices only this, and `stripe-setup.mjs` gives only this a
+ * per-seat tiered price. A company on Pro is not a cheaper company, it is a
+ * state this product does not have.
+ */
+export const SEATED = "studio";
+
+/**
  * The built-in assistant is deterministic and runs in the browser, so it costs
  * nothing to serve and stays unlimited on every plan. The metered thing is the
  * boost path (api/interpret.js), which only fires on what the rules miss:

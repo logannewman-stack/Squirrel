@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Input } from "./ui";
 import { client } from "../lib/supabase";
 import { startCheckout, inNativeApp } from "../lib/billing";
-import { PLANS, can } from "../lib/plans";
+import { PLANS, can, SEATED } from "../lib/plans";
 import { quote } from "../lib/seats";
 import { decode } from "../lib/merge";
 import { teamLoad, sayLoad, LOAD } from "../lib/team";
@@ -465,7 +465,9 @@ function VisibilityOffer({ onUpgrade, count }) {
  * paid for, the team's load — keeps working exactly as it does on the web.
  */
 function SeatPicker({ org, floor }) {
-  const [plan, setPlan] = useState(org.plan === "free" ? "pro" : org.plan);
+  // One plan, so there is nothing to hold in state. A company is a Studio
+  // subscription and Pro is a personal account; there is no cheaper company.
+  const plan = SEATED;
   const [seats, setSeats] = useState(Math.max(org.seats || 1, floor));
   const [sending, setSending] = useState(false);
   const q = quote(plan, seats);
@@ -488,17 +490,11 @@ function SeatPicker({ org, floor }) {
   return (
     <div className="mt-3 rounded-lg border border-[var(--hairline)] p-3">
       <div className="flex flex-wrap items-center gap-2">
-        {["pro", "studio"].map((id) => (
-          <button
-            key={id}
-            onClick={() => setPlan(id)}
-            className={`rounded-md border px-2.5 py-1 text-[13px] transition-colors ${
-              plan === id ? "border-[var(--ink)] font-medium" : "border-[var(--line)] hover:border-[var(--ink)]"
-            }`}
-          >
-            {PLANS[id].name}
-          </button>
-        ))}
+        {/* No plan to choose. A company is a Studio subscription — Pro is a
+            personal account on every device, with nobody else on it — so
+            offering the pair here would be offering a company something the
+            product does not have, and taking money for it. */}
+        <span className="text-[13px] font-medium">{PLANS[SEATED].name} for the team</span>
         <span className="ml-auto flex items-center gap-1">
           <button
             aria-label="One fewer seat"

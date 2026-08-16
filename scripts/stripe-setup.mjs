@@ -7,9 +7,11 @@
  *
  *     …                                node scripts/stripe-setup.mjs --check
  *
- * ## Why this is a script and not a page of instructions
+ * ## Two shapes of price, and why one of them is a script
  *
- * Company seats use *graduated* tiered pricing: the first four seats at list,
+ * Pro is bought one at a time — a personal subscription, flat monthly. Studio
+ * is the tier a company buys, so it is per-seat and uses *graduated* tiered
+ * pricing: the first four seats at list,
  * the next twenty at 15% off, and so on, each band charged at its own rate.
  * That is what `quote()` computes and what the button in the app promises.
  * Stripe's dashboard offers "volume" pricing immediately next to it, which
@@ -97,6 +99,39 @@ async function productFor(plan) {
 }
 
 /**
+ * A flat monthly price, for the tiers a person buys for themselves.
+ *
+ * Matched on the amount rather than merely on the plan: a price that no longer
+ * says $24.99 is not the price this app quotes, whatever it is labelled, and
+ * reusing it would charge last quarter's number for ever.
+ */
+async function flatPriceFor(plan, product) {
+  const cents = Math.round(PLANS[plan].price * 100);
+  const existing = await stripe.prices.list({ product: product.id, active: true, limit: 100 });
+  const already = existing.data.find(
+    (p) => p.recurring?.interval === "month"
+      && p.billing_scheme === "per_unit"
+      && p.unit_amount === cents
+      && p.currency === "usd",
+  );
+  if (already) return already;
+
+  if (check) {
+    problems.push(`no monthly ${money(cents)} price for ${PLANS[plan].name}`);
+    return null;
+  }
+  const made = await stripe.prices.create({
+    product: product.id,
+    currency: "usd",
+    unit_amount: cents,
+    recurring: { interval: "month" },
+    metadata: { squirrel_plan: plan },
+  });
+  notes.push(`created price    ${PLANS[plan].name} — ${money(cents)}/month`);
+  return made;
+}
+
+/**
  * A monthly, per-seat, graduated price — and the same one if it already exists.
  *
  * Matched on the tier amounts themselves, not just on the plan, because that
@@ -107,6 +142,10 @@ async function productFor(plan) {
 async function priceFor(plan, product) {
   if (!product) return null;
   const want = tiers(plan);
+  // Pro is bought one at a time, so it is a flat monthly price. Studio is the
+  // tier a company buys, so it is per-seat and graduated. Giving Pro a tiered
+  // price would advertise a volume discount on a plan that cannot have volume.
+  if (!want.length) return flatPriceFor(plan, product);
   const existing = await stripe.prices.list({ product: product.id, active: true, limit: 100 });
 
   const matches = (price) => {
@@ -164,6 +203,9 @@ for (const plan of PAID) {
 
   const want = tiers(plan);
   console.log(`\n  ${PLANS[plan].name}  ${price ? price.id : "— missing —"}`);
+  if (!want.length) {
+    console.log(`      one person`.padEnd(22) + `${money(Math.round(PLANS[plan].price * 100))}/month`);
+  }
   for (const [i, tier] of want.entries()) {
     const from = i === 0 ? 1 : Number(want[i - 1].up_to) + 1;
     const to = tier.up_to === "inf" ? "and up" : `–${tier.up_to}`;

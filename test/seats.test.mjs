@@ -8,7 +8,7 @@
  * cliff, and that the discount is marginal rather than retroactive.
  */
 import { quote, sayQuote, tiers, BANDS, TALK_TO_US } from "../src/lib/seats.js";
-import { PLANS } from "../src/lib/plans.js";
+import { PLANS, SEATED } from "../src/lib/plans.js";
 
 let pass = 0, fail = 0;
 const t = (name, ok, detail) => {
@@ -133,26 +133,35 @@ const PRO = PLANS.pro.price; // 24.99
   };
 
   let drift = null;
-  for (const plan of ["pro", "studio"]) {
-    for (let n = 1; n <= 250 && !drift; n++) {
-      const app = quote(plan, n).total;
-      const stripe = asStripeWouldCharge(plan, n);
-      if (Math.abs(app - stripe) > 0.005) drift = `${plan} at ${n} seats: app ${app}, Stripe ${stripe}`;
-    }
+  for (let n = 1; n <= 250 && !drift; n++) {
+    const app = quote(SEATED, n).total;
+    const stripe = asStripeWouldCharge(SEATED, n);
+    if (Math.abs(app - stripe) > 0.005) drift = `${SEATED} at ${n} seats: app ${app}, Stripe ${stripe}`;
   }
   t("Stripe's tiers charge exactly what the app quoted, 1 to 250 seats", drift === null, drift);
 
   // A band boundary is where volume and graduated diverge most visibly, so it
   // is worth naming one explicitly rather than trusting the sweep alone.
   t("  the 25th seat is priced marginally, not retroactively",
-    quote("pro", 25).total > quote("pro", 24).total
-      && quote("pro", 25).total < PLANS.pro.price * 25,
-    `${quote("pro", 24).total} → ${quote("pro", 25).total}`);
+    quote(SEATED, 25).total > quote(SEATED, 24).total
+      && quote(SEATED, 25).total < PLANS[SEATED].price * 25,
+    `${quote(SEATED, 24).total} → ${quote(SEATED, 25).total}`);
 
-  t("every band appears in the tier table", tiers("pro").length === BANDS.length);
-  t("  and the last one is open-ended", tiers("pro").at(-1).up_to === "inf");
-  t("  and amounts are whole cents", tiers("studio").every((x) => Number.isInteger(x.unit_amount)));
-  t("a plan with no price has no tiers", tiers("free").length === 0);
+  t("every band appears in the tier table", tiers(SEATED).length === BANDS.length);
+  t("  and the last one is open-ended", tiers(SEATED).at(-1).up_to === "inf");
+  t("  and amounts are whole cents", tiers(SEATED).every((x) => Number.isInteger(x.unit_amount)));
+
+  /**
+   * Only the top tier is sold by the seat.
+   *
+   * Pro is a personal subscription. A per-seat table on it would advertise a
+   * volume discount on a plan that cannot have volume — and, since the deepest
+   * band is 35% off, would make forty Pro seats at $16.24 each the cheapest
+   * route to a team, undercutting the tier that team features are sold on.
+   */
+  t("Pro has no per-seat table at all", tiers("pro").length === 0);
+  t("and neither does free", tiers("free").length === 0);
+  t("the seated tier is Studio", SEATED === "studio");
 }
 
 console.log(`\nSeats: ${pass} passed, ${fail} failed`);
