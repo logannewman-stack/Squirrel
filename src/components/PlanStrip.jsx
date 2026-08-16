@@ -1,5 +1,4 @@
 import { usage, wallReason } from "../lib/plans";
-import { assistsToday } from "../lib/store";
 
 /**
  * The phone's version of the rail's plan card: one line, above the bar.
@@ -14,7 +13,7 @@ import { assistsToday } from "../lib/store";
  * and paid accounts never see it.
  */
 export default function PlanStrip({ state, onUpgrade }) {
-  const u = usage(state, assistsToday());
+  const u = usage(state);
   if (u.plan !== "free" || !u.pressing || !u.tightest) return null;
 
   const m = u.tightest;

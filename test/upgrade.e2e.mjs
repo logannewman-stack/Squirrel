@@ -85,13 +85,25 @@ await p.keyboard.press("Escape");
 await p.waitForTimeout(300);
 
 // ------------------------------------------------------- the assistant wall
+//
+// There is no free allowance any more: the assistant is a paid feature and
+// free accounts meet a lock rather than a counter. She is still *drawn* behind
+// it, which is the point — a feature nobody can see is a feature nobody
+// upgrades for.
 await p.getByRole("button", { name: "Ask Squirrel" }).first().click();
 await p.waitForTimeout(400);
-t("a free account is told where the edge is",
-  /free turns left today/.test(await p.getByRole("dialog").innerText()));
-await p.getByRole("button", { name: "Go unlimited" }).click();
+{
+  const sheet = await p.getByRole("dialog").innerText();
+  t("a free account meets the wall, not a counter",
+    /Squirrel is on Pro/.test(sheet) && !/free turns left today/.test(sheet), sheet.slice(0, 120));
+  t("  and is told the planner itself is still free",
+    /planner itself stays free/i.test(sheet));
+}
+// Scoped to the sheet and matched on the price: the rail behind it carries
+// a plain "Upgrade to Pro" too, and a loose match finds both.
+await p.getByRole("dialog").getByRole("button", { name: /^Upgrade to Pro ·/ }).click();
 await p.waitForTimeout(500);
-t("and the counter is a way out, not a statement",
+t("and the lock is a way out, not a statement",
   (await p.getByRole("dialog", { name: "Upgrade your plan" }).count()) === 1);
 await p.keyboard.press("Escape");
 await p.waitForTimeout(300);
@@ -104,8 +116,11 @@ t("a paying account is never sold to",
 t("and the project wall is gone", (await p.getByRole("button", { name: "Create" }).count()) === 1);
 await p.getByRole("button", { name: "Ask Squirrel" }).first().click();
 await p.waitForTimeout(400);
-t("and the assistant stops counting",
-  !/free turns left today/.test(await p.getByRole("dialog").innerText()));
+{
+  const sheet = await p.getByRole("dialog").innerText();
+  t("and a paying account meets no wall at all",
+    !/Squirrel is on Pro/.test(sheet) && !/free turns left today/.test(sheet), sheet.slice(0, 120));
+}
 await p.keyboard.press("Escape");
 
 t("no page errors", errs.length === 0, errs.join(" · "));

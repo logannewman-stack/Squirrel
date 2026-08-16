@@ -1,5 +1,4 @@
 import { usage, wallReason } from "../lib/plans";
-import { assistsToday } from "../lib/store";
 
 /**
  * What plan you are on, what you have left of it, and the way up.
@@ -16,7 +15,7 @@ import { assistsToday } from "../lib/store";
  * the one moment it genuinely needs to ask.
  */
 export default function PlanCard({ state, onUpgrade, onManage, compact = false }) {
-  const u = usage(state, assistsToday());
+  const u = usage(state);
   const paid = u.plan !== "free";
 
   if (paid) {

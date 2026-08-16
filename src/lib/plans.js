@@ -182,21 +182,22 @@ export const can = (plan, feature) => {
 };
 
 /**
- * How many turns a free account gets with the assistant each day.
+ * The assistant is a paid feature, with no free allowance at all.
  *
- * She is the reason to pay, and a wall in front of something nobody has used is
- * a wall in front of nothing: "unlimited assistant" means little to someone who
- * has never watched her move a meeting. A few turns a day is enough to feel
- * what it does and short enough to run out of on a busy morning, which is the
- * moment the upgrade makes sense.
+ * Free accounts used to get five turns a day, on the argument that nobody
+ * upgrades for a feature they have only seen through glass. That is a real
+ * effect and this is a deliberate trade against it: she is the single reason
+ * to pay for this app, and a free tier that does the thing people would pay
+ * for is a free tier that keeps them on it.
  *
- * Counted in the browser, and deliberately so. The built-in assistant is
- * deterministic and costs nothing to run, so this is a pricing decision rather
- * than a spend control — there is nothing here worth defending with a server
- * round-trip. The one thing that does cost money, the model fallback, is
- * metered in SQL where it cannot be argued with.
+ * Free is still the whole planner — the auto-scheduler, the calendar, the
+ * focus timer, every hour of it laid out for nothing. What it does not include
+ * is being *told* what to do in a sentence. That is the line.
+ *
+ * She stays on screen behind the lock rather than being hidden, because a
+ * feature nobody can see is a feature nobody upgrades for. `FEATURES.assistant`
+ * is the gate; there is no counter left to run down.
  */
-export const FREE_ASSISTS_PER_DAY = 5;
 
 /**
  * What this account is using of what it is allowed.
@@ -210,11 +211,13 @@ export const FREE_ASSISTS_PER_DAY = 5;
  * unlimited, so the list is empty and the surfaces fall silent rather than
  * printing "unlimited" three times.
  *
- * @param state    the store, for what has been created
- * @param assists  today's assistant turns — passed in because it is a clock
- *                 reading, and this module has no business owning a clock
+ * The assistant is not metered here. It is allowed or it is not, and a meter
+ * that always reads "0 of 0" is a row of furniture on a screen that should
+ * simply say what the plan costs.
+ *
+ * @param state  the store, for what has been created
  */
-export function usage(state, assists = 0) {
+export function usage(state) {
   const plan = state?.plan ?? "free";
   const tier = PLANS[plan] ?? PLANS.free;
 
@@ -231,9 +234,6 @@ export function usage(state, assists = 0) {
       used: (state?.tasks || []).filter((t) => !t.done).length,
       cap: tier.tasks,
     },
-    ...(can(plan, "assistant")
-      ? []
-      : [{ key: "assists", label: "Squirrel today", used: assists, cap: FREE_ASSISTS_PER_DAY }]),
   ].filter((m) => m.cap != null);
 
   // The nearest wall, which is the only one worth leading with. Seeded at -1 so
@@ -262,7 +262,6 @@ export const wallReason = (meter) => {
   const at = meter.used >= meter.cap;
   if (meter.key === "projects") return at ? `You're at ${meter.cap} projects` : "Nearly out of projects";
   if (meter.key === "tasks") return at ? `You're at ${meter.cap} open tasks` : "Running out of task room";
-  if (meter.key === "assists") return at ? "You've used today's free turns" : "Nearly out of turns today";
   return null;
 };
 

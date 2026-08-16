@@ -8,7 +8,7 @@
  * pinned here: which limit is closest, when it is worth mentioning, and when
  * the answer is silence.
  */
-import { usage, wallReason, PLANS, FREE_ASSISTS_PER_DAY } from "../src/lib/plans.js";
+import { usage, wallReason, PLANS, can } from "../src/lib/plans.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -35,8 +35,12 @@ const state = ({ plan = "free", projects = 0, tasks = 0, archived = 0, done = 0 
   t("a free account is measured against the free caps", u.tier === PLANS.free);
   t("projects are counted", u.meters.find((m) => m.key === "projects").used === 1);
   t("open tasks are counted", u.meters.find((m) => m.key === "tasks").used === 3);
-  t("today's turns come in from outside",
-    usage(state(), 2).meters.find((m) => m.key === "assists").used === 2);
+  // The assistant is not metered on any tier. Free cannot use her at all, and
+  // a meter that always reads "0 of 0" is furniture on a screen whose job is
+  // to say which wall is closest.
+  t("the assistant is not a meter on any plan",
+    ["free", "pro", "studio"].every((plan) =>
+      !usage(state({ plan })).meters.some((m) => m.key === "assists")));
 
   // Both of these were the bug worth writing the shared function for: a card
   // saying 3/2 because it counted rows the database does not.
@@ -65,9 +69,10 @@ const state = ({ plan = "free", projects = 0, tasks = 0, archived = 0, done = 0 
   // Seeded at -1 rather than 0, so all-zero meters still name one.
   t("an untouched account still has a nearest wall", usage(state()).tightest !== null);
 
-  t("turns run out at the documented number",
-    usage(state(), FREE_ASSISTS_PER_DAY).meters.find((m) => m.key === "assists").used >= FREE_ASSISTS_PER_DAY);
-  t("and that counts as full", usage(state(), FREE_ASSISTS_PER_DAY).full === true);
+  // Free is full when it runs out of room, and room is projects and tasks —
+  // the two things it still has. The assistant is not a quantity here.
+  t("a free account at its task cap is full",
+    usage(state({ tasks: PLANS.free.tasks })).full === true);
 }
 
 // --------------------------------------------------------------------- quiet
@@ -75,23 +80,28 @@ const state = ({ plan = "free", projects = 0, tasks = 0, archived = 0, done = 0 
   // Paid accounts are the ones most likely to resent being sold to, and they
   // are the ones the product can least afford to annoy.
   for (const plan of ["pro", "plus", "studio"]) {
-    const u = usage(state({ plan, projects: 40, tasks: 300 }), 99);
+    const u = usage(state({ plan, projects: 40, tasks: 300 }));
     t(`${plan} has nothing to meter`, u.meters.length === 0, u.meters.map((m) => m.key));
     t(`${plan} is never pressing`, u.pressing === false);
     t(`${plan} is never full`, u.full === false);
   }
 
-  // A free account keeps the assistant meter; a paid one does not, because on
-  // those tiers she is unlimited and a row saying so is furniture.
-  t("only the free tier meters the assistant",
-    usage(state()).meters.some((m) => m.key === "assists") &&
-      !usage(state({ plan: "pro" })).meters.some((m) => m.key === "assists"));
+  /**
+   * The assistant is allowed or it is not — there is no free allowance left.
+   *
+   * Free accounts used to get five turns a day. The entitlement is now the
+   * whole answer, so the only thing worth asserting is that free is outside it
+   * and the paid tiers are inside.
+   */
+  t("free cannot use the assistant at all", can("free", "assistant") === false);
+  t("and every paid tier can",
+    ["pro", "plus", "studio"].every((plan) => can(plan, "assistant")));
 
   // An unknown plan must fall back to the *tightest* interpretation, not the
   // loosest: guessing "unlimited" from a typo gives the app away for free.
   const junk = usage({ plan: "enterprise", projects: [], tasks: [] });
-  t("an unrecognised plan is treated as free", junk.tier === PLANS.free && junk.meters.length === 3);
-  t("and missing state does not throw", usage(undefined).meters.length === 3);
+  t("an unrecognised plan is treated as free", junk.tier === PLANS.free && junk.meters.length === 2);
+  t("and missing state does not throw", usage(undefined).meters.length === 2);
 }
 
 // -------------------------------------------------------------------- wording
@@ -100,8 +110,8 @@ const state = ({ plan = "free", projects = 0, tasks = 0, archived = 0, done = 0 
   const near = { key: "projects", used: 1, cap: 2 };
   t("a reached wall is stated as reached", /at 2 projects/.test(wallReason(at)), wallReason(at));
   t("a near wall is stated as near", /Nearly/.test(wallReason(near)), wallReason(near));
-  t("turns have their own words",
-    wallReason({ key: "assists", used: 5, cap: 5 }) === "You've used today's free turns");
+  t("a retired meter says nothing rather than stale copy",
+    wallReason({ key: "assists", used: 5, cap: 5 }) === null);
   t("nothing said about nothing", wallReason(null) === null);
   t("an unknown meter says nothing rather than something wrong",
     wallReason({ key: "sessions", used: 1, cap: 2 }) === null);

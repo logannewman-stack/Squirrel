@@ -1,5 +1,4 @@
 import { usage, wallReason } from "../lib/plans";
-import { assistsToday } from "../lib/store";
 import { Button } from "./ui";
 
 /**
@@ -16,7 +15,7 @@ import { Button } from "./ui";
  * is a perfectly good answer to a question you asked.
  */
 export default function Usage({ state, onUpgrade }) {
-  const u = usage(state, assistsToday());
+  const u = usage(state);
 
   if (u.plan !== "free" || !u.meters.length) {
     return (
