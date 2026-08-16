@@ -6,6 +6,7 @@ import { PLANS, can } from "../lib/plans";
 import { quote } from "../lib/seats";
 import { decode } from "../lib/merge";
 import { teamLoad, sayLoad, LOAD } from "../lib/team";
+import { api } from "../lib/api";
 
 /**
  * Does this company's subscription include reading its people's work?
@@ -63,7 +64,7 @@ export default function Company({ onUpgrade }) {
       setMeId(session?.session?.user?.id ?? null);
       const t = session?.session?.access_token || null;
       if (!t) return setState({ signedOut: true });
-      const res = await fetch("/api/org", { headers: { authorization: `Bearer ${t}` } });
+      const res = await api("/api/org", { headers: { authorization: `Bearer ${t}` } });
       if (!res.ok) return setState({ unavailable: true });
       setState(await res.json());
     } catch {
@@ -78,7 +79,7 @@ export default function Company({ onUpgrade }) {
     setErr(null);
     try {
       const t = await token();
-      const res = await fetch("/api/org", {
+      const res = await api("/api/org", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${t}` },
         body: JSON.stringify(body),

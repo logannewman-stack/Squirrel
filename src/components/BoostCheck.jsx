@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "./ui";
 import { client } from "../lib/supabase";
 import { isOwner } from "../lib/owner";
+import { api } from "../lib/api";
 
 /**
  * Proving the boost is alive.
@@ -44,7 +45,7 @@ export default function BoostCheck() {
       const { data } = (await supabase?.auth.getSession()) ?? {};
       const token = data?.session?.access_token;
 
-      const res = await fetch("/api/boost-check", {
+      const res = await api("/api/boost-check", {
         method: "POST",
         headers: {
           "content-type": "application/json",

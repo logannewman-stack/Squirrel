@@ -24,6 +24,9 @@
 		35277AFA07014D08A87FEAF7 /* SquirrelCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E2712AFB3BC4E0F9B336A59 /* SquirrelCalendar.swift */; };
 		3EE40134A87B44A884D26804 /* SquirrelCalendar.m in Sources */ = {isa = PBXBuildFile; fileRef = 0B4A8A26ACEF4063B11DFBE8 /* SquirrelCalendar.m */; };
 		4ACE58AFAE8A4E40B85D859C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C4D8974F1664386A55E8001 /* PrivacyInfo.xcprivacy */; };
+		EB52546F27B14605AD197852 /* SquirrelWidget.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 2FD78D1E737E47CB9FF17760 /* SquirrelWidget.appex */; };
+		614D17BD36F04104AE107078 /* SquirrelWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A36DEFA9B8C41608F4D34D1 /* SquirrelWidget.swift */; };
+		E48FFD1DE610434F97107A82 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 59A20E45AE134961919D9BEB /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +49,9 @@
 		8E2712AFB3BC4E0F9B336A59 /* SquirrelCalendar.swift */ = {isa = PBXFileReference; name = "SquirrelCalendar.swift"; path = "SquirrelCalendar.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
 		0B4A8A26ACEF4063B11DFBE8 /* SquirrelCalendar.m */ = {isa = PBXFileReference; name = "SquirrelCalendar.m"; path = "SquirrelCalendar.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
 		5C4D8974F1664386A55E8001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		2FD78D1E737E47CB9FF17760 /* SquirrelWidget.appex */ = {isa = PBXFileReference; name = "SquirrelWidget.appex"; path = "SquirrelWidget.appex"; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = undefined; lastKnownFileType = undefined; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
+		2A36DEFA9B8C41608F4D34D1 /* SquirrelWidget.swift */ = {isa = PBXFileReference; name = "SquirrelWidget.swift"; path = "SquirrelWidget/SquirrelWidget.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		59A20E45AE134961919D9BEB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = "PrivacyInfo.xcprivacy"; path = "SquirrelWidget/PrivacyInfo.xcprivacy"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = text.plist.xml; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +60,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD0D4174045349A59B5A422D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -73,6 +86,7 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				2FD78D1E737E47CB9FF17760 /* SquirrelWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -111,10 +125,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				9B1A51468EC443AE8C7D46B8 /* Copy Files */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				0D05ACDF1DB24D5E963E2F80 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -123,6 +139,23 @@
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		EC29599E14924A5B9DB1C61B /* "SquirrelWidget" */ = {
+			isa = PBXNativeTarget;
+			name = "SquirrelWidget";
+			productName = "SquirrelWidget";
+			productReference = 2FD78D1E737E47CB9FF17760;
+			productType = "com.apple.product-type.app-extension";
+			buildConfigurationList = 49FCA887E0234516A08D73DA;
+			buildPhases = (
+				E022D3E0D2714A91BDFCD625 /* Sources */,
+				08DA76A245A742CA890059C6 /* Resources */,
+				CD0D4174045349A59B5A422D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
 		};
 /* End PBXNativeTarget section */
 
@@ -157,6 +190,7 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				EC29599E14924A5B9DB1C61B /* "SquirrelWidget" */,
 			);
 		};
 /* End PBXProject section */
@@ -176,6 +210,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		08DA76A245A742CA890059C6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E48FFD1DE610434F97107A82 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -192,6 +234,14 @@
 				934343F7A240472FB3277243 /* SquirrelStore.m in Sources */,
 				35277AFA07014D08A87FEAF7 /* SquirrelCalendar.swift in Sources */,
 				3EE40134A87B44A884D26804 /* SquirrelCalendar.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E022D3E0D2714A91BDFCD625 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				614D17BD36F04104AE107078 /* SquirrelWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -374,6 +424,52 @@
 			};
 			name = Release;
 		};
+		D0389548A50A43EB886465CE /* Debug */ = {
+			name = Debug;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = SquirrelWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = "SquirrelWidget";
+				SKIP_INSTALL = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.squirrelll.app.SquirrelWidget;
+				CODE_SIGN_ENTITLEMENTS = SquirrelWidget/SquirrelWidget.entitlements;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				MARKETING_VERSION = $(MARKETING_VERSION);
+				CURRENT_PROJECT_VERSION = $(CURRENT_PROJECT_VERSION);
+				GENERATE_INFOPLIST_FILE = NO;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+			};
+		};
+		B75935B860E24B4BA3D09381 /* Release */ = {
+			name = Release;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = SquirrelWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = "SquirrelWidget";
+				SKIP_INSTALL = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.squirrelll.app.SquirrelWidget;
+				CODE_SIGN_ENTITLEMENTS = SquirrelWidget/SquirrelWidget.entitlements;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				MARKETING_VERSION = $(MARKETING_VERSION);
+				CURRENT_PROJECT_VERSION = $(CURRENT_PROJECT_VERSION);
+				GENERATE_INFOPLIST_FILE = NO;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+			};
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -395,6 +491,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		49FCA887E0234516A08D73DA /* Build configuration list for PBXNativeTarget "SquirrelWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0389548A50A43EB886465CE /* Debug */,
+				B75935B860E24B4BA3D09381 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -411,6 +516,38 @@
 			productName = "CapApp-SPM";
 		};
 /* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		9B1A51468EC443AE8C7D46B8 /* Copy Files */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EB52546F27B14605AD197852 /* SquirrelWidget.appex in Copy Files */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			name = "Copy Files";
+			dstPath = "";
+			dstSubfolderSpec = 13;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0D05ACDF1DB24D5E963E2F80 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EC29599E14924A5B9DB1C61B /* "SquirrelWidget" */;
+			targetProxy = 32ED1C101AF54D17A3A0F2DF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		32ED1C101AF54D17A3A0F2DF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EC29599E14924A5B9DB1C61B;
+			remoteInfo = "SquirrelWidget";
+		};
+/* End PBXContainerItemProxy section */
 	};
 	rootObject = 504EC2FC1FED79650016851F /* Project object */;
 }

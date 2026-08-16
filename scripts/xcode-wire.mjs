@@ -163,24 +163,137 @@ for (const [key, config] of Object.entries(configs)) {
 }
 
 /**
- * What this script deliberately does not do: create the widget extension target.
+ * The widget extension target, built here because nobody opens Xcode.
  *
- * A widget extension is nine linked objects — a native target, its two build
- * configurations and their list, three build phases, a container proxy, a
- * target dependency, and an embed-extensions copy phase on the app — and a
- * mistake in any of them produces a project file Xcode refuses to open rather
- * than one that misbehaves. Xcode's own template writes all nine correctly in
- * about thirty seconds, and this is the one piece of the wiring that is not
- * worth automating badly. APPSTORE.md has the six clicks.
+ * An earlier version of this script left the target to Xcode's template on the
+ * grounds that a widget extension is nine linked objects and a mistake in any
+ * of them produces a project file Xcode refuses to open. That reasoning was
+ * sound and the conclusion was wrong for this project: builds happen on
+ * Codemagic from whatever is committed, so a step that only exists inside
+ * Xcode is a step that never happens. The nine objects get written here.
  *
- * The check below is what stops that step being forgotten, which is the real
- * risk — the same risk that left four files in no target for months.
+ * `addTarget` does most of it — the native target, its two build
+ * configurations and their list, the product reference, and the
+ * embed-app-extensions copy phase on the app. What it leaves is the three
+ * build phases, the dependency, and a set of build settings whose defaults are
+ * wrong for a widget.
+ *
+ * Idempotent like everything above: a project that already has the target is
+ * left alone.
  */
-const hasWidget = readFileSync(PROJECT, "utf8").includes("SquirrelWidgetExtension");
-if (!hasWidget) {
-  const note = "widget extension target — add it in Xcode, see APPSTORE.md §3";
-  if (check) missing.push(note);
-  else console.log(`  ·  ${note}`);
+const WIDGET = {
+  name: "SquirrelWidget",
+  bundleId: "com.squirrelll.app.SquirrelWidget",
+  dir: "SquirrelWidget",
+  sources: ["SquirrelWidget.swift"],
+  resources: ["PrivacyInfo.xcprivacy"],
+};
+
+function hasTarget(name) {
+  return Object.entries(proj.pbxNativeTargetSection()).some(
+    ([k, v]) => !k.endsWith("_comment") && String(v.name).replace(/"/g, "") === name,
+  );
+}
+
+function addWidgetTarget() {
+  const target = proj.addTarget(WIDGET.name, "app_extension", WIDGET.dir, WIDGET.bundleId);
+
+  // The three phases every compiled target needs. Frameworks stays empty:
+  // WidgetKit and SwiftUI are system frameworks and link implicitly, and the
+  // widget deliberately depends on no Capacitor package — it reads a summary
+  // out of the shared container and draws it, nothing more.
+  proj.addBuildPhase(WIDGET.sources.map((f) => `${WIDGET.dir}/${f}`),
+    "PBXSourcesBuildPhase", "Sources", target.uuid);
+  proj.addBuildPhase(WIDGET.resources.map((f) => `${WIDGET.dir}/${f}`),
+    "PBXResourcesBuildPhase", "Resources", target.uuid);
+  proj.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", target.uuid);
+
+  // The library types an unrecognised extension as `lastKnownFileType =
+  // unknown` and writes a literal `explicitFileType = undefined`, which Xcode
+  // reads as a real explicit type and honours over the guess. Harmless on most
+  // files; this one is the privacy manifest, whose absence from the bundle is
+  // an upload rejection, so it is named properly rather than left to luck.
+  for (const [key, ref] of Object.entries(proj.pbxFileReferenceSection())) {
+    if (key.endsWith("_comment")) continue;
+    if (!String(ref.path).includes(`${WIDGET.dir}/PrivacyInfo.xcprivacy`)) continue;
+    ref.lastKnownFileType = "text.plist.xml";
+    delete ref.explicitFileType;
+  }
+
+  /**
+   * The app must build the extension before embedding it. Without the
+   * dependency the copy phase can run against a missing `.appex`, which fails
+   * on a clean CI checkout and nowhere else — the one machine that matters
+   * here, since nothing is built locally.
+   *
+   * The two empty sections are created first because `addTargetDependency`
+   * checks for them and, finding neither, returns successfully having done
+   * nothing at all:
+   *
+   *     if (pbxContainerItemProxySection && pbxTargetDependencySection) { … }
+   *
+   * A project that has never had a second target has neither section, which is
+   * every single-target Capacitor app. It cost one silent no-op to find, and
+   * the assertion after this call is there so it cannot cost a second.
+   */
+  const objects = proj.hash.project.objects;
+  objects.PBXTargetDependency ??= {};
+  objects.PBXContainerItemProxy ??= {};
+  proj.addTargetDependency(proj.getFirstTarget().uuid, [target.uuid]);
+
+  if (!proj.getFirstTarget().firstTarget.dependencies.length) {
+    throw new Error("the app target did not take a dependency on the widget");
+  }
+
+  /**
+   * The settings `addTarget` cannot know.
+   *
+   * INFOPLIST_FILE is the one that bites: the library writes
+   * `SquirrelWidget/SquirrelWidget-Info.plist`, following an older Xcode
+   * naming convention, and the file in this repository is `Info.plist`. A
+   * missing plist does not fail the build — Xcode generates an empty one — and
+   * the extension ships without `NSExtensionPointIdentifier`, which means iOS
+   * never recognises it as a widget and it simply never appears.
+   */
+  const settings = {
+    INFOPLIST_FILE: `${WIDGET.dir}/Info.plist`,
+    CODE_SIGN_ENTITLEMENTS: `${WIDGET.dir}/SquirrelWidget.entitlements`,
+    PRODUCT_BUNDLE_IDENTIFIER: WIDGET.bundleId,
+    // WidgetKit's containerBackground is 17.0, same floor as the app.
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0",
+    SWIFT_VERSION: "5.0",
+    TARGETED_DEVICE_FAMILY: '"1,2"',
+    // Must match the app exactly or the upload is refused for a version
+    // mismatch between a bundle and its extension. Both read the same
+    // settings, so they cannot drift.
+    MARKETING_VERSION: "$(MARKETING_VERSION)",
+    CURRENT_PROJECT_VERSION: "$(CURRENT_PROJECT_VERSION)",
+    // The plist in the repository is the plist that ships. Left on, Xcode
+    // synthesises its own and silently wins.
+    GENERATE_INFOPLIST_FILE: "NO",
+    SKIP_INSTALL: "YES",
+    ALWAYS_SEARCH_USER_PATHS: "NO",
+    CLANG_ENABLE_MODULES: "YES",
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO",
+  };
+
+  const list = proj.pbxXCBuildConfigurationSection();
+  for (const [key, config] of Object.entries(list)) {
+    if (key.endsWith("_comment") || !config.buildSettings) continue;
+    if (config.buildSettings.PRODUCT_NAME !== `"${WIDGET.name}"`) continue;
+    Object.assign(config.buildSettings, settings);
+  }
+
+  return target;
+}
+
+if (!hasTarget(WIDGET.name)) {
+  if (check) {
+    missing.push(`the ${WIDGET.name} extension target`);
+  } else {
+    addWidgetTarget();
+    added.push(`${WIDGET.name} extension target (+ embed phase on the app)`);
+  }
 }
 
 if (check) {

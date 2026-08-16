@@ -36,6 +36,7 @@
  */
 
 import { client } from "./supabase.js";
+import { api } from "./api.js";
 
 /** The native plugin, installed by `startNative()`. Absent in a browser. */
 const store = () => globalThis.__SQUIRREL_STORE__ ?? null;
@@ -64,7 +65,7 @@ let catalogue = null;
 export async function products(deps = {}) {
   if (deps.catalogue) return deps.catalogue;
   if (catalogue) return catalogue;
-  const res = await fetch("/api/apple/verify");
+  const res = await api("/api/apple/verify");
   if (!res.ok) throw new Error("the App Store is not configured on this deployment");
   const { products: ids } = await res.json();
   if (!ids || (!ids.pro && !ids.studio)) throw new Error("no App Store products are configured");
@@ -101,7 +102,7 @@ async function verifyOnServer(tx) {
   const t = await token();
   if (!t) throw new Error("sign in first, so we know whose subscription this is");
 
-  const res = await fetch("/api/apple/verify", {
+  const res = await api("/api/apple/verify", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${t}` },
     body: JSON.stringify({ signedTransaction: tx.signedTransaction }),

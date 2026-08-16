@@ -1,4 +1,5 @@
 import { client } from "./supabase";
+import { api } from "./api.js";
 
 /**
  * Does this account run the deployment?
@@ -23,7 +24,7 @@ export function isOwner() {
       const { data } = (await supabase?.auth.getSession()) ?? {};
       const token = data?.session?.access_token;
       if (!token) return false;
-      const res = await fetch("/api/admin/whoami", {
+      const res = await api("/api/admin/whoami", {
         headers: { authorization: `Bearer ${token}` },
       });
       if (!res.ok) return false;

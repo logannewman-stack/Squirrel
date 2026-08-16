@@ -2,6 +2,7 @@ import { useState, useSyncExternalStore } from "react";
 import { client, configured } from "../lib/supabase";
 import { subscribe, getState } from "../lib/store";
 import Squirrel from "./Squirrel";
+import { signInRedirect } from "../lib/authlink.js";
 
 /**
  * Signing in, asked at the only moment it is reasonable to ask.
@@ -39,7 +40,7 @@ export default function JoinUp({ onDone }) {
       const supabase = await client();
       const { error: err } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: location.origin },
+        options: { emailRedirectTo: signInRedirect() },
       });
       if (err) throw new Error(err.message);
       setSent(true);

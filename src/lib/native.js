@@ -156,9 +156,43 @@ export async function startNative() {
     // The app is usually already running when this fires: iOS brings it
     // forward rather than reloading it, so anything that only reads the URL at
     // startup would never see it.
-    App.addListener("appUrlOpen", ({ url }) => {
+    App.addListener("appUrlOpen", async ({ url }) => {
       dispatchEvent(new Event("squirrel:resumed"));
-      if (url) dispatchEvent(new CustomEvent("squirrel:url", { detail: { url } }));
+      if (!url) return;
+
+      /**
+       * A returning magic link, before anything else looks at the URL.
+       *
+       * Supabase reads tokens off the address bar at load, which never happens
+       * here — the app was already running and iOS simply brought it forward.
+       * Without this the person taps the link, the app opens, and they are
+       * still signed out with nothing said.
+       */
+      const { tokensFrom, errorFrom } = await import("./authlink.js");
+      const tokens = tokensFrom(url);
+      if (tokens) {
+        try {
+          const { client } = await import("./supabase.js");
+          const supabase = await client();
+          await supabase?.auth.setSession(tokens);
+          dispatchEvent(new Event("squirrel:signedin"));
+        } catch {
+          // Offline at the moment of return. The link is spent either way, so
+          // saying so beats a silent failure that looks like the old bug.
+          dispatchEvent(new CustomEvent("squirrel:authfailed", {
+            detail: { said: "Couldn't finish signing in. Check your connection and try again." },
+          }));
+        }
+        return;
+      }
+
+      const failed = errorFrom(url);
+      if (failed) {
+        dispatchEvent(new CustomEvent("squirrel:authfailed", { detail: failed }));
+        return;
+      }
+
+      dispatchEvent(new CustomEvent("squirrel:url", { detail: { url } }));
     });
   } catch { /* not available */ }
 

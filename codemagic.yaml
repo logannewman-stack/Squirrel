@@ -1,0 +1,153 @@
+# Building Squirrel for the App Store, on Codemagic.
+#
+# Nobody on this project opens Xcode, which is why this file exists and why the
+# Xcode project is wired by a script rather than by hand: everything that has
+# to be true of the build has to be true of what is *committed*, because a
+# clean checkout on a rented Mac is the only machine that ever compiles it.
+#
+# Three things that machine will not forgive, all of them invisible locally:
+#
+#   1. The scheme must be shared. Xcode files schemes under `xcuserdata/`,
+#      which is gitignored, so a checkout that has never been opened in Xcode
+#      has no scheme and `xcodebuild` stops before it compiles anything.
+#      `App.xcscheme` is committed for exactly this reason.
+#   2. `VITE_*` values are baked into the web bundle at build time, and the app
+#      ships that bundle. Missing here, the app installs and nobody can sign
+#      in — a working build of a broken product.
+#   3. Signing needs a profile for the widget extension as well as the app.
+#      One missing profile fails the archive at the very last step.
+#
+# Set up once, in the Codemagic UI:
+#   · Teams → Integrations → Apple Developer Portal → add the App Store
+#     Connect API key, named `squirrel-asc` to match `integrations` below.
+#   · Environment variables → group `squirrel-ios`, holding the three values
+#     listed under `vars`. Mark none of them secret except by preference; the
+#     anon key is public by design and RLS is what protects the data.
+
+workflows:
+  ios-testflight:
+    name: Squirrel — iOS to TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: squirrel-asc
+
+    environment:
+      groups:
+        - squirrel-ios
+      vars:
+        # The deployment the app talks to. Empty on the web, where relative
+        # paths are correct; absolute here, because the app is served from the
+        # device and a relative /api path resolves to the phone itself.
+        # VITE_API_URL: https://your-domain
+        #
+        # Baked into the bundle at build time, so the app can sign anybody in.
+        # VITE_SUPABASE_URL: https://xxxx.supabase.co
+        # VITE_SUPABASE_ANON_KEY: eyJ...
+        BUNDLE_ID: com.squirrelll.app
+        WIDGET_BUNDLE_ID: com.squirrelll.app.SquirrelWidget
+        XCODE_PROJECT: ios/App/App.xcodeproj
+        XCODE_SCHEME: App
+      node: 22
+      xcode: latest
+      # Capacitor 8 in SPM mode — there is no Podfile and no workspace, and
+      # asking for CocoaPods here just adds a minute of nothing.
+
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+      # Tag-driven rather than push-driven on purpose. Every push to main
+      # should not consume a build minute or a TestFlight slot; `git tag v1.0.3
+      # && git push --tags` is a deliberate act, which is what shipping is.
+
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+
+      - name: Run the suite that guards the store rules
+        script: |
+          # The compliance suite is the reason this runs before a build rather
+          # than after: it asserts the things App Review checks and the things
+          # that are invisible until a device runs them — no screen reaching
+          # Stripe checkout, no permission without a feature, no native file
+          # missing from the target, no bare relative API call.
+          npm test
+
+      - name: Fail early if the bundle would ship unconfigured
+        script: |
+          # A build that silently omits these produces an app where sign-in,
+          # billing and the App Store receipt check all fail on device while
+          # every screen renders perfectly. Cheaper to stop here.
+          for v in VITE_API_URL VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY; do
+            if [ -z "$(eval echo \$$v)" ]; then
+              echo "✗ $v is not set — add it to the squirrel-ios variable group."
+              exit 1
+            fi
+          done
+          echo "✓ the web bundle has somewhere to talk to"
+
+      - name: Build the web bundle
+        script: npm run build
+
+      - name: Sync Capacitor and wire the Xcode project
+        script: |
+          npx cap sync ios
+          # `cap sync` is allowed to rewrite parts of the project, so the
+          # wiring runs after it, every time. Then the check refuses to
+          # continue if anything is missing — a native file in no target
+          # compiles nowhere and ships as nothing, which is how this project
+          # carried four dead Swift files for months.
+          npm run ios:wire
+          npm run ios:check
+
+      - name: Number the build
+        script: |
+          # Apple refuses a build number it has already seen. Codemagic's
+          # counter is monotonic per workflow and needs no App Store Connect
+          # lookup, so this works before the app record exists as well as after.
+          cd ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
+
+      - name: Fetch signing files for both bundles
+        script: |
+          # Both, explicitly. The widget extension is signed separately, and a
+          # missing extension profile fails at the archive step — the last and
+          # slowest place to find out. `--create` registers the identifier and
+          # the profile if they do not exist yet.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE --create
+          app-store-connect fetch-signing-files "$WIDGET_BUNDLE_ID" \
+            --type IOS_APP_STORE --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Build the ipa
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Deliberately not `submit_to_app_store`. TestFlight is a build going
+        # somewhere it can be looked at; App Review is a submission, and the
+        # first one needs a human to have filled in screenshots, a demo
+        # account and the privacy answers first.
+      email:
+        recipients:
+          - logannewman@sudbudsdetailing.com
+        notify:
+          success: true
+          failure: true

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { client, configured } from "../lib/supabase";
 import { syncNow, syncStatus, onSyncChange, resetCursor } from "../lib/sync";
+import { signInRedirect } from "../lib/authlink.js";
 
 /**
  * Signing in, and what it is for.
@@ -36,7 +37,7 @@ export default function Account({ email: current }) {
     const supabase = await client();
     const { error: err } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: location.origin },
+      options: { emailRedirectTo: signInRedirect() },
     });
     setBusy(false);
     if (err) setError(err.message);

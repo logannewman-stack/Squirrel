@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "./ui";
 import { PLANS, mrrOf } from "../lib/plans";
 import { client } from "../lib/supabase";
+import { api } from "../lib/api";
 
 /**
  * The founder's console: who signed up, who pays, what it costs to serve them.
@@ -41,7 +42,7 @@ export default function Owner() {
       const token = data?.session?.access_token;
       if (!token) return setState({ hidden: true });
 
-      const res = await fetch("/api/admin/users", {
+      const res = await api("/api/admin/users", {
         headers: { authorization: `Bearer ${token}` },
       });
       // 403 (not an owner), 401 (signed out), 404 (no API): all the same

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "./ui";
+import { api } from "../lib/api";
 
 /**
  * What this deployment has configured, read from the server.
@@ -17,7 +18,7 @@ export default function SetupCheck() {
 
   const load = () => {
     setState({ loading: true });
-    fetch("/api/setup-check")
+    api("/api/setup-check")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((data) => setState({ data }))
       // No endpoint at all means the API is not deployed — which is itself the

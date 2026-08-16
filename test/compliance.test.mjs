@@ -91,7 +91,7 @@ t("no key is declared twice",
 // builds and is refused at upload, which is a slow way to find out.
 for (const [what, path] of [
   ["the app", `${IOS}/PrivacyInfo.xcprivacy`],
-  ["the widget", "ios/SquirrelWidget/PrivacyInfo.xcprivacy"],
+  ["the widget", "ios/App/SquirrelWidget/PrivacyInfo.xcprivacy"],
 ]) {
   const m = read(path);
   t(`${what} has a privacy manifest`, Boolean(m), path);
@@ -108,7 +108,7 @@ for (const [what, path] of [
 const GROUP = "group.com.squirrelll.app";
 for (const [what, path] of [
   ["the app", `${IOS}/App.entitlements`],
-  ["the widget", "ios/SquirrelWidget/SquirrelWidget.entitlements"],
+  ["the widget", "ios/App/SquirrelWidget/SquirrelWidget.entitlements"],
   ["the bridge that writes it", `${IOS}/SquirrelBridge.swift`],
 ]) {
   t(`${what} names the same App Group`, read(path).includes(GROUP), `${path} disagrees or is missing`);
@@ -185,6 +185,36 @@ const app = read("src/App.jsx");
 t("the privacy policy and terms are reachable without an account",
   app.includes('"/privacy"') && app.includes('"/terms"'),
   "they must be routable before sign-in, or Connect's URL fields point at a wall");
+
+/* ------------------------------------------------ the build actually happens */
+/**
+ * Everything here is invisible on a laptop and fatal on the build machine.
+ * Squirrel is compiled on a rented Mac from a clean checkout, so anything that
+ * lives only in somebody's Xcode does not exist.
+ */
+t("the widget extension target is in the project",
+  pbxproj.includes("SquirrelWidget"),
+  "no target means no widget in the bundle, however good the Swift is");
+
+t("the app embeds the extension it builds",
+  pbxproj.includes("PBXCopyFilesBuildPhase") && pbxproj.includes("PBXTargetDependency"),
+  "without the dependency and the embed phase the .appex never reaches PlugIns/");
+
+t("the scheme is shared, not per-developer",
+  existsSync("ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme"),
+  "schemes live in gitignored xcuserdata; a clean checkout would have none to build");
+
+const ci = read("codemagic.yaml");
+t("there is a build pipeline at all", Boolean(ci), "codemagic.yaml");
+t("the pipeline re-wires the project after cap sync",
+  /cap sync ios[\s\S]{0,600}ios:wire/.test(ci),
+  "cap sync rewrites the project, so the wiring has to run after it");
+t("the pipeline refuses to ship an unconfigured bundle",
+  ci.includes("VITE_API_URL") && ci.includes("VITE_SUPABASE_ANON_KEY"),
+  "these are baked in at build time; missing, the app installs and nobody can sign in");
+t("the pipeline signs the widget as well as the app",
+  ci.includes("WIDGET_BUNDLE_ID"),
+  "a missing extension profile fails at the archive, the slowest place to find out");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -8,6 +8,7 @@
  */
 
 import { client } from "./supabase";
+import { api } from "./api.js";
 
 async function post(path, body) {
   const supabase = await client();
@@ -131,7 +132,7 @@ export async function fetchUsage() {
   const token = data?.session?.access_token;
   if (!token) return null;
 
-  const res = await fetch("/api/usage", { headers: { authorization: `Bearer ${token}` } });
+  const res = await api("/api/usage", { headers: { authorization: `Bearer ${token}` } });
   if (!res.ok) return null;
   return res.json().catch(() => null);
 }

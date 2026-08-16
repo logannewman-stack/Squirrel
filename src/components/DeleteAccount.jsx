@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "./ui";
 import { client } from "../lib/supabase";
 import { resetAll } from "../lib/store";
+import { api } from "../lib/api";
 
 /**
  * Leaving, properly.
@@ -53,7 +54,7 @@ export default function DeleteAccount({ email }) {
       const token = data?.session?.access_token;
       if (!token) throw new Error("Sign in again to delete your account.");
 
-      const res = await fetch("/api/account/delete", {
+      const res = await api("/api/account/delete", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify({ confirm: "DELETE" }),

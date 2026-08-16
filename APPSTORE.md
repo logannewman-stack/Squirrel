@@ -1,257 +1,213 @@
 # Shipping Squirrel to the App Store
 
-`GO-LIVE.md` gets the web app running. This one gets the iPhone app *approved*.
+`GO-LIVE.md` gets the web app running. This one gets the iPhone app approved.
 
-Read it once end to end before starting. Most of it is App Store Connect
-paperwork you cannot do from a repository, and the order matters in two places
-— the bundle identifier and the subscription products both become permanent the
-moment they exist.
+Nobody here opens Xcode. Builds happen on **Codemagic**, from a clean checkout,
+on a rented Mac — which is why the Xcode project is wired by a script
+(`npm run ios:wire`), why the scheme is committed, and why `npm test` fails if
+any of it drifts. Everything that has to be true of the build has to be true of
+what is *committed*.
 
-Time: about two hours of clicking, spread over a couple of days while Apple
-reviews. Cost: $99/year for the Developer Program.
+What remains is almost entirely dashboard work: Apple's developer portal, App
+Store Connect, Codemagic, Supabase, Vercel.
 
-> **Before every build:** `npm run ios:check`. It fails when a native file has
-> been added to the folder and forgotten in the Xcode project, which is exactly
-> how four Swift files once shipped as nothing at all. `npm test` runs the same
-> assertions plus the rest of the compliance checks.
-
----
-
-## 0. The one decision that cannot be undone
-
-The bundle identifier is **`com.squirrelll.app`** — three `l`s. It is in
-`capacitor.config.json`, the Xcode project, the App Group
-(`group.com.squirrelll.app`), the entitlements files and the URL scheme.
-
-If that is the domain, leave it. If it is a typo, **fix it now**: once an App
-Store Connect record exists on an identifier, that identifier is yours for ever
-and cannot be renamed, reused, or deleted. Change it in one pass:
-
-```
-capacitor.config.json                       appId
-ios/App/App.xcodeproj/project.pbxproj       PRODUCT_BUNDLE_IDENTIFIER
-ios/App/App/Info.plist                      CFBundleURLName
-ios/App/App/App.entitlements                the group
-ios/SquirrelWidget/SquirrelWidget.entitlements  the group
-ios/App/App/SquirrelBridge.swift            squirrelAppGroup
-scripts/xcode-wire.mjs                      APP_GROUP
-test/compliance.test.mjs                    GROUP
-```
-
-`npm test` fails if any of them disagree, which is the point of the check.
+> Before any build: `npm test`. It runs the compliance suite, which asserts what
+> App Review checks and what only breaks on a device.
 
 ---
 
-## 1. Apple Developer, and the identifiers (~20 min)
+## What is already done
 
-1. Enrol at [developer.apple.com](https://developer.apple.com/programs/) — $99/yr.
-   Allow a day or two; an organisation enrolment needs a D-U-N-S number.
-2. **Certificates, Identifiers & Profiles → Identifiers → App IDs → +**
-   - Bundle ID: `com.squirrelll.app` (explicit, not wildcard)
-   - Capabilities: **App Groups**, **In-App Purchase**, **SiriKit**
-3. **Identifiers → App Groups → +** → `group.com.squirrelll.app`.
-   Then go back into the App ID, edit App Groups, and tick it.
-4. **Identifiers → App IDs → +** again for the widget:
-   `com.squirrelll.app.SquirrelWidget`, with **App Groups** ticked and the same
-   group selected.
+No action needed on any of this — written, tested, pushed.
 
-> The App Group is the least forgiving thing on this page. Set on the app and
-> not the widget — or spelled differently in either entitlements file — the app
-> writes happily into a container the widget cannot see. There is no error and
-> no log entry; the widget just shows its placeholder for ever.
-
----
-
-## 2. Xcode, once (~15 min)
-
-```bash
-npm run build          # the web bundle the app wraps
-npx cap sync ios       # copy it in, refresh the plugins
-npm run ios:wire       # put our native files back in the target
-open ios/App/App.xcworkspace
-```
-
-`cap sync` is allowed to rewrite parts of the project, so **`ios:wire` runs
-after it, every time.** It is idempotent; running it twice does nothing.
-
-In Xcode, on the **App** target:
-
-1. **Signing & Capabilities** → pick your team. Verify **App Groups** is listed
-   and `group.com.squirrelll.app` is ticked.
-2. **General** → Minimum Deployment **iOS 17.0**. This is not adjustable
-   downward: the widget uses `containerBackground` (17.0) and the Siri
-   shortcuts use App Intents (16.0). Below 17 the project does not compile.
+- In-App Purchase end to end: StoreKit 2, purchase, **Restore purchases**,
+  renewals, and server-side receipt verification before any transaction is
+  finished
+- The Stripe-vs-IAP fork, so no screen inside the app can reach Stripe checkout
+- Company seats deliberately not sold in-app — StoreKit cannot express a
+  quantity-based subscription — with the app saying where they are bought
+- EventKit bridge, so the calendar permission has a real feature behind it
+- Privacy manifests for the app and the widget
+- `Info.plist`: arm64, export compliance answered, duplicate key removed
+- The widget extension target, its embed phase and its dependency, built by
+  `scripts/xcode-wire.mjs` with no Xcode involved
+- A shared scheme, committed, so a clean checkout has something to build
+- `codemagic.yaml`
+- API calls routed through `lib/api.js`, and magic-link sign-in returning
+  through `squirrel://auth` — **both were broken on device while working
+  perfectly on the web**, which is why neither had been noticed
 
 ---
 
-## 3. The widget extension target (~5 min, and only Xcode can do it)
+## 1. Apple developer portal (~10 min)
 
-`ios/SquirrelWidget/` holds the widget, its `Info.plist`, its entitlements and
-its privacy manifest. What it does not have is a *target*, because a widget
-extension is nine linked objects in the project file and a mistake in any of
-them produces a project Xcode refuses to open. Xcode's template writes all nine
-correctly in half a minute.
+The App ID for `com.squirrelll.app` already exists. Three things are missing.
 
-1. **File → New → Target → Widget Extension**
-2. Product Name: `SquirrelWidget`. **Untick** "Include Live Activity" and
-   "Include Configuration App Intent". Finish, then **Activate** the scheme.
-3. Xcode generates its own `SquirrelWidget.swift` and `Info.plist` — delete
-   both (Move to Trash), then drag in the four real files from
-   `ios/SquirrelWidget/`, ticking **SquirrelWidget** as the target and *not* App.
-4. **Signing & Capabilities** on the new target → **+ Capability → App Groups**
-   → tick `group.com.squirrelll.app`.
-5. **Build Settings** on the new target:
-   - `INFOPLIST_FILE` → `SquirrelWidget/Info.plist`
-   - `CODE_SIGN_ENTITLEMENTS` → `SquirrelWidget/SquirrelWidget.entitlements`
-   - `IPHONEOS_DEPLOYMENT_TARGET` → 17.0
-6. **App target → General → Frameworks, Libraries, and Embedded Content**:
-   confirm `SquirrelWidget.appex` is there and set to **Embed Without Signing**.
+1. **Identifiers → App Groups → +** → `group.com.squirrelll.app`
+2. **Identifiers → App IDs →** open `com.squirrelll.app` → **Edit** → tick
+   **App Groups**, **In-App Purchase** and **SiriKit**, then inside App Groups
+   select the group you just made. Save.
+3. **Identifiers → App IDs → +** → `com.squirrelll.app.SquirrelWidget`, tick
+   **App Groups**, select the same group.
 
-`npm run ios:check` stops reporting the widget once the target exists.
+> Step 3 can be skipped — the build registers the identifier if it is missing —
+> but the **App Group cannot be**, and it must be enabled on *both*. Set on one
+> and not the other, the app writes into a container the widget cannot read: no
+> error, no log, a placeholder widget for ever.
+
+4. **Integrations → App Store Connect API → Keys → +**, access **App Manager**.
+   Download the `.p8` — it downloads once and never again. Note the **Key ID**
+   and the **Issuer ID** from the same page.
 
 ---
 
-## 4. Subscriptions in App Store Connect (~30 min)
+## 2. App Store Connect (~30 min)
 
-Nothing can be sold until these exist, and **their product ids are permanent**.
-
-1. [appstoreconnect.apple.com](https://appstoreconnect.apple.com) → **Apps → +**
-   → New App. Platform iOS, your bundle id, SKU anything, Full Access.
+1. **Apps → +** → New App. iOS, `com.squirrelll.app`, SKU anything, Full Access.
 2. **Monetization → Subscriptions → Create Subscription Group**, named
-   something the customer sees, e.g. `Squirrel`.
+   `Squirrel`.
 
-   > One group, both plans. Subscriptions in the same group upgrade and
-   > downgrade between each other with Apple handling the proration; in
-   > separate groups a customer moving from Pro to Studio ends up paying for
-   > both at once. This cannot be changed afterwards.
+   > **One group, both plans.** Subscriptions in the same group upgrade and
+   > downgrade between each other with Apple handling proration. In separate
+   > groups, a customer moving from Pro to Studio pays for both at once. This
+   > cannot be changed afterwards.
 
-3. Add two subscriptions in that group:
+3. Two subscriptions inside it:
 
    | Reference name | Product ID | Price | Rank |
    | --- | --- | --- | --- |
    | Squirrel Pro | `com.squirrelll.app.pro.monthly` | $24.99/mo | 2 |
    | Squirrel Studio | `com.squirrelll.app.studio.monthly` | $50.00/mo | 1 |
 
-   Rank 1 is the highest tier. Each needs a display name, a description, and a
-   localisation, or it stays in "Missing Metadata" and never loads on device.
+   Rank 1 is the highest tier. Each needs a display name, description and
+   localisation, or it stays in "Missing Metadata", never loads on device, and
+   the paywall renders empty with no error.
 
-4. Set the matching variables in Vercel and redeploy:
+4. **App Store Server Notifications** — set Production *and* Sandbox URLs to
+   `https://your-domain/api/apple/notifications`. This is what keeps a
+   subscription current afterwards: renewals, refunds, billing failures,
+   cancellations. Without it, a customer who cancels keeps their plan for ever.
+
+5. **Users and Access → Sandbox → Test Accounts → +**, on an email you control
+   that is not already an Apple ID.
+
+---
+
+## 3. Vercel (~5 min)
+
+| Variable | Value |
+| --- | --- |
+| `APPLE_PRODUCT_PRO` | `com.squirrelll.app.pro.monthly` |
+| `APPLE_PRODUCT_STUDIO` | `com.squirrelll.app.studio.monthly` |
+| `APPLE_BUNDLE_ID` | `com.squirrelll.app` |
+| `APPLE_ALLOW_SANDBOX` | `true` — **while testing only** |
+
+The app asks the server which product id is which plan, so these are the only
+place the ids are written. A second copy compiled into the app is a copy that
+goes stale, and the failure is the worst available: the purchase succeeds,
+Apple charges the card, and the server does not recognise what was bought.
+
+> `APPLE_ALLOW_SANDBOX=true` makes every TestFlight build a free subscription
+> generator. Set it to test, remove it before the first real submission.
+
+---
+
+## 4. Supabase (~2 min)
+
+**Authentication → URL Configuration → Redirect URLs** → add:
+
+```
+squirrel://auth
+```
+
+Without it, Supabase refuses the app's redirect and sends people to the web
+Site URL instead — which on a phone is a dead end. They tap the link, a browser
+opens, and the app never hears anything.
+
+---
+
+## 5. Codemagic (~15 min, once)
+
+1. **Applications → Add application → GitHub →** `logannewman-stack/squirrel`.
+   Choose **codemagic.yaml** when asked; it is in the repo root and defines
+   everything.
+2. **Teams → Integrations → Developer Portal → Add key.** Upload the `.p8`,
+   paste the Key ID and Issuer ID, and **name it `squirrel-asc`** — the yaml
+   refers to it by that exact name.
+3. **Environment variables → group `squirrel-ios`**, three values:
 
    | Variable | Value |
    | --- | --- |
-   | `APPLE_PRODUCT_PRO` | `com.squirrelll.app.pro.monthly` |
-   | `APPLE_PRODUCT_STUDIO` | `com.squirrelll.app.studio.monthly` |
-   | `APPLE_BUNDLE_ID` | `com.squirrelll.app` |
-   | `APPLE_ALLOW_SANDBOX` | *unset in production* |
+   | `VITE_API_URL` | `https://your-domain` — no trailing slash |
+   | `VITE_SUPABASE_URL` | your Supabase project URL |
+   | `VITE_SUPABASE_ANON_KEY` | the `anon` key |
 
-   The app asks the server which id is which plan (`GET /api/apple/verify`), so
-   these are the only place the ids are written. A second copy compiled into
-   the app is a copy that goes stale, and the failure is the worst available:
-   the purchase succeeds, Apple charges the card, and the server does not
-   recognise what was bought.
+   These are compiled **into** the bundle the app ships. Missing them, the app
+   installs, looks perfect, and nobody can sign in, buy anything, or open the
+   company screen. The build stops rather than producing that.
 
-   > `APPLE_ALLOW_SANDBOX=true` makes every TestFlight build a free
-   > subscription generator. Set it while testing, unset it before you ship,
-   > and never set it in production.
+4. **Build it.** The workflow triggers on a version tag:
 
-5. **App Store Server Notifications V2** → Production and Sandbox URLs both
-   `https://your-domain/api/apple/notifications`. This is what keeps a
-   subscription current afterwards — renewals, refunds, billing failures,
-   cancellations. Without it a customer who cancels keeps their plan for ever.
+   ```
+   git tag v1.0.0 && git push --tags
+   ```
+
+   About fifteen minutes later it lands in TestFlight. It does **not** submit to
+   App Review — that stays a deliberate act.
 
 ---
 
-## 5. Testing purchases before you ship (~20 min)
+## 6. Test a real purchase (~20 min)
 
-1. **Users and Access → Sandbox → Test Accounts** → create one with an email
-   you control that is *not* an existing Apple ID.
-2. On a real device (not the simulator): Settings → App Store → sign out of
-   the sandbox account section, then run a TestFlight or debug build and buy.
-   Use the sandbox account when prompted.
-3. Set `APPLE_ALLOW_SANDBOX=true` while doing this or every purchase is
-   refused with `sandbox_not_allowed` — which is the correct production
-   behaviour and a confusing hour in testing.
-4. Check all four:
-   - the app shows the new plan immediately
-   - `profiles.plan` in Supabase says the same
-   - **Restore purchases** on a fresh install puts the plan back
-   - cancelling in Settings → Subscriptions drops the plan at period end, not
-     at the click
+On a real device from TestFlight. The simulator cannot buy.
 
-> **The one to test deliberately: kill the app between paying and being
-> granted.** Buy, then force-quit before the plan appears. Reopen. The plan
-> should arrive on its own. That is the whole reason the code verifies with the
-> server *before* finishing the transaction, and it is the only failure mode
-> here that costs a customer real money if it is wrong.
+- [ ] Buy a plan; the app shows it immediately
+- [ ] `profiles.plan` in Supabase agrees
+- [ ] Delete the app, reinstall, tap **Restore purchases** — the plan comes back
+- [ ] Cancel in Settings → Subscriptions — the plan ends at period end, not at
+      the tap
+- [ ] Sign out and back in — the emailed link opens the app and signs you in
+- [ ] **Force-quit mid-purchase, then reopen.** The plan should arrive on its own
+
+That last one matters most. It is why the code verifies with the server *before*
+finishing the transaction, and it is the only failure here that costs a real
+customer real money if it is wrong.
+
+Then remove `APPLE_ALLOW_SANDBOX` from Vercel.
 
 ---
 
-## 6. The listing (~45 min)
+## 7. The listing (~45 min)
 
-- **Screenshots** — 6.9" iPhone is mandatory. Take them on a device or the
-  simulator at that size. The Info.plist declares iPad orientations, so either
-  produce 13" iPad screenshots too, or set the App target's supported
-  destinations to iPhone only.
-- **Privacy policy URL** — `https://your-domain/privacy`. Already reachable
-  without an account (`App.jsx` routes it before first run), which is what the
-  reviewer needs.
-- **Support URL** — required, and it must resolve. A page with an email address
-  on it is enough.
-- **Privacy nutrition labels** — these must match
-  `ios/App/App/PrivacyInfo.xcprivacy` exactly, because review reads both. Declare
-  **Email Address**, **Purchase History**, **Other User Content** and **Product
-  Interaction**, all *linked to the user*, all "App Functionality", none used
-  for tracking.
+- **Screenshots** — 6.9" iPhone mandatory. `Info.plist` declares iPad
+  orientations, so either add 13" iPad screenshots or set the App target to
+  iPhone only.
+- **Privacy policy URL** — `https://your-domain/privacy`, already reachable
+  without an account.
+- **Support URL** — required, and it must resolve.
+- **Privacy nutrition labels** — must match `ios/App/App/PrivacyInfo.xcprivacy`
+  exactly, because review reads both: **Email Address**, **Purchase History**,
+  **Other User Content**, **Product Interaction** — all linked to the user, all
+  "App Functionality", none for tracking.
+- **Age rating** 4+, **category** Productivity.
+- **Demo account.** The usual first-round rejection on a magic-link app: the
+  reviewer cannot receive your sign-in emails. Give them an account already
+  signed in, or a pre-authorised link, and say which in the review notes.
 
-  > Task and project titles do sync to Supabase. That is User Content, it is
-  > linked to the person, and saying otherwise to look tidier is the kind of
-  > discrepancy that gets found.
-
-- **Age rating** — 4+. Nothing here needs anything higher.
-- **Category** — Productivity.
-- **Review notes** — say plainly: *"Sign-in is by emailed magic link. A demo
-  account is below with the link pre-authorised; the app is fully usable
-  without an account, which is the free tier."*
-- **Demo account** — required, and the usual reason a first submission is
-  rejected on a magic-link app: a reviewer cannot receive your emails. Give
-  them an account already signed in on a device, or a pre-authorised link, and
-  say which.
-
-**You do not need Sign in with Apple.** It is required only when you offer
+**Sign in with Apple is not required** — that applies only when you offer
 third-party social login. Magic-link email is first-party.
 
 ---
 
-## 7. Upload
+## Not blocking submission
 
-```bash
-npm run build && npx cap sync ios && npm run ios:wire
-```
-
-Then in Xcode: bump **Build** (Apple refuses a build number it has seen
-before — Version can stay 1.0), select **Any iOS Device**, **Product → Archive**,
-and **Distribute App → App Store Connect**.
-
-The export-compliance question is already answered in the bundle
-(`ITSAppUsesNonExemptEncryption = false`, correct because the app uses HTTPS and
-the platform's own TLS and nothing else), so the upload will not ask.
-
----
-
-## What is deliberately not built
-
-**Stripe stays web-only.** `api/checkout.js` is not reachable from the app and
-must not become reachable: routing an in-app upgrade to Stripe Checkout is a
-3.1.1 rejection, not a grey area. `upgrade()` in `src/lib/billing.js` is the
-single fork, and `test/compliance.test.mjs` fails if any component imports
-`startCheckout` directly.
-
-Selling on the web is both allowed and cheaper — 2.9% + 30¢ against Apple's 15%
-under the Small Business Program — so the web checkout is worth keeping and
-worth pointing people at from your own marketing. What it may not be is a
-button inside the app.
+**Stripe.** The account exists; nothing for Squirrel is set up in it yet.
+`GO-LIVE.md` §5 has the products, prices, webhook and four ids. Selling on the
+web is allowed and cheaper — 2.9% + 30¢ against Apple's 15% — so it is worth
+having, and it stays web-only: routing an in-app upgrade to Stripe is a 3.1.1
+rejection, and `test/compliance.test.mjs` fails if any component tries.
 
 **Invitation emails.** Inviting a colleague creates the record and sends
-nothing. `api/email/invite.js` and `sendInvite` exist and need a `RESEND_API_KEY`
-and wiring. Not a submission blocker; it is a company of twelve people where
-eleven never hear they were invited.
+nothing. `api/email/invite.js` and `sendInvite` are written and need
+`RESEND_API_KEY` and `INVITE_FROM`. A company of twelve currently has eleven
+people who never hear they were invited.
