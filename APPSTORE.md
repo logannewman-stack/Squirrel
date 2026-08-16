@@ -201,11 +201,22 @@ third-party social login. Magic-link email is first-party.
 
 ## Not blocking submission
 
-**Stripe.** The account exists; nothing for Squirrel is set up in it yet.
-`GO-LIVE.md` §5 has the products, prices, webhook and four ids. Selling on the
-web is allowed and cheaper — 2.9% + 30¢ against Apple's 15% — so it is worth
-having, and it stays web-only: routing an in-app upgrade to Stripe is a 3.1.1
-rejection, and `test/compliance.test.mjs` fails if any component tries.
+**Stripe.** The account exists; nothing for Squirrel is set up in it yet. One
+command does all of it — products, graduated seat prices, webhook — and prints
+the variables to paste into Vercel:
+
+```
+STRIPE_SECRET_KEY=sk_test_… PUBLIC_URL=https://your-domain npm run stripe:setup
+```
+
+Test key first. `npm run stripe:check` verifies later that Stripe still matches
+the app. `GO-LIVE.md` §5 has the detail, including why the tier table is
+generated rather than typed into the dashboard.
+
+Selling on the web is allowed and cheaper — 2.9% + 30¢ against Apple's 15% — so
+it is worth having, and it stays web-only: routing an in-app upgrade to Stripe
+is a 3.1.1 rejection, and `test/compliance.test.mjs` fails if any component
+tries.
 
 **Invitation emails.** Inviting a colleague creates the record and sends
 nothing. `api/email/invite.js` and `sendInvite` are written and need

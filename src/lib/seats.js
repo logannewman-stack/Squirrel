@@ -88,6 +88,35 @@ export function quote(plan, seats) {
   };
 }
 
+/**
+ * The same schedule, in the shape Stripe wants it.
+ *
+ * Stripe calls this *graduated* tiered pricing, and the distinction from
+ * *volume* pricing is the entire reason this function exists rather than a
+ * table typed into a dashboard. Graduated charges each band's seats at that
+ * band's rate — which is what `quote()` computes and what the button in the
+ * app promises. Volume charges *every* seat at the rate the last one unlocked,
+ * which is a different and much lower number.
+ *
+ * Choose the wrong one in the dashboard and nothing fails: checkout works, the
+ * invoice is produced, and it quietly disagrees with the price the customer
+ * was shown. That is a refund and an apology, found by a customer rather than
+ * by a test. So the tiers are derived here from the same BANDS the quote uses
+ * and sent by `scripts/stripe-setup.mjs`. The two cannot drift, because there
+ * is only one of them.
+ *
+ * Amounts are in cents, which is Stripe's unit — and floating-point dollars
+ * are how a price ends up a cent out.
+ */
+export function tiers(plan) {
+  const list = PLANS[plan]?.price || 0;
+  if (!list) return [];
+  return BANDS.map((band) => ({
+    up_to: band.upTo === Infinity ? "inf" : band.upTo,
+    unit_amount: Math.round(round(list * (1 - band.off)) * 100),
+  }));
+}
+
 /** "25 seats · $531/mo · $21.25 each, saving $93" — one line for a button. */
 export function sayQuote(plan, seats) {
   const q = quote(plan, seats);

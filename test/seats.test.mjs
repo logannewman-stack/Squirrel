@@ -7,7 +7,7 @@
  * growing by one person never costs less than nothing and never triggers a
  * cliff, and that the discount is marginal rather than retroactive.
  */
-import { quote, sayQuote, BANDS, TALK_TO_US } from "../src/lib/seats.js";
+import { quote, sayQuote, tiers, BANDS, TALK_TO_US } from "../src/lib/seats.js";
 import { PLANS } from "../src/lib/plans.js";
 
 let pass = 0, fail = 0;
@@ -102,6 +102,57 @@ const PRO = PLANS.pro.price; // 24.99
   t("the one-line quote names seats, total, each, and the saving",
     /25 seats/.test(said) && /\/mo/.test(said) && /each/.test(said) && /saving/.test(said), said);
   t("  and says nothing at all for nothing", sayQuote("pro", 0) === "");
+}
+
+/* ------------------------------------------------ what Stripe will charge */
+/**
+ * The quote in the app and the invoice from Stripe are two different
+ * implementations of one schedule, and only one of them the customer can see
+ * in advance. If they disagree, the app is lying about a price — found by a
+ * customer reading a card statement, which is a refund and an apology rather
+ * than a bug report.
+ *
+ * So the tier table sent to Stripe is replayed here through Stripe's own
+ * graduated arithmetic and checked against `quote()` seat by seat. The failure
+ * this is really guarding is picking *volume* pricing instead of *graduated*
+ * in the dashboard: identical-looking setup, every seat charged at the last
+ * band's rate, and a bill roughly a third under what was promised.
+ */
+{
+  /** Stripe's graduated maths, written out rather than assumed. */
+  const asStripeWouldCharge = (plan, n) => {
+    let from = 0, cents = 0;
+    for (const tier of tiers(plan)) {
+      const upTo = tier.up_to === "inf" ? Infinity : tier.up_to;
+      const count = Math.min(n, upTo) - from;
+      if (count > 0) cents += count * tier.unit_amount;
+      from = Math.min(n, upTo);
+      if (from >= n) break;
+    }
+    return cents / 100;
+  };
+
+  let drift = null;
+  for (const plan of ["pro", "studio"]) {
+    for (let n = 1; n <= 250 && !drift; n++) {
+      const app = quote(plan, n).total;
+      const stripe = asStripeWouldCharge(plan, n);
+      if (Math.abs(app - stripe) > 0.005) drift = `${plan} at ${n} seats: app ${app}, Stripe ${stripe}`;
+    }
+  }
+  t("Stripe's tiers charge exactly what the app quoted, 1 to 250 seats", drift === null, drift);
+
+  // A band boundary is where volume and graduated diverge most visibly, so it
+  // is worth naming one explicitly rather than trusting the sweep alone.
+  t("  the 25th seat is priced marginally, not retroactively",
+    quote("pro", 25).total > quote("pro", 24).total
+      && quote("pro", 25).total < PLANS.pro.price * 25,
+    `${quote("pro", 24).total} → ${quote("pro", 25).total}`);
+
+  t("every band appears in the tier table", tiers("pro").length === BANDS.length);
+  t("  and the last one is open-ended", tiers("pro").at(-1).up_to === "inf");
+  t("  and amounts are whole cents", tiers("studio").every((x) => Number.isInteger(x.unit_amount)));
+  t("a plan with no price has no tiers", tiers("free").length === 0);
 }
 
 console.log(`\nSeats: ${pass} passed, ${fail} failed`);

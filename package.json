@@ -12,6 +12,8 @@
     "test:schema": "supabase/tests/run.sh",
     "schema:bundle": "node scripts/bundle-schema.mjs",
     "ios:wire": "node scripts/xcode-wire.mjs",
+    "stripe:setup": "node scripts/stripe-setup.mjs",
+    "stripe:check": "node scripts/stripe-setup.mjs --check",
     "ios:check": "node scripts/xcode-wire.mjs --check",
     "test:build": "vite build && node test/build.e2e.mjs && node test/offline.e2e.mjs"
   },

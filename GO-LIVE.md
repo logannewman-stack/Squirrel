@@ -109,52 +109,69 @@ on Pro and used 40 assists, not what they're working on. And it will not open
 for anyone whose email is not in that list: not a customer, not a curious
 signed-in stranger, not you before you set the variable. Unset means nobody.
 
-## 5. Stripe monthly subscriptions (~20 min)
+## 5. Stripe monthly subscriptions (~10 min)
 
 The code is written and tested — checkout, the customer portal, the webhook,
-proration, failed cards, cancellations. What it needs is your Stripe account
-and four ids.
+proration, failed cards, cancellations. So is the setup: one command creates
+the products, the prices and the webhook, and prints the variables to paste.
 
-1. **Create the products.** [dashboard.stripe.com](https://dashboard.stripe.com)
-   → Product catalogue → **Add product**, one per tier you sell. For each,
-   add a price: **Recurring**, **Monthly**, in your currency. The prices the
-   app advertises live in `src/lib/plans.js` — set Stripe to match, or change
-   both together.
+```
+STRIPE_SECRET_KEY=sk_test_… PUBLIC_URL=https://your-domain npm run stripe:setup
+```
 
-   | Product | Price in `plans.js` | Env var to hold its price id |
-   | --- | --- | --- |
-   | Squirrel Pro | $24.99/mo | `STRIPE_PRICE_PRO` |
-   | Squirrel Studio | $50/mo | `STRIPE_PRICE_STUDIO` |
+Use the **test** key first — it starts `sk_test_` and cannot charge anybody.
+Re-run with the live key when the test flow works end to end.
 
-   Copy each **price** id (`price_…`, not the `prod_…` product id).
+It is idempotent: run it twice and nothing is created twice. `npm run
+stripe:check` writes nothing and fails if Stripe has drifted from the app,
+which is what to run after changing a price in `src/lib/plans.js`.
 
-   > `STRIPE_PRICE_PLUS` also exists in the code and the database's tier enum.
-   > It is a legacy tier the pricing page no longer sells — leave it unset
-   > unless you decide to bring a cheaper plan back, in which case add `plus`
-   > to `PLANS` in `src/lib/plans.js` first, so the app can price and describe
-   > what Stripe is charging for.
+### Why not the dashboard
 
-2. **Add the webhook.** Developers → Webhooks → **Add endpoint**, URL
-   `https://your-domain/api/stripe-webhook`. Select exactly these events:
+Because company seats use **graduated** tiered pricing — the first four seats
+at list, the next twenty at 15% off, and so on, each band charged at its own
+rate. That is what the quote in the app promises. Stripe's dashboard offers
+"volume" pricing immediately beside it, which charges *every* seat at the rate
+the last one unlocked: a different, much lower number.
 
-   - `checkout.session.completed` — first purchase; links the Stripe customer
-     to the Supabase account
-   - `customer.subscription.created`, `customer.subscription.updated`,
-     `customer.subscription.deleted` — the plan itself, including upgrades,
-     downgrades and cancellations
-   - `invoice.payment_failed` — raises the card-failing flag you see in your
-     console
-   - `invoice.payment_succeeded` — clears it when the card works again
+Choose the wrong radio button and nothing fails. Checkout works, the invoice is
+produced, and it quietly disagrees with the price the customer was shown — a
+refund and an apology, found by a customer rather than by a test. The script
+sends the tier table straight from `src/lib/seats.js`, so there is one copy of
+the pricing in the project and the two cannot drift. `test/seats.test.mjs`
+replays Stripe's own arithmetic against the app's quote for every seat count
+from 1 to 250, on both plans.
 
-   Copy the **signing secret** (`whsec_…`).
+### What it makes
 
-3. **Set the variables** in Vercel and redeploy:
+| | Seats 1–4 | 5–24 | 25–99 | 100+ |
+| --- | --- | --- | --- | --- |
+| Pro | $24.99 | $21.24 | $18.74 | $16.24 |
+| Studio | $50.00 | $42.50 | $37.50 | $32.50 |
 
-   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO`,
-   `STRIPE_PRICE_STUDIO`, and `PUBLIC_URL` (checkout builds its return links
-   from it — unset, customers land nowhere after paying).
+Plus a webhook at `/api/stripe-webhook` subscribed to exactly six events —
+`checkout.session.completed`, the three `customer.subscription.*`, and both
+`invoice.payment_*`. Only those six: Stripe retries failures for days, and an
+endpoint returning 500 on an event nobody wrote a handler for looks exactly
+like an endpoint that is broken.
 
-4. **Test with a test-mode card.** Use Stripe's test keys first;
+> The webhook signing secret is shown **once**, at creation, and Stripe will
+> never show it again. The script prints it. Without it every delivery is
+> rejected as unsigned and no subscription ever activates.
+
+### Then, in Vercel
+
+Paste the five the script printed and redeploy:
+
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO`,
+`STRIPE_PRICE_STUDIO`, and `PUBLIC_URL` — checkout builds its return links from
+that last one, and unset, customers land nowhere after paying.
+
+`STRIPE_PRICE_PLUS` is the retired tier. Leave it unset.
+
+### Test with a test-mode card
+
+**Test it.** Use Stripe's test keys first;
    `/api/setup-check` warns you when you're in test mode so you can't mistake
    it for live. In the app: Settings → Plan → upgrade → pay with `4242 4242
    4242 4242`, any future expiry, any CVC. Then check three things — the app
