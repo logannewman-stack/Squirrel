@@ -171,13 +171,34 @@ export const breakMinsOn = (hours, weekday) =>
   breaksOn(hours, weekday).reduce((n, b) => n + b.mins, 0);
 
 /**
- * Focused minutes genuinely reachable on one weekday: the window, less the
- * breaks, and never more than the capacity asked for.
+ * Focused minutes genuinely reachable on one weekday.
+ *
+ * This was `min(capacity, window − breaks)`, which reads correctly and was
+ * almost inert. The window is wide — 08:00 to 19:00 is 660 minutes — and
+ * capacity is a realistic 300, so taking breaks off the window changed nothing
+ * at all until they passed *360 minutes in a single day*. Somebody could
+ * commit lunch, the school run and an hour at the gym and the planner went on
+ * believing they had five clear hours: it laid work across all three and
+ * handed back a week that could not be kept.
+ *
+ * That made every commitment anybody entered decoration — asked for, stored,
+ * and changing no decision — which is worse than never asking.
+ *
+ * So capacity shrinks with the day it lives in. It was an estimate of
+ * realistic focus across the *whole* window, so committing a fifth of the
+ * window costs about a fifth of the focus: an hour of lunch takes roughly
+ * twenty-seven minutes off the five hours, rather than nothing. The `min`
+ * survives as the floor for the extreme case, where so much of the day is
+ * committed that the time left is smaller than the scaled capacity.
  */
-export const usableMinsOn = (hours, weekday) =>
-  worksOn(new Date(2024, 0, 7 + weekday), hours.days)
-    ? Math.min(hours.capacityMins, Math.max(0, hours.windowMins - breakMinsOn(hours, weekday)))
-    : 0;
+export const usableMinsOn = (hours, weekday) => {
+  if (!worksOn(new Date(2024, 0, 7 + weekday), hours.days)) return 0;
+  if (!hours.windowMins) return 0;
+
+  const left = Math.max(0, hours.windowMins - breakMinsOn(hours, weekday));
+  const scaled = hours.capacityMins * (left / hours.windowMins);
+  return Math.round(Math.min(scaled, left));
+};
 
 /** Focused minutes across a normal week. The number the pacing maths rests on. */
 export const weeklyMins = (hours) =>
