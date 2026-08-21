@@ -8,44 +8,37 @@
  */
 
 export const PLANS = {
-  // Free is the whole app on one device, capped so a genuinely busy person
-  // hits the wall in a week. The cap is on scope, never on quality — the
-  // built-in assistant, the calendar, and the focus timer are all here in
-  // full, because a crippled free tier converts worse than a generous one that
-  // simply runs out of room.
+  /**
+   * Not a plan. The state of having no subscription.
+   *
+   * Squirrel used to have a real free tier — the whole planner on one device,
+   * capped at two projects — and it does not any more. Every account starts on
+   * a seven-day trial with a card already given, and `free` is what an account
+   * becomes when that trial ends without payment, or when a subscription
+   * lapses. It is a wall, not an offer.
+   *
+   * The row still exists, and the enum value in Postgres still says `free`,
+   * because a hundred places read a plan id and a rename would be a migration
+   * with nothing at the end of it. What changed is the meaning: zero of
+   * everything, no feature entitlements, and copy that names the state rather
+   * than selling it.
+   *
+   * Nothing is deleted when somebody lands here. Their projects, tasks and
+   * calendar are exactly where they left them, behind a paywall, because an
+   * expired card is a reason to stop serving somebody and never a reason to
+   * destroy their week.
+   */
   free: {
     id: "free",
-    name: "Free",
+    name: "No plan",
     price: 0,
-    projects: 2,
-    tasks: 15,
-    /**
-     * Zero model-backed chats — and this number is the one the database
-     * enforces (plan_limit('free','chats') in migration 0009). It read 25
-     * here while the server allowed 0, so the in-app meter promised a "free
-     * taste" that every request 402'd on: the client lied to the free user
-     * on their first miss. The two now agree.
-     *
-     * This is deliberately the cost-safe default: the whole planner — the
-     * auto-scheduler, the deterministic assistant, everything on-device —
-     * costs the owner nothing, and the paid model boost is the only thing
-     * behind the wall. To offer a metered free taste later, raise this AND
-     * plan_limit('free','chats') to the same number; the meter is already
-     * built to count and warn.
-     */
+    projects: 0,
+    tasks: 0,
     chats: 0,
-    tagline: "Get organized",
-    blurb: "The whole planner on one device, capped at two projects.",
-    features: [
-      // Named first, and named here rather than under Pro: auto-scheduling is
-      // free on purpose, and the free tier's list previously said "plan your
-      // week by hand" — advertising the absence of the single best thing the
-      // app does to the exact people who have to fall in love with it.
-      "Auto-scheduling: your week lays itself out",
-      "Calendar, agenda, and focus timer",
-      "2 projects · 15 open tasks",
-      "This device only",
-    ],
+    tagline: "Trial ended",
+    blurb: "Your work is safe and waiting. Start a plan to pick it up.",
+    locked: true,
+    features: [],
   },
 
   // The flagship. One person running their entire life on it, on every device.
@@ -124,6 +117,25 @@ export const PAID = ["pro", "studio"];
  * state this product does not have.
  */
 export const SEATED = "studio";
+
+/**
+ * How long a new account gets before the card is charged.
+ *
+ * The card is taken at sign-up and Stripe holds the subscription in
+ * `trialing` until day eight, which the webhook already treats as entitled —
+ * so a trialling account is a Pro account in every respect and nothing here
+ * has to special-case it.
+ *
+ * Card up front, deliberately. A trial with no card is a signup number; a
+ * trial with a card is a customer who has already decided, and it removes an
+ * entire state machine — the countdown, the expiry lockout, the win-back
+ * email, the "was I supposed to pay?" support thread. Stripe sends the
+ * reminder, takes the money, and handles the cancellation.
+ *
+ * `api/checkout.js` refuses to grant it twice. Without that guard, cancelling
+ * and re-subscribing is a free month a fortnight.
+ */
+export const TRIAL_DAYS = 7;
 
 /**
  * The built-in assistant is deterministic and runs in the browser, so it costs
@@ -221,6 +233,32 @@ export function usage(state) {
   const plan = state?.plan ?? "free";
   const tier = PLANS[plan] ?? PLANS.free;
 
+  /**
+   * A locked account is not a nearly-full one.
+   *
+   * With no free tier there is nothing left that is capped-but-usable: a paid
+   * plan is unlimited and everything else is a wall at zero. So the meters
+   * stop being a gauge and become a statement, and the arithmetic that used to
+   * drive them stops applying — `used / cap` against a cap of nothing is
+   * Infinity when they have work and NaN when they do not, and neither is a
+   * number worth putting on a card.
+   *
+   * `locked` is what the surfaces should read now. `full` and `pressing` are
+   * kept true so anything still asking the old questions gets the safe answer
+   * rather than a quiet false.
+   */
+  if (tier.locked) {
+    return {
+      plan,
+      tier,
+      locked: true,
+      meters: [],
+      tightest: null,
+      pressing: true,
+      full: true,
+    };
+  }
+
   const meters = [
     {
       key: "projects",
@@ -247,6 +285,7 @@ export function usage(state) {
   return {
     plan,
     tier,
+    locked: false,
     meters,
     tightest,
     // Close enough to be worth mentioning unprompted. Anything below this is an
@@ -255,6 +294,7 @@ export function usage(state) {
     full: Boolean(tightest) && tightest.used >= tightest.cap,
   };
 }
+
 
 /** A wall, said as the reason it is being brought up. */
 export const wallReason = (meter) => {

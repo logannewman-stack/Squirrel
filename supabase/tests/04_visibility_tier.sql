@@ -116,6 +116,11 @@ select case when not is_managed(:emp)
 -- The gate is on reading *other people*. An administrator's own work is
 -- theirs by the ordinary owner policy and must survive every plan change
 -- above — a company downgrading should never lose its own founder's projects.
+-- The company above has been lapsed on purpose, and with no free tier that
+-- means its administrator cannot create anything either. Give them back a
+-- personal plan first: what is under test here is the visibility gate, not
+-- the paywall, and a check_violation would prove neither.
+update profiles set plan='pro', plan_renews_at = now() + interval '30 days' where id = :boss;
 insert into projects (user_id, name) values (:boss, 'The board pack');
 set role authenticated;
 set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000001';

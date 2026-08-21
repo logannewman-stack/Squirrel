@@ -20,7 +20,12 @@ declare
   n     integer;
 begin
   insert into auth.users (email) values ('alice@example.com') returning id into alice;
+  -- With no free tier, a brand-new profile can create nothing. This suite is
+  -- about sync — tombstones, conflict order, one remote id per calendar — so
+  -- it needs an account that is allowed to have rows at all.
+  update profiles set plan='pro', plan_renews_at = now() + interval '30 days' where id = alice;
   insert into auth.users (email) values ('bob@example.com')   returning id into bob;
+  update profiles set plan='pro', plan_renews_at = now() + interval '30 days' where id = bob;
 
   perform set_config('request.jwt.claim.sub', alice::text, true);
 

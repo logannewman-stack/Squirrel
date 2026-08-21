@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { asUser, asService, requireUser, json } from "./_lib/db.js";
-import { SEATED } from "../src/lib/plans.js";
+import { SEATED, TRIAL_DAYS } from "../src/lib/plans.js";
 
 const PRICE = {
   plus: process.env.STRIPE_PRICE_PLUS,
@@ -122,6 +122,27 @@ export default async function handler(req, res) {
     }
   }
 
+  /**
+   * Seven days before the card is charged — once, ever.
+   *
+   * Stripe applies `trial_period_days` to whatever subscription it is handed,
+   * every time, with no memory of what this customer has had before. So a
+   * person who subscribes, cancels on day six and subscribes again gets a
+   * second free week, and a third, indefinitely: a free product with extra
+   * steps, and one nobody would have to be clever to find.
+   *
+   * `status: "all"` is the load-bearing part. The default listing returns only
+   * live subscriptions, so a customer who cancelled looks exactly like a
+   * customer who never subscribed — which is precisely the person this is
+   * meant to catch.
+   */
+  const previous = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 1,
+  });
+  const firstTime = previous.data.length === 0;
+
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
@@ -135,7 +156,13 @@ export default async function handler(req, res) {
       metadata: org
         ? { squirrel_org_id: org.id, plan, seats: String(org.wanted) }
         : { supabase_user_id: auth.user.id, plan },
+      ...(firstTime ? { trial_period_days: TRIAL_DAYS } : {}),
     },
+    // The card is collected during the trial rather than at the end of it,
+    // which is the whole point of taking it up front: nobody is chased for a
+    // payment method on day eight, and `trialing` is already an entitled
+    // status, so the account is live the moment checkout returns.
+    ...(firstTime ? { payment_method_collection: "always" } : {}),
   });
 
   return json(res, 200, { url: session.url });

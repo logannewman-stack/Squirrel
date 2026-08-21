@@ -1,48 +1,37 @@
 -- What each plan is actually allowed, proven against the database.
 --
 -- These numbers are the product's promise, and the database is where the
--- promise is kept — a client-side check is a suggestion. The expectations
--- below were written against the original tiers (free: 1 project / 10 tasks,
--- plus: 5 projects / 200 chats) and drifted when 0005 and 0009 moved them,
--- because this suite needs a local Postgres and quietly stopped being run.
--- They now match the shipping limits: free 2 / 15 / 0 chats, every paid tier
--- unlimited on projects and tasks, Pro and Plus 1,000 chats, Studio 3,000.
+-- promise is kept — a client-side check is a suggestion.
+--
+-- There is no free tier any more. Every account starts on a seven-day trial
+-- with a card already given, which Stripe holds in `trialing` and the webhook
+-- writes as a paid plan, so nobody is ever on `free` while they are using the
+-- product. `free` is now reached exactly one way — by a trial or subscription
+-- ending — and it is a wall: nothing new can be created.
+--
+-- What it is not is a delete. The caps bite on creating, never on reading or
+-- keeping, and the last block here proves that a lapsed account still has
+-- every row it had the day before.
 \set ON_ERROR_STOP off
 \pset tuples_only on
 insert into auth.users (id, email) values ('11111111-1111-1111-1111-111111111111','a@x.com');
 \set u '''11111111-1111-1111-1111-111111111111'''
 
--- FREE: two projects allowed
-insert into projects (user_id, name) select :u, 'P'||g from generate_series(1,2) g;
-select 'PASS  free allows 2 projects' where (select count(*) from projects) = 2;
-
--- FREE: third project blocked
+-- FREE: nothing at all. Not a smaller allowance — none.
 do $$ begin
-  insert into projects (user_id, name) values ('11111111-1111-1111-1111-111111111111','P3');
-  raise notice 'FAIL  free allowed a 3rd project';
-exception when check_violation then raise notice 'PASS  free blocks 3rd project';
+  insert into projects (user_id, name) values ('11111111-1111-1111-1111-111111111111','P1');
+  raise notice 'FAIL  a lapsed account created a project';
+exception when check_violation then raise notice 'PASS  no plan means no new projects';
 end $$;
 
--- FREE: 15 open tasks allowed, 16th blocked
-insert into tasks (user_id, title) select :u, 'T'||g from generate_series(1,15) g;
-select 'PASS  free allows 15 tasks' where (select count(*) from tasks) = 15;
 do $$ begin
-  insert into tasks (user_id, title) values ('11111111-1111-1111-1111-111111111111','T16');
-  raise notice 'FAIL  free allowed a 16th task';
-exception when check_violation then raise notice 'PASS  free blocks 16th task';
+  insert into tasks (user_id, title) values ('11111111-1111-1111-1111-111111111111','T1');
+  raise notice 'FAIL  a lapsed account created a task';
+exception when check_violation then raise notice 'PASS  and no new tasks';
 end $$;
 
--- FREE: completing a task frees a slot (the limit counts OPEN tasks)
-update tasks set done = true where title = 'T1';
-do $$ begin
-  insert into tasks (user_id, title) values ('11111111-1111-1111-1111-111111111111','T16');
-  raise notice 'PASS  completing a task frees a slot';
-exception when check_violation then raise notice 'FAIL  completed task still counted';
-end $$;
-
--- FREE: no model-backed chats at all. The deterministic assistant is free and
--- unlimited; this meters only the paid boost.
-select case when claim_assistant_chat(:u) then 'FAIL  free got a chat' else 'PASS  free blocked from assistant' end;
+select case when claim_assistant_chat(:u) then 'FAIL  a lapsed account got a chat'
+            else 'PASS  and no assistant at all' end;
 
 -- PRO: unlimited projects and tasks
 update profiles set plan='pro', plan_renews_at = now() + interval '30 days' where id = :u;
@@ -68,3 +57,45 @@ select case when plan_limit(current_plan(:u), 'chats') = 3000 then 'PASS  studio
 -- Token recording
 select record_assistant_tokens(:u, 1000, 500);
 select 'PASS  tokens recorded' where (select input_tokens from usage_counters where user_id=:u) = 1000;
+
+-- ------------------------------------------------- lapsing keeps the work
+-- The rule this whole tier turns on: an expired card stops somebody creating
+-- and never destroys what they made. Somebody who pays again finds their week
+-- exactly where they left it.
+update profiles set plan='pro', plan_renews_at = now() + interval '30 days' where id = :u;
+insert into projects (user_id, name) values (:u, 'Written while paying');
+insert into tasks (user_id, title) values (:u, 'Also written while paying');
+
+update profiles set plan='free', plan_renews_at = null where id = :u;
+select case when (select count(*) from projects where name = 'Written while paying') = 1
+             and (select count(*) from tasks where title = 'Also written while paying') = 1
+  then 'PASS  lapsing keeps every row that was already there'
+  else 'FAIL  LAPSING DESTROYED WORK' end;
+
+-- And it is readable, not merely present: a paywall is a wall in front of
+-- making things, not in front of your own history.
+select case when (select name from projects where name = 'Written while paying') is not null
+  then 'PASS  and it can still be read'
+  else 'FAIL  a lapsed account cannot see its own work' end;
+
+-- Paying again restores creating, with nothing lost in between.
+update profiles set plan='pro', plan_renews_at = now() + interval '30 days' where id = :u;
+insert into projects (user_id, name) values (:u, 'After paying again');
+select case when (select count(*) from projects where user_id = :u) >= 3
+  then 'PASS  paying again picks up exactly where it stopped'
+  else 'FAIL  could not resume after paying' end;
+
+-- ------------------------------------------- archiving is not deleting, and
+-- an archived project stops taking up room. Finishing work must never move
+-- somebody towards a paywall; on a capped plan this is the difference between
+-- a tidy account and a blocked one.
+update profiles set plan='plus', plan_renews_at = now() + interval '30 days' where id = :u;
+select case when plan_limit('plus','projects') is null
+  then 'PASS  the legacy plus tier is unlimited on projects'
+  else 'FAIL  plus still has a project cap: ' || plan_limit('plus','projects') end;
+
+update projects set archived = true where user_id = :u;
+select case when (select count(*) from projects where user_id = :u and not archived) = 0
+             and (select count(*) from projects where user_id = :u) > 0
+  then 'PASS  archiving empties the live count without deleting a row'
+  else 'FAIL  archiving lost rows or kept counting them' end;

@@ -67,12 +67,20 @@ import { distribute } from "../src/lib/schedule.js";
     s.projects.filter((x) => !x.archived).length === 1);
 
   /**
-   * The quota is the one that costs money. It counts live projects, so an
-   * archived project has to stop counting — otherwise finishing work moves
-   * somebody towards a paywall.
+   * An archived project stops counting as live work.
+   *
+   * This used to be asserted through the free tier's project meter. There is
+   * no free tier now — paid plans are unlimited and everything else is a wall
+   * at zero — so the client has no meter to read, and the rule lives in
+   * Postgres, where `plan_limit` counts only unarchived rows.
+   * `supabase/tests/01_plan_limits.sql` proves it there. What is still worth
+   * proving here is the store's own arithmetic: archiving takes a project out
+   * of the live count without deleting it.
    */
-  const meter = usage({ ...s, plan: "free" }).meters.find((m) => m.key === "projects");
-  t("and the plan quota stops counting a finished project", meter.used === 1, JSON.stringify(meter));
+  const stillLive = s.projects.filter((p) => !p.archived);
+  t("and a finished project stops counting as live work",
+    stillLive.length === 1 && s.projects.length === 2,
+    `${stillLive.length} live of ${s.projects.length}`);
 }
 
 /* ------------------------------------------------------------ no accidental writes */

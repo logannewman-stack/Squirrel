@@ -29,50 +29,32 @@ const state = ({ plan = "free", projects = 0, tasks = 0, archived = 0, done = 0 
   ],
 });
 
-// ------------------------------------------------------------------ counting
+// ------------------------------------------------------------------ locked
+/**
+ * There is no capped-but-usable tier any more.
+ *
+ * A paid plan is unlimited and everything else is a wall at zero, so the
+ * meters stopped being a gauge. The arithmetic that drove them is the reason
+ * this block exists: `used / cap` against a cap of nothing is Infinity when
+ * somebody has work and NaN when they do not, and a card that reads "1 of 0"
+ * or "NaN%" is worse than one that says plainly that the trial ended.
+ */
 {
-  const u = usage(state({ projects: 1, tasks: 3 }));
-  t("a free account is measured against the free caps", u.tier === PLANS.free);
-  t("projects are counted", u.meters.find((m) => m.key === "projects").used === 1);
-  t("open tasks are counted", u.meters.find((m) => m.key === "tasks").used === 3);
-  // The assistant is not metered on any tier. Free cannot use her at all, and
-  // a meter that always reads "0 of 0" is furniture on a screen whose job is
-  // to say which wall is closest.
+  const out = usage(state({ projects: 3, tasks: 9 }));
+  t("an account with no plan is locked, not nearly full", out.locked === true);
+  t("  and reports no meters to draw", out.meters.length === 0, out.meters.map((m) => m.key));
+  t("  and names no nearest wall, because the wall is the plan", out.tightest === null);
+  t("  and still answers the old questions safely",
+    out.full === true && out.pressing === true);
+
+  // The state that produced NaN: nothing created, nothing allowed.
+  const empty = usage(state());
+  t("an empty locked account does not produce NaN",
+    empty.locked === true && empty.full === true);
+
   t("the assistant is not a meter on any plan",
     ["free", "pro", "studio"].every((plan) =>
       !usage(state({ plan })).meters.some((m) => m.key === "assists")));
-
-  // Both of these were the bug worth writing the shared function for: a card
-  // saying 3/2 because it counted rows the database does not.
-  t("an archived project stops taking up room",
-    usage(state({ projects: 1, archived: 5 })).meters.find((m) => m.key === "projects").used === 1);
-  t("and a finished task stops taking up room",
-    usage(state({ tasks: 2, done: 9 })).meters.find((m) => m.key === "tasks").used === 2);
-}
-
-// ------------------------------------------------------------------ pressure
-{
-  t("an empty account is not pressed", usage(state()).pressing === false);
-  t("nor nearly full at half a cap",
-    usage(state({ projects: 1 })).pressing === false, PLANS.free.projects);
-
-  const full = usage(state({ projects: PLANS.free.projects }));
-  t("a reached cap is full", full.full === true);
-  t("and is pressing", full.pressing === true);
-  t("and names itself as the nearest wall", full.tightest.key === "projects");
-
-  // The one that decides which wall a card leads with. Tasks at 14/15 is
-  // tighter than projects at 1/2, and the prompt has to say the true one.
-  const mixed = usage(state({ projects: 1, tasks: PLANS.free.tasks - 1 }));
-  t("the tightest meter wins, not the first", mixed.tightest.key === "tasks", mixed.tightest.key);
-
-  // Seeded at -1 rather than 0, so all-zero meters still name one.
-  t("an untouched account still has a nearest wall", usage(state()).tightest !== null);
-
-  // Free is full when it runs out of room, and room is projects and tasks —
-  // the two things it still has. The assistant is not a quantity here.
-  t("a free account at its task cap is full",
-    usage(state({ tasks: PLANS.free.tasks })).full === true);
 }
 
 // --------------------------------------------------------------------- quiet
@@ -84,6 +66,7 @@ const state = ({ plan = "free", projects = 0, tasks = 0, archived = 0, done = 0 
     t(`${plan} has nothing to meter`, u.meters.length === 0, u.meters.map((m) => m.key));
     t(`${plan} is never pressing`, u.pressing === false);
     t(`${plan} is never full`, u.full === false);
+    t(`${plan} is never locked`, u.locked === false);
   }
 
   /**
@@ -99,9 +82,11 @@ const state = ({ plan = "free", projects = 0, tasks = 0, archived = 0, done = 0 
 
   // An unknown plan must fall back to the *tightest* interpretation, not the
   // loosest: guessing "unlimited" from a typo gives the app away for free.
+  // An unknown plan must fall back to the *tightest* reading, not the loosest:
+  // guessing "unlimited" from a typo gives the product away.
   const junk = usage({ plan: "enterprise", projects: [], tasks: [] });
-  t("an unrecognised plan is treated as free", junk.tier === PLANS.free && junk.meters.length === 2);
-  t("and missing state does not throw", usage(undefined).meters.length === 2);
+  t("an unrecognised plan is treated as no plan", junk.tier === PLANS.free && junk.locked === true);
+  t("and missing state does not throw", usage(undefined).locked === true);
 }
 
 // -------------------------------------------------------------------- wording
